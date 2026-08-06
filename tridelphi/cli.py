@@ -24,7 +24,9 @@ from pathlib import Path
 from . import __version__
 from .api import AnalysisError, analyze
 from .baseline import DEFAULT_BASELINE, load_baseline, partition, write_baseline
-from .model import RULES, rule_by_id
+from .html_report import render_html
+from .model import RULES
+from .orchestrate import merge_runs, run_zizmor, summarize_external_run
 from .render import SEVERITY_ORDER, render_text
 from .sarif import dumps, to_sarif
 
@@ -44,8 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("path", nargs="?", default=".", help="repository root (default: .)")
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
-    parser.add_argument("-f", "--format", choices=("text", "sarif", "json"), default="text")
+    parser.add_argument(
+        "-f", "--format", choices=("text", "sarif", "json", "html"), default="text",
+        help="output format (default: text; html is a browsable report)",
+    )
     parser.add_argument("--sarif-file", metavar="PATH", help="also write SARIF here")
+    parser.add_argument("--html-file", metavar="PATH", help="also write an HTML report here")
     parser.add_argument("--min-severity", choices=_SEVERITIES, default="critical")
     parser.add_argument(
         "--fail-on", choices=(*_SEVERITIES, "none"), default="critical",
@@ -58,10 +64,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--assume-default-permissions", choices=("read", "write"), default="write",
         help="repository default GITHUB_TOKEN permission when a job declares none",
     )
+    parser.add_argument(
+        "--with-zizmor", action="store_true",
+        help="also run zizmor (if installed) and merge its findings into the SARIF output",
+    )
+    parser.add_argument(
+        "--zizmor-online", action="store_true",
+        help="allow zizmor's online audits (requires GH_TOKEN; not air-gap safe)",
+    )
     parser.add_argument("--strict-parse", action="store_true", help="unparseable workflow exits 2")
     parser.add_argument("--require-workflows", action="store_true")
     parser.add_argument("--self-check", action="store_true", help="validate SARIF against the schema")
     parser.add_argument("--explain", metavar="RULE_ID")
+    parser.add_argument("--list-rules", action="store_true", help="print every rule id and exit")
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument("--no-color", action="store_true")
     parser.add_argument("--version", action="version", version=f"tridelphi {__version__}")
@@ -84,6 +99,13 @@ def _explain(rule_id: str, out) -> int:
     return 0
 
 
+def _list_rules(out) -> int:
+    for spec in RULES:
+        print(f"{spec.default_level:8}  {spec.id}", file=out)
+        print(f"          {spec.short_description}", file=out)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -96,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command is not None:
         path = args.path
 
+    if args.list_rules:
+        return _list_rules(sys.stdout)
     if args.explain:
         return _explain(args.explain, sys.stdout)
 
@@ -120,6 +144,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"tridelphi: {diagnostic.path}: {diagnostic.message}", file=sys.stderr)
         return 2
 
+    # Optional zizmor orchestration. This is the only place a subprocess runs,
+    # and only when explicitly requested — the default scan stays offline.
+    external_summary: str | None = None
+    external_sarif = None
+    if args.with_zizmor:
+        zres = run_zizmor(path, offline=not args.zizmor_online)
+        external_summary = summarize_external_run(zres)
+        if zres.diagnostic is not None:
+            print(f"tridelphi: {zres.diagnostic.message}", file=sys.stderr)
+        external_sarif = zres.sarif
+
     baseline: set[str] = set()
     baseline_path = Path(args.baseline) if args.baseline else Path(path) / DEFAULT_BASELINE
     if not args.no_baseline and baseline_path.is_file():
@@ -141,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
 
     gating = new if baseline else list(result.findings)
 
-    if args.format in ("sarif", "json"):
+    def build_sarif() -> dict:
         document = to_sarif(
             result.findings,
             tool_version=__version__,
@@ -149,7 +184,18 @@ def main(argv: list[str] | None = None) -> int:
             baseline=baseline if baseline else None,
             validate=args.self_check,
         )
-        sys.stdout.write(dumps(document))
+        if external_sarif is not None:
+            document = merge_runs(document, external_sarif)
+        return document
+
+    repo_label = str(Path(path).resolve().name) or path
+
+    if args.format in ("sarif", "json"):
+        sys.stdout.write(dumps(build_sarif()))
+    elif args.format == "html":
+        sys.stdout.write(
+            render_html(result, repo_label=repo_label, external_summary=external_summary)
+        )
     elif not args.quiet:
         render_text(
             result,
@@ -159,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
             elapsed=elapsed,
             no_color=args.no_color,
             new_count=len(new) if baseline else None,
+            external_summary=external_summary,
         )
     else:
         counts = {s: sum(1 for f in result.findings if f.severity == s) for s in _SEVERITIES}
@@ -169,14 +216,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.sarif_file:
-        document = to_sarif(
-            result.findings,
-            tool_version=__version__,
-            diagnostics=result.diagnostics,
-            baseline=baseline if baseline else None,
-            validate=args.self_check,
+        Path(args.sarif_file).write_text(dumps(build_sarif()), encoding="utf-8", newline="\n")
+    if args.html_file:
+        Path(args.html_file).write_text(
+            render_html(result, repo_label=repo_label, external_summary=external_summary),
+            encoding="utf-8",
+            newline="\n",
         )
-        Path(args.sarif_file).write_text(dumps(document), encoding="utf-8", newline="\n")
 
     if args.fail_on == "none":
         return 0

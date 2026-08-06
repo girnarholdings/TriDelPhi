@@ -1,7 +1,7 @@
 # Rules
 
 Every rule id is anchored here; `tridelphi --explain <rule>` prints the same
-text at a terminal.
+text at a terminal, and `tridelphi --list-rules` prints the whole table.
 
 Severity in TriDelPhi has three levels. SARIF has no `critical`, so it maps to
 `error` and the true severity travels in the result's property bag.
