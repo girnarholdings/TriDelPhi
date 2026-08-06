@@ -1,0 +1,20 @@
+name: Preview metadata
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: deps-${{ github.head_ref }}
+    env:
+      PREVIEW_TOKEN: ${{ secrets.PREVIEW_TOKEN }}

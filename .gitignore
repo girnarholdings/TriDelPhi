@@ -9,3 +9,5 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+.tridelphi-baseline.json
+tridelphi.sarif

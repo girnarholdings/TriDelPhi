@@ -1,0 +1,207 @@
+"""Finding[] -> SARIF 2.1.0.
+
+Determinism is a contract, not a nicety: a future merge gate diffs these
+documents. Two consequences worth stating because both are easy to get wrong.
+
+Fingerprints exclude line numbers. Including the line means inserting a step
+above a job invalidates every fingerprint in the file, the gate reports an
+all-new finding set, and the ratchet is untrustworthy within a week.
+
+Validation is off by default. The vendored schema is draft-04 and 110 KB;
+validating on every run is a needless cost for an air-gapped CLI, so it is
+enabled in tests and behind ``--self-check``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from importlib import resources
+from typing import Any, Sequence
+
+from .model import RULES, Diagnostic, Finding, rule_by_id
+
+__all__ = ["to_sarif", "load_schema", "validate_sarif", "fingerprint", "dumps"]
+
+SCHEMA_URI = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
+
+_LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
+
+
+def load_schema() -> dict[str, Any]:
+    text = resources.files(f"{__package__}.data").joinpath("sarif-2.1.0.json").read_text("utf-8")
+    return json.loads(text)
+
+
+def validate_sarif(document: dict[str, Any]) -> None:
+    """Raise if ``document`` does not validate. Draft-04 selection is explicit —
+    a modern validator silently mishandles draft-04 keywords."""
+    from jsonschema.validators import validator_for
+
+    schema = load_schema()
+    validator_cls = validator_for(schema)
+    validator_cls.check_schema(schema)
+    validator_cls(schema).validate(document)
+
+
+def fingerprint(finding: Finding) -> str:
+    parts = (
+        finding.context.workflow_file,
+        finding.context.job_id,
+        finding.rule_id,
+        ",".join(sorted({h.kind for h in finding.hits})),
+    )
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _region(position) -> dict[str, Any]:
+    region: dict[str, Any] = {"startLine": position.line}
+    if position.column:
+        region["startColumn"] = position.column
+    if position.end_line:
+        region["endLine"] = position.end_line
+    if position.snippet:
+        region["snippet"] = {"text": position.snippet}
+    return region
+
+
+def _location(position) -> dict[str, Any]:
+    return {
+        "physicalLocation": {
+            "artifactLocation": {"uri": position.file, "uriBaseId": "%SRCROOT%"},
+            "region": _region(position),
+        }
+    }
+
+
+def _result(finding: Finding, baseline_state: str | None) -> dict[str, Any]:
+    spec = rule_by_id(finding.rule_id)
+    properties: dict[str, Any] = {
+        "tridelphiSeverity": finding.severity,
+        "capabilities": list(finding.capabilities()),
+        "jobId": finding.context.job_id,
+        "triggers": list(finding.context.triggers),
+        "permissionsSource": finding.context.permissions_source,
+        "hits": [
+            {
+                "capability": h.capability,
+                "kind": h.kind,
+                "reason": h.reason,
+                "observed": h.observed,
+                "tier": h.tier,
+                "file": h.position.file,
+                "line": h.position.line,
+            }
+            for h in finding.hits
+        ],
+    }
+    if finding.remediation is not None:
+        properties["remediation"] = {
+            "strip": finding.remediation.strip,
+            "kind": finding.remediation.kind,
+            "target": finding.remediation.target,
+            "breaks": finding.remediation.breaks,
+            "confidence": finding.remediation.confidence,
+            "text": finding.remediation.rendered,
+        }
+
+    result: dict[str, Any] = {
+        "ruleId": finding.rule_id,
+        "ruleIndex": _RULE_INDEX[finding.rule_id],
+        "level": _LEVEL[finding.severity],
+        "message": {"text": finding.message},
+        "locations": [_location(finding.primary_position)],
+        "partialFingerprints": {"tridelphiContextHash/v1": fingerprint(finding)},
+        "properties": properties,
+    }
+
+    # SARIF declares relatedLocations with uniqueItems, and several hits
+    # legitimately share a position (a step that is both the agent and the
+    # egress). Deduplicate on the position, preserving order.
+    related = []
+    seen_positions = {finding.primary_position.sort_key}
+    for hit in finding.hits:
+        key = hit.position.sort_key
+        if key in seen_positions:
+            continue
+        seen_positions.add(key)
+        related.append(_location(hit.position))
+    if related:
+        # Showing U here, P there and E somewhere else in one result is the
+        # product thesis rendered in the consumer's UI.
+        result["relatedLocations"] = related
+    if baseline_state:
+        result["baselineState"] = baseline_state
+    return result
+
+
+_RULE_INDEX = {spec.id: i for i, spec in enumerate(RULES)}
+
+
+def _rules_block() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": spec.id,
+            "name": spec.name,
+            "shortDescription": {"text": spec.short_description},
+            "fullDescription": {"text": spec.full_description},
+            "helpUri": spec.help_uri,
+            "defaultConfiguration": {"level": spec.default_level},
+        }
+        for spec in RULES
+    ]
+
+
+def to_sarif(
+    findings: Sequence[Finding],
+    *,
+    tool_version: str,
+    diagnostics: Sequence[Diagnostic] = (),
+    baseline: set[str] | None = None,
+    validate: bool = False,
+) -> dict[str, Any]:
+    ordered = sorted(findings, key=lambda f: f.sort_key)
+    results = []
+    for finding in ordered:
+        state = None
+        if baseline is not None:
+            state = "unchanged" if fingerprint(finding) in baseline else "new"
+        results.append(_result(finding, state))
+
+    run: dict[str, Any] = {
+        "tool": {
+            "driver": {
+                "name": "tridelphi",
+                "version": tool_version,
+                "informationUri": "https://github.com/girnarholdings/TriDelPhi",
+                "rules": _rules_block(),
+            }
+        },
+        "results": results,
+        "originalUriBaseIds": {"%SRCROOT%": {"description": {"text": "repository root"}}},
+    }
+
+    if diagnostics:
+        run["invocations"] = [
+            {
+                "executionSuccessful": True,
+                "toolExecutionNotifications": [
+                    {
+                        "level": d.severity,
+                        "message": {"text": f"{d.path}: {d.message}"},
+                    }
+                    for d in sorted(diagnostics, key=lambda d: d.sort_key)
+                ],
+            }
+        ]
+
+    document = {"$schema": SCHEMA_URI, "version": "2.1.0", "runs": [run]}
+    if validate:
+        validate_sarif(document)
+    return document
+
+
+def dumps(document: dict[str, Any]) -> str:
+    """Byte-stable serialisation. ``ensure_ascii`` keeps output identical across
+    locales; the trailing newline is explicit so the file layer cannot vary."""
+    return json.dumps(document, sort_keys=True, indent=2, ensure_ascii=True) + "\n"

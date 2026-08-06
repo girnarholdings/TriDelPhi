@@ -1,0 +1,24 @@
+name: Build and publish
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      title: ${{ steps.grab.outputs.title }}
+    steps:
+      - id: grab
+        run: echo "title=${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+
+  publish:
+    needs: meta
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./release.sh "${{ needs.meta.outputs.title }}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

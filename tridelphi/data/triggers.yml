@@ -1,0 +1,69 @@
+# Trigger classification.
+#
+# A dangerous trigger is a PRECONDITION, not a source of untrusted input. It
+# tells us an attacker can start the job; a mechanism (see untrusted_expressions
+# and the checkout analysis) is still required before U fires. Treating the
+# trigger itself as U is what makes a scanner flag every fork-PR CI job on
+# GitHub.
+
+# Triggers reachable by someone with no write access to the repository.
+fork_reachable:
+  - pull_request
+  - pull_request_target
+  - issue_comment
+  - issues
+  - discussion
+  - discussion_comment
+  - pull_request_review
+  - pull_request_review_comment
+  - fork
+  - watch
+  - public
+
+# Triggers that run with repository secrets available AND can be started by an
+# untrusted party. `pull_request` is deliberately absent: GitHub withholds
+# secrets and forces GITHUB_TOKEN to read-only for fork pull requests,
+# regardless of repository settings. That platform guarantee is why
+# `pull_request_target` exists as the dangerous variant.
+privileged_untrusted:
+  - pull_request_target
+  - issue_comment
+  - issues
+  - discussion
+  - discussion_comment
+  - pull_request_review
+  - pull_request_review_comment
+
+# Runs against base/default branch, and can be triggered by a run that itself
+# processed untrusted code. Only confers U when the job consumes upstream state.
+upstream_consuming:
+  - workflow_run
+
+# Default `pull_request` activity types, all of which fire for fork PRs.
+fork_pr_types:
+  - opened
+  - synchronize
+  - reopened
+  - ready_for_review
+  - edited
+  - labeled
+  - unlabeled
+
+# GitHub-hosted runner label prefixes. Anything else is treated as self-hosted,
+# where the runner itself is the privileged asset.
+hosted_runner_labels:
+  - ubuntu-latest
+  - ubuntu-24.04
+  - ubuntu-22.04
+  - ubuntu-20.04
+  - windows-latest
+  - windows-2025
+  - windows-2022
+  - windows-2019
+  - macos-latest
+  - macos-15
+  - macos-14
+  - macos-13
+  - ubuntu-latest-4-cores
+  - ubuntu-latest-8-cores
+  - ubuntu-latest-16-cores

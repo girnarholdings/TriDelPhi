@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tridelphi"
+version = "0.1.0"
+description = "Static Agents Rule of Two checker for GitHub Actions"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+keywords = ["github-actions", "security", "sarif", "static-analysis", "ai-agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Security",
+]
+# Deliberately minimal. ruamel parses both workflows and the data tables;
+# PyYAML is excluded because it resolves `on:` to True and `no`/`off` to False.
+dependencies = [
+  "ruamel.yaml>=0.18,<0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+  "jsonschema>=4.21,<5",
+  "pytest>=8,<9",
+]
+
+[project.scripts]
+tridelphi = "tridelphi.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/girnarholdings/TriDelPhi"
+
+[tool.setuptools]
+packages = ["tridelphi"]
+
+[tool.setuptools.package-data]
+tridelphi = ["data/*.yml", "data/*.json", "data/*.md", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:tridelphi.*"]
