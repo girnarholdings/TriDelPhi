@@ -176,11 +176,33 @@ U ∩ P, and E exists to rank findings and catch the rare genuinely-contained jo
 Narrowing E's detection would only produce false negatives, since `run: node
 build.js` where the script fetches is invisible to any pattern.
 
+## Developing
+
+```console
+pip install -e ".[dev]"
+pytest -q                       # 117 tests
+ruff check tridelphi/ tests/    # lint
+python -m build --wheel         # packaging
+```
+
+CI runs on every pull request: **lint** (ruff), **test** (pytest on Python 3.11,
+3.12 and 3.13), **wheel** (builds a wheel, installs it into a clean environment
+and runs the console script from outside the checkout — the only way to catch
+the vendored SARIF schema or the YAML tables failing to ship), and **self-scan**
+(TriDelPhi scanning its own workflows). A single aggregating check, `ci-ok`,
+gates the branch so a newly added job cannot silently widen what can merge.
+
+> **Two settings a workflow cannot flip** — serving the landing page, and
+> requiring CI before merge — are documented in
+> [`docs/REPO_SETUP.md`](docs/REPO_SETUP.md). Until the second one is on, pull
+> requests can merge with no checks having run.
+
 ## Docs
 
 | Doc | What it is |
 |---|---|
-| [`site/index.html`](site/index.html) | The landing page — what it is and the U/P/E idea, interactive |
+| [`site/index.html`](site/index.html) | The landing page — deployed to GitHub Pages by `.github/workflows/pages.yml` |
+| [`docs/REPO_SETUP.md`](docs/REPO_SETUP.md) | The two repository settings that gate merges and serve the site |
 | [`docs/RULES.md`](docs/RULES.md) | Every rule, what it means, why it fires |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | What four adversarial reviews changed before a line was written |
 | [`docs/OSS_LANDSCAPE.md`](docs/OSS_LANDSCAPE.md) | Prior art: zizmor, poutine, Raven, octoscan, TaintAWI |

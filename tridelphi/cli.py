@@ -30,7 +30,7 @@ from .orchestrate import merge_runs, run_zizmor, summarize_external_run
 from .render import SEVERITY_ORDER, render_text
 from .sarif import dumps, to_sarif
 
-__all__ = ["main", "build_parser"]
+__all__ = ["build_parser", "main"]
 
 _SEVERITIES = ("critical", "warning", "note")
 
@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     baseline_path = Path(args.baseline) if args.baseline else Path(path) / DEFAULT_BASELINE
     if not args.no_baseline and baseline_path.is_file():
         baseline = load_baseline(baseline_path)
-    new, unchanged, stale = partition(list(result.findings), baseline)
+    new, _unchanged, stale = partition(list(result.findings), baseline)
 
     if args.write_baseline is not None:
         target = Path(args.write_baseline)

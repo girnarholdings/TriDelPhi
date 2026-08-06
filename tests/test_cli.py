@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from conftest import run_cli
 
 MALICIOUS = "tests/fixtures/malicious/comment-and-control"

@@ -12,13 +12,13 @@ do not invalidate the baseline.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from .model import Finding
 from .sarif import fingerprint
 
-__all__ = ["DEFAULT_BASELINE", "load_baseline", "write_baseline", "partition"]
+__all__ = ["DEFAULT_BASELINE", "load_baseline", "partition", "write_baseline"]
 
 DEFAULT_BASELINE = ".tridelphi-baseline.json"
 _VERSION = 1

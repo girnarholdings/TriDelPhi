@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from conftest import run_cli
+
 from tridelphi import __version__
 from tridelphi.api import analyze
 from tridelphi.html_report import render_html

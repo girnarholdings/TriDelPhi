@@ -10,12 +10,11 @@ to fix first, why that one, and does it fit on a screen.
 from __future__ import annotations
 
 import os
-import sys
-from typing import Sequence, TextIO
+from typing import TextIO
 
 from .model import AnalysisResult, Finding
 
-__all__ = ["render_text", "SEVERITY_ORDER"]
+__all__ = ["SEVERITY_ORDER", "render_text"]
 
 SEVERITY_ORDER = {"critical": 0, "warning": 1, "note": 2}
 

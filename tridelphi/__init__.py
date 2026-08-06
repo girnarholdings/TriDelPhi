@@ -1,13 +1,13 @@
 """TriDelPhi — a static Agents Rule of Two checker for GitHub Actions."""
 
 from .model import (
+    RULES,
     AnalysisResult,
     CapabilityHit,
     Diagnostic,
     ExecutionContext,
     Finding,
     Position,
-    RULES,
     Remediation,
     RepoInventory,
     RuleSpec,
@@ -16,9 +16,7 @@ from .model import (
 __version__ = "0.1.0"
 
 __all__ = [
-    "__version__",
-    "analyze",
-    "analyze_to_sarif",
+    "RULES",
     "AnalysisResult",
     "CapabilityHit",
     "Diagnostic",
@@ -28,7 +26,9 @@ __all__ = [
     "Remediation",
     "RepoInventory",
     "RuleSpec",
-    "RULES",
+    "__version__",
+    "analyze",
+    "analyze_to_sarif",
 ]
 
 

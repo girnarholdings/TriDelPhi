@@ -10,8 +10,8 @@ that our matcher matches our fixture. Two additions make it falsifiable:
 from __future__ import annotations
 
 import pytest
-
 from conftest import gating
+
 from tridelphi.api import analyze
 
 EXPECTED_CRITICAL = {

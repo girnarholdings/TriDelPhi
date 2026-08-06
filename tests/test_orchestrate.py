@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from conftest import run_cli
+
 from tridelphi.orchestrate import merge_runs, run_zizmor, summarize_external_run, zizmor_path
 
 MALICIOUS = "tests/fixtures/malicious/comment-and-control"
