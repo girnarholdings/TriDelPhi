@@ -1,0 +1,158 @@
+# AI coding agents in CI, and what each one restores from the base branch.
+#
+# This table is the part of TriDelPhi that compounds. Detecting "an agent runs
+# here" is a weekend of work for anyone. Knowing which agent actions neutralise
+# which attacker-controlled files -- and keeping that current as each action
+# ships releases -- is maintenance nobody else is doing, and it is the difference
+# between a true finding and a false positive on a hardened repo.
+#
+# `restores_from_base` lists repo-relative paths the action replaces with base
+# branch content before the agent reads anything. A path covered here is NOT
+# attacker-controlled even when the working tree came from a PR head.
+#
+# LAST REVIEWED: 2026-08-06. Re-check on every agent action minor release; a
+# vendor mitigation landing unnoticed is exactly how this table goes stale and
+# starts producing false positives.
+
+agents:
+  - id: claude-code-action
+    uses_prefixes:
+      - anthropics/claude-code-action
+      - anthropics/claude-code-base-action
+    display: Claude Code Action
+    # Verified against docs/security.md in anthropics/claude-code-action.
+    # PR versions are parked in .claude-pr/ as reference-only, and paths absent
+    # on base are deleted.
+    restores_from_base:
+      - .claude/
+      - .mcp.json
+      - .claude.json
+      - CLAUDE.md
+      - CLAUDE.local.md
+      - .gitmodules
+      - .ripgreprc
+      - .husky/
+    # Not restored, and therefore still attacker-controlled on a PR-head tree.
+    residual_risk: >-
+      The restore list is fixed. AGENTS.md, .cursor/rules and
+      .github/copilot-instructions.md are untouched, and package manifests,
+      lockfiles and formatter config stay at PR head -- so a base-branch hook
+      that shells out through a package manager re-inherits attacker control.
+    network_tools:
+      - Bash
+      - WebFetch
+      - WebSearch
+
+  - id: gemini-cli
+    uses_prefixes:
+      - google-github-actions/run-gemini-cli
+      - google-gemini/gemini-cli-action
+    display: Gemini CLI
+    restores_from_base: []
+    residual_risk: >-
+      No base-branch restoration. GEMINI.md and .gemini/ from the pull request
+      head are read directly.
+    network_tools:
+      - run_shell_command
+      - web_fetch
+
+  - id: openai-codex
+    uses_prefixes:
+      - openai/codex-action
+    display: OpenAI Codex
+    restores_from_base: []
+    residual_risk: No base-branch restoration documented.
+    network_tools: []
+
+  - id: github-ai-inference
+    uses_prefixes:
+      - actions/ai-inference
+      - github/ai-inference
+    display: GitHub AI inference
+    restores_from_base: []
+    residual_risk: >-
+      A raw model call. Whatever the workflow puts in the prompt is the whole
+      trust boundary.
+    network_tools: []
+
+# Commands that invoke an agent from inside a run block. These never restore
+# anything, so a PR-head tree is fully attacker-controlled.
+run_invocations:
+  - claude -p
+  - claude --print
+  - npx @anthropic-ai/claude-code
+  - npx claude-code
+  - gemini -p
+  - npx @google/gemini-cli
+  - codex exec
+  - aider --yes
+  - cursor-agent
+
+# Instruction files an agent reads as authoritative direction.
+instruction_files:
+  claude_md:
+    - CLAUDE.md
+    - CLAUDE.local.md
+  agents_md:
+    - AGENTS.md
+    - AGENT.md
+  cursor_rules:
+    - .cursorrules
+    - .cursor/rules
+  copilot:
+    - .github/copilot-instructions.md
+  gemini:
+    - GEMINI.md
+  other:
+    - .windsurfrules
+    - .clinerules
+    - .aider.conf.yml
+
+# Config that executes a shell command rather than merely instructing a model.
+# A pull request adding one of these to an untrusted checkout is direct command
+# execution with no model in the loop, so it is reported unconditionally.
+hook_files:
+  - .claude/settings.json
+  - .claude/settings.local.json
+  - .husky/
+
+hook_keys:
+  - hooks
+  - PreToolUse
+  - PostToolUse
+  - SessionStart
+  - UserPromptSubmit
+
+mcp_files:
+  - .mcp.json
+  - .vscode/mcp.json
+  - .cursor/mcp.json
+
+# MCP tool-name fragments implying the server can change state or exfiltrate.
+mcp_write_markers:
+  - write
+  - create
+  - update
+  - delete
+  - push
+  - merge
+  - deploy
+  - execute
+  - run
+  - send
+  - post
+  - upload
+
+# Step inputs whose content becomes agent instructions. An agent follows what it
+# reads, so these are interpreter sinks in the same sense a `run:` block is --
+# the "Prompt-to-Agent" class. Omitting them is why a prompt built from
+# `github.event.comment.body` can look clean to a YAML linter.
+prompt_inputs:
+  - prompt
+  - direct_prompt
+  - user_prompt
+  - instructions
+  - input
+  - claude_args
+  - query
+  - system_prompt

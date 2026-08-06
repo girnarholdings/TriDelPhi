@@ -1,0 +1,93 @@
+# Egress and state change.
+#
+# E is graded, not narrowed. Any `run:` step is genuine egress on a hosted
+# runner -- `run: node build.js` where build.js fetches is invisible to any
+# grep, so narrowing detection only produces false negatives. What changes is
+# how E is USED: the tier ranks findings, it never admits them, and E alone
+# never produces a finding.
+#
+#   E2  an observed egress primitive
+#   E1  generic shell
+#   E0  no shell; only actions from the read-only set
+
+# Commands that are unambiguously network or state-changing egress.
+network_commands:
+  - curl
+  - wget
+  - nc
+  - ncat
+  - netcat
+  - Invoke-WebRequest
+  - Invoke-RestMethod
+  - ssh
+  - scp
+  - rsync
+  - telnet
+
+state_change_commands:
+  - git push
+  - git tag
+  - npm publish
+  - yarn publish
+  - pnpm publish
+  - twine upload
+  - poetry publish
+  - cargo publish
+  - gem push
+  - docker push
+  - helm push
+  - aws s3
+  - aws lambda
+  - gcloud
+  - az storage
+  - kubectl apply
+  - terraform apply
+  - gh release create
+  - gh pr create
+  - gh issue create
+  - gh api
+
+# Actions that publish, deploy or otherwise move data off the runner.
+egress_actions:
+  - actions/upload-artifact
+  - actions/upload-pages-artifact
+  - actions/deploy-pages
+  - actions/attest-build-provenance
+  - peaceiris/actions-gh-pages
+  - JamesIves/github-pages-deploy-action
+  - docker/build-push-action
+  - docker/login-action
+  - pypa/gh-action-pypi-publish
+  - softprops/action-gh-release
+  - ncipollo/release-action
+  - aws-actions/configure-aws-credentials
+  - google-github-actions/auth
+  - azure/login
+  - superfly/flyctl-actions
+  - cloudflare/wrangler-action
+  - amondnet/vercel-action
+  - appleboy/ssh-action
+  - dawidd6/action-download-artifact
+  - peter-evans/create-pull-request
+  - peter-evans/create-or-update-comment
+  - actions/github-script
+
+# Actions that read only and confer no egress on their own.
+read_only_actions:
+  - actions/checkout
+  - actions/setup-node
+  - actions/setup-python
+  - actions/setup-java
+  - actions/setup-go
+  - actions/setup-dotnet
+  - actions/cache
+  - actions/cache/restore
+  - actions/download-artifact
+  - actions/labeler
+
+# Consuming state produced by the run that triggered us. On a workflow_run job
+# this is what turns a trusted trigger into an untrusted one.
+upstream_consumers:
+  - actions/download-artifact
+  - dawidd6/action-download-artifact
+  - gh run download

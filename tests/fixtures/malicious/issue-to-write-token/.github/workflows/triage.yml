@@ -1,0 +1,20 @@
+name: Issue triage
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Summarise and label
+        run: |
+          echo "Triaging: ${{ github.event.issue.title }}"
+          ./scripts/triage.sh "${{ github.event.issue.body }}"
+          git push origin HEAD:triage-notes
+        env:
+          GH_PAT: ${{ secrets.RELEASE_PAT }}

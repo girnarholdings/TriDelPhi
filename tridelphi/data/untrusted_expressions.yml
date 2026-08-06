@@ -1,0 +1,71 @@
+# Attacker-controlled context expressions.
+#
+# Seeded from actionlint's BuiltinUntrustedInputs (MIT, rhysd/actionlint,
+# expr_insecure.go), which is the most actively maintained version of the list
+# GitHub Security Lab published. A `*` segment matches exactly one path element,
+# which is required because GitHub's object-filter syntax (`github.event.*.body`,
+# `github.event.commits.*.message`) is a real injection path that a flat string
+# list misses.
+
+paths:
+  - github.event.issue.title
+  - github.event.issue.body
+  - github.event.pull_request.title
+  - github.event.pull_request.body
+  - github.event.pull_request.head.ref
+  - github.event.pull_request.head.label
+  - github.event.pull_request.head.repo.default_branch
+  - github.event.pull_request.head.repo.description
+  - github.event.pull_request.head.repo.homepage
+  - github.event.comment.body
+  - github.event.review.body
+  - github.event.review_comment.body
+  - github.event.discussion.title
+  - github.event.discussion.body
+  - github.event.pages.*.page_name
+  - github.event.commits.*.message
+  - github.event.commits.*.author.email
+  - github.event.commits.*.author.name
+  - github.event.head_commit.message
+  - github.event.head_commit.author.email
+  - github.event.head_commit.author.name
+  - github.event.workflow_run.head_branch
+  - github.event.workflow_run.head_commit.message
+  - github.event.workflow_run.head_commit.author.email
+  - github.event.workflow_run.head_commit.author.name
+  - github.event.workflow_run.head_repository.description
+  - github.head_ref
+
+# Refs whose content is chosen by the pull request author. A checkout resolving
+# to one of these produces an untrusted working tree.
+untrusted_refs:
+  - github.event.pull_request.head.sha
+  - github.event.pull_request.head.ref
+  - github.event.pull_request.merge_commit_sha
+  - github.head_ref
+  - github.event.workflow_run.head_sha
+  - github.event.workflow_run.head_branch
+  - github.event.pull_request.number
+  - refs/pull/
+
+# Step inputs that are executed rather than merely read. Interpolation into one
+# of these is injection; interpolation into anything else is a taint carrier.
+#
+# `env:` is deliberately NOT here. Routing an expression through the environment
+# is GitHub's own documented mitigation, and flagging the official fix is worse
+# than missing the bug.
+interpreter_sinks:
+  run: true
+  actions/github-script:
+    - script
+  args: true
+
+# Shell constructs that re-expand an environment variable, which defeats the
+# env-indirection mitigation and makes a tainted variable dangerous again.
+env_reexpansion_markers:
+  - eval
+  - "$("
+  - "`"
+  - GITHUB_ENV
+  - GITHUB_PATH
+  - GITHUB_OUTPUT
