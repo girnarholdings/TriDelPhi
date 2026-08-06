@@ -3,9 +3,19 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual re-run without an empty commit. Needed in practice: during a GitHub
+  # Actions outage, jobs can be cancelled while queued, and re-running the
+  # original run keeps inheriting the degraded attempt.
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# A superseded run has nothing to say. Cancelling in-flight work on the same ref
+# also stops a backed-up queue from holding runners that a newer push needs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
