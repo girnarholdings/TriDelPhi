@@ -15,7 +15,7 @@ produced a specific fatal outcome in review:
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 from . import detect_agent_ingress, detect_egress, detect_privilege, detect_untrusted
 from .detect_untrusted import expression_paths, matches_untrusted_path
@@ -123,7 +123,7 @@ def _cross_job_hits(
         entry = upstream.get(f"{context.workflow_file}::{dep}")
         if not entry:
             continue
-        dep_ctx, tainted = entry
+        _dep_ctx, tainted = entry
         for output in tainted:
             reference = f"needs.{dep}.outputs.{output}"
             if reference in body_text:

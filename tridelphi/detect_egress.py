@@ -12,7 +12,7 @@ upload-artifact step" and mean it, instead of "your job has a shell".
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 from .model import CapabilityHit, ExecutionContext
 from .tables import Tables

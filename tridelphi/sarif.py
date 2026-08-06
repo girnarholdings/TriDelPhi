@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from importlib import resources
-from typing import Any, Sequence
+from typing import Any
 
 from .model import RULES, Diagnostic, Finding, rule_by_id
 
-__all__ = ["to_sarif", "load_schema", "validate_sarif", "fingerprint", "dumps"]
+__all__ = ["dumps", "fingerprint", "load_schema", "to_sarif", "validate_sarif"]
 
 SCHEMA_URI = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
@@ -75,7 +76,10 @@ def _location(position) -> dict[str, Any]:
 
 
 def _result(finding: Finding, baseline_state: str | None) -> dict[str, Any]:
-    spec = rule_by_id(finding.rule_id)
+    # Raises if the rule is not in the registry. Kept for the side effect: it is
+    # what stops rule.py from minting an id that never appears in
+    # tool.driver.rules, which would emit SARIF referencing an undeclared rule.
+    rule_by_id(finding.rule_id)
     properties: dict[str, Any] = {
         "tridelphiSeverity": finding.severity,
         "capabilities": list(finding.capabilities()),

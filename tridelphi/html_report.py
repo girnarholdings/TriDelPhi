@@ -12,7 +12,6 @@ offline, and can be uploaded as a CI artifact with no CSP surprises.
 from __future__ import annotations
 
 import html
-from typing import Sequence
 
 from . import __version__
 from .model import AnalysisResult, Finding

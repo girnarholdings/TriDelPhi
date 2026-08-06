@@ -15,17 +15,17 @@ distinction right is the whole difference between this and a filename grep.
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 from .model import CapabilityHit, ExecutionContext
 from .tables import Tables
 from .yamlnode import YamlNode
 
-__all__ = ["detect", "agent_steps", "AgentStep"]
+__all__ = ["AgentStep", "agent_steps", "detect"]
 
 
 class AgentStep:
-    __slots__ = ("node", "spec", "invocation")
+    __slots__ = ("invocation", "node", "spec")
 
     def __init__(self, node: YamlNode, spec: dict | None, invocation: str) -> None:
         self.node = node

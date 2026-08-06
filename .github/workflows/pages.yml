@@ -1,0 +1,72 @@
+name: Deploy site
+
+# Publishes site/ to GitHub Pages so the landing page has a real URL.
+#
+# One-time setup, which cannot be done from a workflow: in the repository
+# Settings -> Pages, set "Source" to "GitHub Actions". Until that is switched on,
+# this workflow's deploy step fails with "Pages is not enabled".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a deploy midway; queue instead. A half-applied deploy is worse
+# than a slightly stale site.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the site is self-contained
+        # The page must render with no network: no CDN fonts, no remote scripts.
+        # A remote asset silently degrades to a blank or unstyled page for anyone
+        # behind a proxy, which is cheaper to catch here than in production.
+        #
+        # Prose hyperlinks are fine and expected — only *asset* references
+        # (scripts, stylesheets, fonts, images) have to be local.
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          page = pathlib.Path("site/index.html").read_text()
+          problems = []
+          problems += [f"remote src: {m}" for m in
+                       re.findall(r'\bsrc\s*=\s*["\'](https?://[^"\']+)', page)]
+          problems += [f"remote <link>: {m}" for m in
+                       re.findall(r'<link\b[^>]*href\s*=\s*["\'](https?://[^"\']+)', page)]
+          problems += [f"CSS @import: {m}" for m in
+                       re.findall(r'@import\s+(?:url\()?["\']?(https?://[^"\')\s]+)', page)]
+          if "<title>" not in page:
+              problems.append("missing <title>")
+          if problems:
+              print("\n".join(problems)); sys.exit(1)
+          print(f"site/index.html OK ({len(page)} bytes, no external assets)")
+          PY
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

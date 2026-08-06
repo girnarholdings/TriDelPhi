@@ -16,8 +16,9 @@ from reading files itself. Ordering constraints worth knowing before editing:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .yamlnode import YamlNode
@@ -27,21 +28,21 @@ Severity = Literal["critical", "warning", "note"]
 EgressTier = Literal["E0", "E1", "E2"]
 
 __all__ = [
-    "Capability",
-    "Severity",
-    "EgressTier",
-    "Position",
-    "CapabilityHit",
-    "AgentConfigFile",
-    "McpServer",
-    "RepoInventory",
-    "ExecutionContext",
-    "Remediation",
-    "Finding",
-    "Diagnostic",
-    "AnalysisResult",
-    "RuleSpec",
     "RULES",
+    "AgentConfigFile",
+    "AnalysisResult",
+    "Capability",
+    "CapabilityHit",
+    "Diagnostic",
+    "EgressTier",
+    "ExecutionContext",
+    "Finding",
+    "McpServer",
+    "Position",
+    "Remediation",
+    "RepoInventory",
+    "RuleSpec",
+    "Severity",
     "rule_by_id",
 ]
 
@@ -147,8 +148,8 @@ class ExecutionContext:
     effective_permissions: Mapping[str, str]
     permissions_source: str
     repo: RepoInventory
-    body: "YamlNode" = field(compare=False, repr=False)
-    workflow_env: "YamlNode | None" = field(default=None, compare=False, repr=False)
+    body: YamlNode = field(compare=False, repr=False)
+    workflow_env: YamlNode | None = field(default=None, compare=False, repr=False)
     permissions_position: Position | None = None
     needs: tuple[str, ...] = ()
     runs_on: tuple[str, ...] = ()

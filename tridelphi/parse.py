@@ -10,9 +10,8 @@ otherwise have no legal way to see it.
 from __future__ import annotations
 
 import json
-import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
 
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
@@ -28,7 +27,7 @@ from .model import (
 from .tables import Tables
 from .yamlnode import YamlNode
 
-__all__ = ["parse_repo", "ParseOutcome"]
+__all__ = ["ParseOutcome", "parse_repo"]
 
 _WORKFLOW_SUFFIXES = (".yml", ".yaml")
 

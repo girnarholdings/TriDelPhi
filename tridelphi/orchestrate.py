@@ -32,10 +32,10 @@ from .model import Diagnostic
 
 __all__ = [
     "ZizmorResult",
-    "zizmor_path",
-    "run_zizmor",
     "merge_runs",
+    "run_zizmor",
     "summarize_external_run",
+    "zizmor_path",
 ]
 
 
@@ -43,7 +43,7 @@ class ZizmorResult:
     """The outcome of asking zizmor to scan. Exactly one of ``sarif`` or
     ``diagnostic`` is set."""
 
-    __slots__ = ("sarif", "diagnostic", "finding_count")
+    __slots__ = ("diagnostic", "finding_count", "sarif")
 
     def __init__(
         self,

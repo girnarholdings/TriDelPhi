@@ -10,7 +10,7 @@ sees.
 from __future__ import annotations
 
 import re
-from typing import Iterator
+from collections.abc import Iterator
 
 from .model import CapabilityHit, ExecutionContext
 from .parse import grants_write

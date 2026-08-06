@@ -12,9 +12,9 @@ implies-U makes the tool emit findings on the most common workflow on GitHub.
 from __future__ import annotations
 
 import re
-from typing import Iterator
+from collections.abc import Iterator
 
-from .model import CapabilityHit, ExecutionContext, Position
+from .model import CapabilityHit, ExecutionContext
 from .tables import Tables
 from .yamlnode import YamlNode
 
@@ -46,13 +46,11 @@ def matches_untrusted_path(path: str, patterns: tuple[str, ...]) -> str | None:
     for pattern in patterns:
         pat_parts = pattern.split(".")
         if len(pat_parts) != len(parts):
-            # An object filter in the source (`github.event.*.body`) collapses a
-            # level; compare against the filtered form too.
-            if "*" not in parts:
-                continue
-        if len(pat_parts) != len(parts):
             continue
-        if all(p == "*" or q == "*" or p == q for p, q in zip(pat_parts, parts)):
+        # A `*` on either side matches one segment: `github.event.*.body` in the
+        # workflow is an object filter, and `commits.*.message` in the table is a
+        # wildcard over array elements. Both must match a concrete path.
+        if all(p == "*" or q == "*" or p == q for p, q in zip(pat_parts, parts, strict=True)):
             return pattern
     return None
 

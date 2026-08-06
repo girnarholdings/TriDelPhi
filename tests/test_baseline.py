@@ -7,7 +7,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-
 from conftest import run_cli
 
 SOURCE = "tests/fixtures/malicious/comment-and-control"

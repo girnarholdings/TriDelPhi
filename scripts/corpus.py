@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tridelphi.api import analyze  # noqa: E402
+from tridelphi.api import analyze
 
 COMPOSITION_RULES = {
     "tridelphi/agent-config-ingress",

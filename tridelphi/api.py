@@ -14,20 +14,23 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from .model import AnalysisResult, Diagnostic, Finding, Position
 from .parse import parse_repo
 from .rule import evaluate_all
 from .tables import Tables, load_tables
 
-__all__ = ["analyze", "analyze_to_sarif", "AnalysisError"]
+__all__ = ["AnalysisError", "analyze", "analyze_to_sarif"]
 
 # `# tridelphi: ignore <rule-id> — <reason>`. The reason is mandatory: an
 # exception a reviewer cannot evaluate is not an exception, it is a hole.
+# The em/en dashes in the character class below are intentional: people type all
+# three separators, and rejecting a suppression over dash flavour would be a
+# baffling failure. Hence the RUF001 waiver on that line.
 _SUPPRESS = re.compile(
-    r"#\s*tridelphi:\s*ignore\s+(?P<rule>[\w/-]+)\s*[—–-]{1,2}\s*(?P<reason>\S.*)$"
+    r"#\s*tridelphi:\s*ignore\s+(?P<rule>[\w/-]+)\s*[—–-]{1,2}\s*(?P<reason>\S.*)$"  # noqa: RUF001
 )
 
 
@@ -109,7 +112,7 @@ def analyze(
 
 
 def _parse_error_finding(diagnostic: Diagnostic, outcome, tables: Tables) -> Finding:
-    from .model import ExecutionContext, RepoInventory
+    from .model import ExecutionContext
 
     position = diagnostic.position or Position(file=diagnostic.path, line=1)
     context = ExecutionContext(

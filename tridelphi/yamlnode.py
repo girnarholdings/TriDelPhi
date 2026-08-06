@@ -15,7 +15,8 @@ undershoots to a real construct, never to an unrelated one.
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from ruamel.yaml.scalarstring import LiteralScalarString
 
@@ -60,7 +61,7 @@ class YamlNode:
     workflow files in the wild are frequently partial.
     """
 
-    __slots__ = ("value", "_file", "_parent", "_key", "_lines")
+    __slots__ = ("_file", "_key", "_lines", "_parent", "value")
 
     def __init__(
         self,
@@ -79,22 +80,22 @@ class YamlNode:
     # -- construction ----------------------------------------------------
 
     @classmethod
-    def root(cls, value: Any, file: str, source: str) -> "YamlNode":
+    def root(cls, value: Any, file: str, source: str) -> YamlNode:
         return cls(value, file, tuple(source.splitlines()))
 
-    def _child(self, value: Any, key: Any) -> "YamlNode":
+    def _child(self, value: Any, key: Any) -> YamlNode:
         return YamlNode(value, self._file, self._lines, parent=self.value, key=key)
 
     # -- navigation ------------------------------------------------------
 
-    def get(self, key: Any, default: Any = None) -> "YamlNode | None":
+    def get(self, key: Any, default: Any = None) -> YamlNode | None:
         if not isinstance(self.value, dict):
             return None
         if key not in self.value:
             return None if default is None else self._child(default, key)
         return self._child(self.value[key], key)
 
-    def __getitem__(self, key: Any) -> "YamlNode":
+    def __getitem__(self, key: Any) -> YamlNode:
         if isinstance(self.value, (list, tuple)):
             return self._child(self.value[key], key)
         return self._child(self.value[key], key)
@@ -102,7 +103,7 @@ class YamlNode:
     def __contains__(self, key: Any) -> bool:
         return isinstance(self.value, dict) and key in self.value
 
-    def __iter__(self) -> Iterator["YamlNode"]:
+    def __iter__(self) -> Iterator[YamlNode]:
         if isinstance(self.value, (list, tuple)):
             for i, item in enumerate(self.value):
                 yield self._child(item, i)
@@ -110,7 +111,7 @@ class YamlNode:
             for k in self.value:
                 yield self._child(self.value[k], k)
 
-    def items(self) -> Iterator[tuple[Any, "YamlNode"]]:
+    def items(self) -> Iterator[tuple[Any, YamlNode]]:
         if not isinstance(self.value, dict):
             return
         for k in self.value:
@@ -121,7 +122,7 @@ class YamlNode:
             return ()
         return tuple(self.value.keys())
 
-    def seq(self) -> tuple["YamlNode", ...]:
+    def seq(self) -> tuple[YamlNode, ...]:
         """This node as a sequence. A bare scalar becomes a one-element
         sequence, which is how GitHub treats several workflow keys."""
         if isinstance(self.value, (list, tuple)):
