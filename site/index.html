@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TriDelPhi — find the CI job that turns a comment into RCE</title>
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0a0d15; --panel:#121826; --panel2:#171e30; --line:#28304a;
+  --ink:#e8ecf5; --mute:#8493b0; --faint:#5a6884;
+  --u:#ff4d6d; --p:#ffb020; --e:#22d3ee; --ok:#3ddc97; --crit:#ff4d6d;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding:0 22px}
+a{color:var(--e);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--e);outline-offset:3px;border-radius:4px}
+
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+  text-transform:uppercase;color:var(--mute)}
+h1{font-size:clamp(30px,6vw,54px);font-weight:800;letter-spacing:-.03em;
+  line-height:1.03;margin:16px 0 0;text-wrap:balance}
+h2{font-size:clamp(21px,3.6vw,30px);font-weight:800;letter-spacing:-.02em;
+  margin:0 0 6px;text-wrap:balance}
+.lede{font-size:clamp(16px,2.2vw,19px);color:#c3cce0;max-width:60ch;margin:16px 0 0}
+.mono{font-family:var(--mono)}
+
+/* ---- top bar ---- */
+.top{display:flex;align-items:center;justify-content:space-between;
+  padding:20px 0;border-bottom:1px solid var(--line)}
+.logo{font-family:var(--mono);font-weight:600;letter-spacing:.02em;font-size:15px}
+.logo b{color:var(--e)}
+.top nav{display:flex;gap:22px;font-family:var(--mono);font-size:12.5px}
+.top nav a{color:var(--mute)}
+@media(max-width:620px){.top nav{display:none}}
+
+/* ---- hero ---- */
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:38px;align-items:center;
+  padding:54px 0 40px}
+@media(max-width:840px){.hero{grid-template-columns:1fr;gap:30px}}
+.install{margin-top:26px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.cmd{font-family:var(--mono);font-size:14px;background:#05070c;border:1px solid var(--line);
+  border-radius:9px;padding:11px 14px;color:#c3cce0;display:inline-flex;gap:10px;align-items:center}
+.cmd .p{color:var(--ok)}
+.copyhint{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.sub{margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+.sub b{color:var(--mute);font-weight:500}
+
+/* ---- venn ---- */
+.venn-card{border:1px solid var(--line);border-radius:18px;background:
+  radial-gradient(120% 120% at 50% 0%,#141b2c,#0c1019 70%);padding:18px 18px 14px;
+  box-shadow:0 30px 80px -40px rgba(0,0,0,.8)}
+.venn-stage{position:relative;aspect-ratio:1/.82}
+.venn-stage svg{width:100%;height:100%;display:block}
+.circle{transition:opacity .45s ease, filter .45s ease}
+.circle.off{opacity:.12}
+.readout{position:absolute;left:50%;top:49%;transform:translate(-50%,-50%);
+  text-align:center;pointer-events:none;transition:color .4s}
+.readout .verdict{font-family:var(--mono);font-weight:600;font-size:15px;letter-spacing:.04em}
+.readout .detail{font-family:var(--mono);font-size:10.5px;color:var(--mute);margin-top:3px}
+.legend{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+.chip{flex:1;min-width:120px;font-family:var(--mono);font-size:11.5px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);border-radius:9px;
+  padding:9px 11px;color:var(--ink);display:flex;align-items:center;gap:8px;
+  transition:border-color .2s,background .2s;text-align:left}
+.chip:hover{background:var(--panel2)}
+.chip .dot{width:9px;height:9px;border-radius:50%;flex:none}
+.chip.off{opacity:.5}
+.chip .k{font-weight:700}
+.chip .v{color:var(--mute)}
+.chip[data-cap="U"] .dot{background:var(--u)} .chip[data-cap="U"]{border-color:#5a2436}
+.chip[data-cap="P"] .dot{background:var(--p)} .chip[data-cap="P"]{border-color:#5a4520}
+.chip[data-cap="E"] .dot{background:var(--e)} .chip[data-cap="E"]{border-color:#1e4650}
+.hint{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:10px;text-align:center}
+
+/* ---- sections ---- */
+section{padding:46px 0;border-top:1px solid var(--line)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}
+@media(max-width:760px){.grid3{grid-template-columns:1fr}}
+.cap{border:1px solid var(--line);border-top-width:3px;border-radius:13px;
+  background:var(--panel);padding:16px 17px}
+.cap.u{border-top-color:var(--u)} .cap.p{border-top-color:var(--p)} .cap.e{border-top-color:var(--e)}
+.cap .tag{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.06em}
+.cap.u .tag{color:var(--u)} .cap.p .tag{color:var(--p)} .cap.e .tag{color:var(--e)}
+.cap h3{margin:8px 0 6px;font-size:15.5px}
+.cap p{margin:0;font-size:13.5px;color:#c3cce0}
+
+/* ---- terminal ---- */
+.term{border:1px solid var(--line);border-radius:13px;overflow:hidden;margin-top:22px;
+  background:#05070c;box-shadow:0 24px 60px -40px rgba(0,0,0,.8)}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 14px;background:#0d1220;
+  border-bottom:1px solid var(--line)}
+.term-bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+.term-bar i:nth-child(1){background:#ff5f57}.term-bar i:nth-child(2){background:#febc2e}
+.term-bar i:nth-child(3){background:#28c840}
+.term-bar span{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-left:8px}
+.term pre{margin:0;padding:16px 18px;font-family:var(--mono);font-size:12.5px;
+  line-height:1.7;color:#c3cce0;overflow-x:auto}
+.term .crit{color:var(--crit);font-weight:700}
+.term .u{color:var(--u)} .term .p{color:var(--p)} .term .e{color:var(--e)}
+.term .ok{color:var(--ok)} .term .c{color:var(--faint)} .term .h{color:var(--ink);font-weight:600}
+
+/* ---- moat split ---- */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px}
+@media(max-width:700px){.split{grid-template-columns:1fr}}
+.file{border:1px solid var(--line);border-radius:13px;background:var(--panel);padding:16px 17px}
+.file.bad{border-left:3px solid var(--crit)} .file.good{border-left:3px solid var(--ok)}
+.file .fh{font-family:var(--mono);font-size:12.5px;display:flex;justify-content:space-between;
+  align-items:center}
+.file .verdict{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px}
+.file.bad .verdict{background:rgba(255,77,109,.16);color:var(--crit)}
+.file.good .verdict{background:rgba(61,220,151,.16);color:var(--ok)}
+.file p{margin:10px 0 0;font-size:13px;color:#c3cce0}
+
+/* ---- steps ---- */
+.steps{display:grid;gap:12px;margin-top:22px}
+.step{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start;
+  border:1px solid var(--line);border-radius:13px;background:var(--panel);padding:15px 17px}
+.step .n{font-family:var(--mono);font-size:12px;color:var(--e);border:1px solid var(--line);
+  border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center}
+.step code{font-family:var(--mono);font-size:13px;background:#05070c;border:1px solid var(--line);
+  border-radius:6px;padding:2px 7px;color:#c3cce0}
+.step .d{font-size:13.5px;color:#c3cce0;margin-top:6px}
+
+.facts{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.fact{font-family:var(--mono);font-size:12px;color:var(--mute);border:1px solid var(--line);
+  border-radius:999px;padding:7px 13px;background:var(--panel)}
+.fact b{color:var(--ok)}
+
+footer{border-top:1px solid var(--line);padding:34px 0 60px;color:var(--faint);
+  font-family:var(--mono);font-size:12px}
+footer a{color:var(--mute)}
+
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.pulse{animation:pulse 2.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.85}50%{opacity:1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="logo">Tri<b>Del</b>Phi</div>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+      <a href="#moat">The hard part</a>
+      <a href="https://github.com/girnarholdings/TriDelPhi">GitHub</a>
+    </nav>
+  </div>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div>
+      <span class="eyebrow">Static analysis · GitHub Actions · offline</span>
+      <h1>Find the CI job that turns a comment into RCE.</h1>
+      <p class="lede">TriDelPhi reads your workflows and flags the jobs where a
+        prompt injection or pwn-request would actually run attacker code — with
+        your repository's secrets. No account, no network, one command.</p>
+      <div class="install">
+        <span class="cmd"><span class="p">$</span> pipx install tridelphi</span>
+        <span class="cmd"><span class="p">$</span> tridelphi .</span>
+      </div>
+      <p class="sub"><b>Python 3.11+.</b> One dependency. Reads files on disk — nothing leaves the machine.</p>
+    </div>
+
+    <div class="venn-card">
+      <div class="venn-stage">
+        <svg viewBox="0 0 320 262" aria-label="Interactive diagram: three overlapping capability circles">
+          <g style="mix-blend-mode:screen">
+            <circle class="circle" data-cap="U" cx="130" cy="105" r="82" fill="#ff4d6d"/>
+            <circle class="circle" data-cap="P" cx="190" cy="105" r="82" fill="#ffb020"/>
+            <circle class="circle" data-cap="E" cx="160" cy="162" r="82" fill="#22d3ee"/>
+          </g>
+        </svg>
+        <div class="readout" id="readout">
+          <div class="verdict" id="verdict">CRITICAL</div>
+          <div class="detail" id="detail">U ∩ P ∩ E</div>
+        </div>
+      </div>
+      <div class="legend" id="legend">
+        <button class="chip" data-cap="U"><span class="dot"></span><span><span class="k">U</span> <span class="v">untrusted</span></span></button>
+        <button class="chip" data-cap="P"><span class="dot"></span><span><span class="k">P</span> <span class="v">privilege</span></span></button>
+        <button class="chip" data-cap="E"><span class="dot"></span><span><span class="k">E</span> <span class="v">egress</span></span></button>
+      </div>
+      <div class="hint">Toggle a capability off — hold at most two and the job is safe.</div>
+    </div>
+  </div>
+
+  <!-- HOW -->
+  <section id="how">
+    <span class="eyebrow">The rule</span>
+    <h2>Two is fine. Three is an exploit.</h2>
+    <p class="lede"><a href="https://ai.meta.com/blog/practical-ai-agent-security/">Meta's Agents Rule of Two</a>
+      says an agent should hold at most two of these. A GitHub Actions job is an
+      agent by that definition — and the danger is never one line, it's the
+      combination.</p>
+    <div class="grid3">
+      <div class="cap u">
+        <div class="tag">U · UNTRUSTED</div>
+        <h3>Attacker text gets in</h3>
+        <p>A fork-reachable trigger plus a real path in: an injected
+          <span class="mono">${{ github.event.* }}</span>, a checkout of PR code,
+          or an AI agent reading files the PR can edit.</p>
+      </div>
+      <div class="cap p">
+        <div class="tag">P · PRIVILEGE</div>
+        <h3>The job holds power</h3>
+        <p>A <span class="mono">secrets.*</span> value, a write-scoped token,
+          <span class="mono">id-token: write</span>, or a self-hosted runner —
+          the runner itself is the prize.</p>
+      </div>
+      <div class="cap e">
+        <div class="tag">E · EGRESS</div>
+        <h3>It can reach out</h3>
+        <p>Any <span class="mono">run:</span> step, a publish or deploy action, or
+          an agent with <span class="mono">Bash</span> / <span class="mono">WebFetch</span>.
+          On a hosted runner, a shell is the open internet.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- TERMINAL -->
+  <section>
+    <span class="eyebrow">What you see</span>
+    <h2>It names the job, the evidence, and the one line to change.</h2>
+    <div class="term">
+      <div class="term-bar"><i></i><i></i><i></i><span>tridelphi .</span></div>
+<pre><span class="c">tridelphi 0.1.0 · Agents Rule of Two · 6 workflows, 20 jobs, 0.2s, offline</span>
+
+<span class="h">START HERE</span> ───────────────────────────────────────────────
+<span class="crit">CRITICAL</span> .github/workflows/assist.yml:19   job "assist"
+  tridelphi/agent-prompt-injection
+
+  <span class="u">U</span>  ${{ github.event.comment.body }} is interpolated into the
+     agent's prompt — it treats that text as instructions
+  <span class="p">P</span>  secrets.ANTHROPIC_API_KEY is available to this job
+  <span class="e">E</span>  Claude Code Action can use Bash, WebFetch
+
+  <span class="ok">Cheapest fix:</span> strip U — gate the job on the commenter's
+  association so only trusted accounts reach it. Escaping does
+  not help; the injection is semantic, not syntactic.
+
+  1 critical · 0 warning · 0 note</pre>
+    </div>
+    <div class="facts">
+      <span class="fact"><b>CRITICAL</b> = all three, fix now</span>
+      <span class="fact"><b>WARNING</b> = two, one edit from critical</span>
+      <span class="fact"><b>silent</b> on the compliant majority</span>
+      <span class="fact">SARIF · HTML · text output</span>
+    </div>
+  </section>
+
+  <!-- MOAT -->
+  <section id="moat">
+    <span class="eyebrow">The hard part nobody else does</span>
+    <h2>It knows what each agent restores from the base branch.</h2>
+    <p class="lede">Detecting "an agent runs here" is easy. Knowing which
+      attacker-editable files the agent actually reads — after the action swaps
+      some of them back to safe base-branch copies — is the difference between a
+      true finding and a false alarm on a hardened repo.</p>
+    <div class="split">
+      <div class="file good">
+        <div class="fh"><span class="mono">CLAUDE.md</span><span class="verdict">SAFE</span></div>
+        <p>Claude Code Action restores this from the base branch before the agent
+          starts. A tool that flags it is crying wolf on the recommended setup.</p>
+      </div>
+      <div class="file bad">
+        <div class="fh"><span class="mono">AGENTS.md</span><span class="verdict">EXPLOITABLE</span></div>
+        <p>Not in the restore list — it stays at pull-request head, attacker-controlled,
+          and the agent reads it as instructions. This is the real finding.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section id="install">
+    <span class="eyebrow">Get started</span>
+    <h2>Sixty seconds to your first scan.</h2>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><div>
+        <code>pipx install tridelphi</code>
+        <div class="d">Or <code>pip install tridelphi</code>, or <code>uvx tridelphi .</code> to run without installing. Python 3.11+.</div>
+      </div></div>
+      <div class="step"><span class="n">2</span><div>
+        <code>tridelphi .</code>
+        <div class="d">Scan the current repo. Human-readable by default; add <code>--format html --html-file report.html</code> for a page you can share.</div>
+      </div></div>
+      <div class="step"><span class="n">3</span><div>
+        <code>tridelphi . --format sarif --sarif-file out.sarif</code>
+        <div class="d">Upload to GitHub code scanning. Findings show up in the Security tab, in the PR, right where reviewers look.</div>
+      </div></div>
+      <div class="step"><span class="n">4</span><div>
+        <code>tridelphi . --with-zizmor</code>
+        <div class="d">Add <a href="https://github.com/zizmorcore/zizmor">zizmor</a>'s line-level checks — unpinned actions, mutable tags — merged into one SARIF. Complementary, not overlapping.</div>
+      </div></div>
+    </div>
+    <div class="facts">
+      <span class="fact">exit <b>0</b> clean · <b>1</b> findings · <b>2</b> error</span>
+      <span class="fact"><b>--baseline</b> freezes the backlog</span>
+      <span class="fact"><b>--explain</b> any rule</span>
+      <span class="fact">no network · no account · no token</span>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap" style="padding:0">
+      TriDelPhi · a static Agents Rule of Two checker for GitHub Actions ·
+      <a href="https://github.com/girnarholdings/TriDelPhi">github.com/girnarholdings/TriDelPhi</a><br>
+      Offline by design. One rung of a larger CI hardening ladder.
+    </div>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  var caps={U:true,P:true,E:true};
+  var circles={}, chips={};
+  document.querySelectorAll('.circle').forEach(function(c){circles[c.dataset.cap]=c;});
+  var verdict=document.getElementById('verdict'), detail=document.getElementById('detail');
+
+  function render(){
+    var on=Object.keys(caps).filter(function(k){return caps[k];});
+    Object.keys(circles).forEach(function(k){
+      circles[k].classList.toggle('off',!caps[k]);
+    });
+    document.querySelectorAll('.chip').forEach(function(ch){
+      ch.classList.toggle('off',!caps[ch.dataset.cap]);
+      ch.setAttribute('aria-pressed',String(caps[ch.dataset.cap]));
+    });
+    if(on.length===3){
+      verdict.textContent='CRITICAL'; verdict.style.color='var(--crit)';
+      verdict.classList.add('pulse');
+      detail.textContent='U ∩ P ∩ E';
+    } else if(on.length<=2){
+      verdict.classList.remove('pulse');
+      verdict.textContent='COMPLIANT'; verdict.style.color='var(--ok)';
+      detail.textContent = on.length===0 ? 'nothing to exploit'
+        : 'holds '+on.join(' + ')+' — safe';
+    }
+  }
+  document.querySelectorAll('.chip').forEach(function(ch){
+    ch.addEventListener('click',function(){
+      caps[ch.dataset.cap]=!caps[ch.dataset.cap]; render();
+    });
+  });
+  render();
+})();
+</script>
+</body>
+</html>

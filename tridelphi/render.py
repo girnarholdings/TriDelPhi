@@ -121,6 +121,7 @@ def render_text(
     elapsed: float,
     no_color: bool = False,
     new_count: int | None = None,
+    external_summary: str | None = None,
 ) -> None:
     style = _Style(_color_enabled(stream, no_color))
     threshold = SEVERITY_ORDER[min_severity]
@@ -157,6 +158,9 @@ def render_text(
     if new_count is not None:
         summary += f" · {new_count} new since baseline"
     print(summary, file=stream)
+
+    if external_summary:
+        print(style.dim(f"  {external_summary}"), file=stream)
 
     if hidden:
         print(
