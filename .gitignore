@@ -16,3 +16,7 @@ tridelphi.sarif
 bot/node_modules/
 bot/.wrangler/
 bot/package-lock.json
+
+# L6 scan artifacts
+tridelphi-evidence.json
+tridelphi.sarif

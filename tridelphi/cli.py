@@ -71,12 +71,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="repository default GITHUB_TOKEN permission when a job declares none",
     )
     parser.add_argument(
-        "--level", type=int, choices=(1, 2, 3), default=None,
+        "--level", type=int, choices=(1, 2, 3, 4, 5, 6), default=None,
         help=(
             "run the hardening ladder up to this rung: 1 secrets (gitleaks), "
-            "2 +supply chain (osv-scanner, queries osv.dev), 3 +CI lint (zizmor). "
+            "2 +supply chain (osv-scanner, queries osv.dev), 3 +CI lint (zizmor), "
+            "4 +repo posture (scorecard), 5 +code SAST (semgrep), 6 +attest "
+            "(writes the evidence statement `tridelphi attest` produces). "
             "Rungs are cumulative; TriDelPhi core always runs. See --credits."
         ),
+    )
+    parser.add_argument(
+        "--evidence-file", metavar="PATH", default="tridelphi-evidence.json",
+        help="with `attest` or --level 6: where to write the in-toto evidence statement",
     )
     parser.add_argument(
         "--offline", action="store_true",
@@ -139,11 +145,28 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # `tridelphi init` sets up the scan workflow; `tridelphi core .` and
-    # `tridelphi .` both scan. `core` stays canonical for later subcommands.
+    # `tridelphi .` both scan; `gate` and `attest` are L6's two processes.
     if args.path == "init":
         from .init_cmd import run_init
 
         return run_init(args.command or ".", force=args.force)
+    if args.path == "gate":
+        from .gate_cmd import run_gate
+
+        if not args.command:
+            print("tridelphi: gate needs a SARIF file: tridelphi gate out.sarif", file=sys.stderr)
+            return 2
+        return run_gate(args.command, fail_on=args.fail_on)
+    if args.path == "attest":
+        from .gate_cmd import run_attest
+
+        if not args.command:
+            print(
+                "tridelphi: attest needs a SARIF file: tridelphi attest out.sarif",
+                file=sys.stderr,
+            )
+            return 2
+        return run_attest(args.command, evidence_path=args.evidence_file)
 
     path = args.path
     if path == "core":
@@ -272,6 +295,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.sarif_file:
         Path(args.sarif_file).write_text(dumps(build_sarif()), encoding="utf-8", newline="\n")
+    # L6: the attest half runs inline when the scan reaches rung 6 and there is
+    # a SARIF file on disk to attest over. The gate half is this process's own
+    # exit code (and `tridelphi gate` re-checks it as a separate step).
+    if args.level is not None and args.level >= 6:
+        if args.sarif_file:
+            from .gate_cmd import run_attest
+
+            run_attest(args.sarif_file, evidence_path=args.evidence_file, out=sys.stderr)
+        else:
+            print("tridelphi: --level 6 attestation needs --sarif-file; skipped", file=sys.stderr)
     if args.html_file:
         Path(args.html_file).write_text(
             render_html(result, repo_label=repo_label, external_summary=external_summary),

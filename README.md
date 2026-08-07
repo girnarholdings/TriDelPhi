@@ -224,19 +224,44 @@ everything into **one SARIF document, one Security tab, one gate**:
 | **L2** | [osv-scanner](https://github.com/google/osv-scanner) | Apache-2.0 | known-vulnerable packages in your lockfiles¹ |
 | **L3** | [zizmor](https://github.com/zizmorcore/zizmor) | MIT | unpinned actions, template injection, workflow lint |
 | **L3** | **tridelphi core** | Apache-2.0 | the U∩P∩E capability intersection — always runs |
+| **L4** | [scorecard](https://github.com/ossf/scorecard) | Apache-2.0 | OSSF repo posture: security policy, token permissions, pinning¹ |
+| **L5** | [semgrep](https://github.com/semgrep/semgrep) | LGPL-2.1 | rule-based SAST of the application code itself¹ |
+| **L6** | **tridelphi attest / gate** | Apache-2.0 | native: emit signed evidence + enforce policy as its own step |
 
 ```console
-tridelphi . --level 3      # the whole ladder; rungs are cumulative
+tridelphi . --level 3      # lean default: secrets + supply chain + workflow lint + core
+tridelphi . --level 6      # the whole ladder, then write the evidence statement
 tridelphi . --level 1      # just secrets + core
 tridelphi --credits        # who built what — the wrapped tools, with licenses
 ```
 
+Rungs are cumulative. **Level 3 is the recommended default** — fast, and it
+stays off the heavier dependency trees; opt into 5+ when you want code SAST.
 Missing a tool? That rung is skipped with an install hint — a missing optional
 scanner **never** fails the scan or hides TriDelPhi's own findings. A gitleaks
 hit is escalated to error severity: a live secret in the tree is never just a
-warning. ¹ osv-scanner queries [osv.dev](https://osv.dev); pass `--offline` to
-skip network rungs. `--with-zizmor` remains as the single-tool spelling of L3's
-linter.
+warning. ¹ osv-scanner, scorecard and semgrep reach the network (a vuln
+database or a ruleset registry); pass `--offline` to skip those rungs.
+`--with-zizmor` remains as the single-tool spelling of L3's linter.
+
+### 🔏 L6 — attest & gate, the spec's two closing processes
+
+Scanning and enforcing are deliberately separate steps, so evidence can be
+uploaded before a gate fails the build and a policy change can re-gate an old
+scan without re-scanning:
+
+```console
+tridelphi . --level 6 --sarif-file out.sarif   # scan every rung, then attest
+tridelphi gate out.sarif                        # enforce --fail-on as its own process
+tridelphi attest out.sarif                      # write the in-toto evidence statement
+```
+
+`attest` emits an **unsigned** in-toto Statement (the SARIF's digest as
+subject, the tools and their counts as predicate). Signing is sigstore's job:
+the composite action feeds the evidence to `actions/attest-build-provenance`,
+which signs it with the workflow's OIDC identity. The generated `init`
+workflow also drops in [step-security/harden-runner](https://github.com/step-security/harden-runner)
+(Apache-2.0) to audit the scan job's own egress.
 
 ## ⚡ Put it in CI — one line
 
@@ -302,8 +327,12 @@ Each keeps its own name, rule metadata, and provenance as a separate run in the
 merged SARIF — attribution is structural, not a footnote:
 [gitleaks](https://github.com/gitleaks/gitleaks) (MIT) ·
 [osv-scanner](https://github.com/google/osv-scanner) (Apache-2.0) ·
-[zizmor](https://github.com/zizmorcore/zizmor) (MIT). Run `tridelphi --credits`
-for the same table from the CLI.
+[zizmor](https://github.com/zizmorcore/zizmor) (MIT) ·
+[scorecard](https://github.com/ossf/scorecard) (Apache-2.0) ·
+[semgrep](https://github.com/semgrep/semgrep) (LGPL-2.1) ·
+[step-security/harden-runner](https://github.com/step-security/harden-runner) (Apache-2.0) ·
+[actions/attest-build-provenance](https://github.com/actions/attest-build-provenance) (MIT).
+Run `tridelphi --credits` for the same table from the CLI.
 
 ## 📊 Honest calibration
 

@@ -30,9 +30,11 @@ inputs:
     default: "."
   level:
     description: >-
-      Hardening-ladder rung to climb to: 0 runs only TriDelPhi core; 1 adds
-      gitleaks (secrets); 2 adds osv-scanner (supply chain, queries osv.dev);
-      3 adds zizmor (workflow lint). Rungs are cumulative.
+      Hardening-ladder rung to climb to (cumulative): 0 core only; 1 +gitleaks
+      (secrets); 2 +osv-scanner (supply chain, queries osv.dev); 3 +zizmor
+      (workflow lint); 4 +scorecard (repo posture); 5 +semgrep (code SAST);
+      6 +attest (writes a signed-elsewhere evidence statement). Default 3 stays
+      lean and fast; 5+ pulls in semgrep's dependency tree, so opt into it.
     default: "3"
   fail-on:
     description: Exit non-zero at this level or above (critical | warning | none).
@@ -43,6 +45,9 @@ inputs:
   sarif-file:
     description: Where to write SARIF for code-scanning upload.
     default: tridelphi.sarif
+  evidence-file:
+    description: With level 6, where to write the in-toto evidence statement.
+    default: tridelphi-evidence.json
 
 runs:
   using: composite
@@ -51,17 +56,17 @@ runs:
       with:
         python-version: '3.12'
 
-    - name: Install TriDelPhi
-      shell: bash
-      # Installed from the action's own checkout, so the scan always runs the
-      # exact code this action's ref points at — no registry in the path.
-      run: python3 -m pip install --quiet "$GITHUB_ACTION_PATH"
-
-    - name: Install the ladder scanners (pinned, checksum-verified)
+    # One setup step: TriDelPhi from the action's own checkout (so the scan
+    # runs exactly this ref, no registry in the path), then the ladder scanners
+    # the chosen level needs (pinned + checksum-verified; the installer is
+    # level-gated, so level 3 never pulls in semgrep's dependency tree).
+    - name: Set up TriDelPhi and the ladder
       shell: bash
       env:
         LEVEL: ${{ inputs.level }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/install-ladder.sh" "$LEVEL"
+      run: |
+        python3 -m pip install --quiet "$GITHUB_ACTION_PATH"
+        bash "$GITHUB_ACTION_PATH/scripts/install-ladder.sh" "$LEVEL"
 
     - name: Scan
       id: scan
@@ -71,13 +76,14 @@ runs:
         LEVEL: ${{ inputs.level }}
         FAIL_ON: ${{ inputs.fail-on }}
         SARIF_FILE: ${{ inputs.sarif-file }}
+        EVIDENCE_FILE: ${{ inputs.evidence-file }}
       # Never fail this step; the SARIF upload and PR comment must run
       # regardless. The threshold is enforced as the final step.
       run: |
         set +e
         LEVEL_ARGS=()
         if [ "$LEVEL" -ge 1 ] 2>/dev/null; then
-          LEVEL_ARGS=(--level "$LEVEL")
+          LEVEL_ARGS=(--level "$LEVEL" --evidence-file "$EVIDENCE_FILE")
         fi
         tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" \
           --format text \
@@ -98,6 +104,16 @@ runs:
       uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
       with:
         sarif_file: ${{ inputs.sarif-file }}
+
+    # L6: publish the evidence statement as a signed build attestation, so a
+    # consumer can verify what scanned this commit. Runs only at level 6, only
+    # on push (attestations need the workflow's own OIDC identity, which fork
+    # PRs do not get), and only if the evidence file was written.
+    - name: Attest the scan evidence
+      if: ${{ inputs.level == '6' && github.event_name != 'pull_request' && hashFiles(inputs.evidence-file) != '' }}
+      uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+      with:
+        subject-path: ${{ inputs.evidence-file }}
 
     - name: Comment on the pull request
       if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
