@@ -83,6 +83,8 @@ def _scan_interpreter_sinks(
     markers = tables.tuple_of("untrusted_expressions", "env_reexpansion_markers")
     sinks = tables.section("untrusted_expressions", "interpreter_sinks", {}) or {}
 
+    env_files = tables.tuple_of("untrusted_expressions", "env_file_targets")
+
     for step in _iter_steps(context):
         run = step.get("run")
         if run is not None and run.text:
@@ -99,6 +101,27 @@ def _scan_interpreter_sinks(
                         ),
                         position=run.find_substring(path.split(".")[-1]),
                     )
+            # Environment-file injection: writing attacker text into $GITHUB_ENV,
+            # $GITHUB_OUTPUT or $GITHUB_PATH lets it set variables like
+            # NODE_OPTIONS that later steps execute — the Google/Apache class.
+            # A hit only when an untrusted expression lands on a line writing to
+            # one of those files.
+            for line in run.text.splitlines():
+                if not any(target in line for target in env_files):
+                    continue
+                for path in expression_paths(line):
+                    if matches_untrusted_path(path, patterns):
+                        yield CapabilityHit(
+                            capability="U",
+                            kind="env-file-injection",
+                            reason=(
+                                f"`${{{{ {path} }}}}` is written into a GitHub "
+                                "environment file; attacker text there sets variables "
+                                "(NODE_OPTIONS, PATH…) that later privileged steps run"
+                            ),
+                            position=run.find_substring(path.split(".")[-1]),
+                        )
+                        break
 
         name = _uses_name(step)
         sink_inputs = sinks.get(name)

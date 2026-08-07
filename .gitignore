@@ -11,3 +11,8 @@ build/
 .ruff_cache/
 .tridelphi-baseline.json
 tridelphi.sarif
+
+# bot (Cloudflare Worker) local artifacts
+bot/node_modules/
+bot/.wrangler/
+bot/package-lock.json

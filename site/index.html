@@ -395,7 +395,25 @@ footer a{color:var(--mute)}
   <!-- INSTALL -->
   <section id="install">
     <span class="eyebrow">Get started</span>
-    <h2>Sixty seconds to your first scan.</h2>
+    <h2>One command, and it guards every pull request.</h2>
+    <p class="lede">Vibe-coding and not sure where to start? You don't need the
+      flags. Two lines set up the bot — GitHub Actions runs it, and it comments
+      on every PR.</p>
+    <div class="term" style="margin-bottom:8px">
+      <div class="term-bar"><i></i><i></i><i></i><span>set it up</span></div>
+<pre><span class="c">$</span> pipx install tridelphi
+<span class="c">$</span> tridelphi init
+<span class="ok">wrote .github/workflows/tridelphi.yml</span>
+
+<span class="c"># commit, push — done. it now scans every PR and comments.</span></pre>
+    </div>
+    <p class="sub">Prefer a one-liner in a workflow you already have?
+      <code style="background:none;border:0;padding:0;color:var(--e)">- uses: girnarholdings/TriDelPhi@v1</code>
+      · Running a hosted bot across many repos? A Cloudflare Worker webhook front
+      door lives in <code style="background:none;border:0;padding:0;color:var(--e)">bot/</code>,
+      testable with <code style="background:none;border:0;padding:0;color:var(--e)">wrangler dev</code>.</p>
+
+    <h3 style="font-family:var(--mono);font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);margin:30px 0 0">Or drive it yourself</h3>
     <div class="steps">
       <div class="step"><span class="n">1</span><div>
         <code>pipx install tridelphi</code>

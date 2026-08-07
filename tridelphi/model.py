@@ -353,6 +353,41 @@ RULES: tuple[RuleSpec, ...] = (
         adr_techniques=("insecure-output-handling",),
     ),
     RuleSpec(
+        id="tridelphi/env-file-injection",
+        name="EnvFileInjection",
+        short_description="Attacker text is written into a GitHub environment file in a privileged job",
+        full_description=(
+            "The job writes an untrusted expression into $GITHUB_ENV, $GITHUB_OUTPUT "
+            "or $GITHUB_PATH. Values placed there persist into later steps as "
+            "environment variables and PATH entries, so an attacker can set "
+            "NODE_OPTIONS, LD_PRELOAD or PATH and have a subsequent privileged step "
+            "execute their code — even though no single line looks like a shell "
+            "command. Google Firebase and Apache were both found vulnerable to this. "
+            "Route the value through a quoted step-scoped `env:` instead of the "
+            "environment file."
+        ),
+        help_uri=f"{_HELP}#env-file-injection",
+        default_level="error",
+        adr_techniques=("insecure-output-handling", "agentic-control-flow-hijacking"),
+    ),
+    RuleSpec(
+        id="tridelphi/weak-actor-guard",
+        name="WeakActorGuard",
+        short_description="Attacker-reachable job is gated only by a spoofable github.actor check",
+        full_description=(
+            "The job runs on a trigger an outside party can fire and its only "
+            "authorization gate is a `github.actor` or `github.triggering_actor` "
+            "comparison. Actor identity is not authorization: the Dependabot "
+            "confused-deputy trick makes github.actor read as a trusted bot on an "
+            "attacker's pull request, and git authorship is trivially forged. Gate "
+            "on the event's `author_association` (OWNER / MEMBER / COLLABORATOR) or a "
+            "real permission lookup instead."
+        ),
+        help_uri=f"{_HELP}#weak-actor-guard",
+        default_level="warning",
+        adr_techniques=("agent-identity-spoofing",),
+    ),
+    RuleSpec(
         id="tridelphi/workflow-run-upstream-execution",
         name="WorkflowRunUpstreamExecution",
         short_description="Privileged workflow_run job consumes state produced by an untrusted run",

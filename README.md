@@ -43,6 +43,31 @@ CRITICAL .github/workflows/assist.yml:19   job "assist"
   1 critical · 0 warning · 0 note
 ```
 
+## 🚀 Protect your repo in one command
+
+Not sure where to start? You don't need to learn the flags. Run this in your repo:
+
+```console
+$ pipx install tridelphi
+$ tridelphi init
+wrote .github/workflows/tridelphi.yml
+```
+
+Commit that file and push. From now on TriDelPhi scans every pull request, posts
+a plain-language sticky comment, and (if you turn on code scanning) files
+findings in the Security tab. That's the whole setup — it's the **bot**, and
+GitHub Actions is what runs it.
+
+Prefer a one-liner in an existing workflow?
+
+```yaml
+- uses: girnarholdings/TriDelPhi@v1      # scans + comments on the PR
+```
+
+Running a hosted bot across many repos? There's a Cloudflare Worker webhook front
+door in [`bot/`](bot/), testable locally with `wrangler dev` — see
+[`bot/README.md`](bot/README.md).
+
 ---
 
 ## 🎯 The problem
@@ -138,10 +163,11 @@ where static analysis **cannot** reach:
 [x] Agentic Control-Flow Hijacking             detected
 [x] Indirect Prompt Injection                  detected
 [x] Exploitation of Excessive Tool Permissions detected
+[x] Agent Identity Spoofing                    partial
 [ ] Tool Shadowing                             gap — statically reachable, no rule yet
 [-] Long-Term Goal Hijacking                   runtime-only
 ...
-8 of 11 statically reachable techniques have a rule; 6 of 17 are runtime-only.
+9 of 11 statically reachable techniques have a rule; 6 of 17 are runtime-only.
 ```
 
 **ADR is the runtime half; TriDelPhi is the static half.** ADR observes agent
@@ -254,7 +280,7 @@ any pattern.
 
 ```console
 pip install -e ".[dev]"
-pytest -q                       # 129 tests
+pytest -q                       # 253 tests
 ruff check tridelphi/ tests/    # lint
 python -m build --wheel         # packaging
 ```
@@ -295,6 +321,8 @@ without wiring it in fails CI rather than silently widening what can merge.
 | 🧭 [`docs/DECISIONS.md`](docs/DECISIONS.md) | What four adversarial reviews changed before a line was written |
 | 🗺️ [`docs/OSS_LANDSCAPE.md`](docs/OSS_LANDSCAPE.md) | Prior art: zizmor, poutine, Raven, octoscan, TaintAWI |
 | ⚙️ [`docs/REPO_SETUP.md`](docs/REPO_SETUP.md) | The two settings that gate merges and serve the site |
+| 🤖 [`bot/`](bot/) | Cloudflare Worker webhook front door for a hosted bot |
+| ▶️ [`action.yml`](action.yml) | The one-line `uses:` composite action |
 
 ---
 

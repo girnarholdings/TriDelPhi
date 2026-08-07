@@ -69,3 +69,12 @@ env_reexpansion_markers:
   - GITHUB_ENV
   - GITHUB_PATH
   - GITHUB_OUTPUT
+
+# Environment-file targets. Writing an untrusted expression into one of these is
+# a laundering path: the value persists into later steps as an env var / PATH
+# entry that then executes. Documented real attacks: Legit Security's Google
+# Firebase and Apache findings (NODE_OPTIONS -> RCE).
+env_file_targets:
+  - GITHUB_ENV
+  - GITHUB_OUTPUT
+  - GITHUB_PATH
