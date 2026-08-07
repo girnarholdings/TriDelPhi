@@ -66,8 +66,11 @@ jobs:
         # Never fail the job here; we want the SARIF upload and the PR comment to
         # run regardless. The gate is code scanning + branch protection, not this
         # step's exit code.
+        # `--format checklist` is the plain-language report: a first-time reader
+        # gets pass/fail and what to do, not exit codes and rule ids. SARIF still
+        # carries the full detail to the Security tab.
         run: |
-          tridelphi . --format text --sarif-file tridelphi.sarif > report.txt 2>&1 || true
+          tridelphi . --format checklist --sarif-file tridelphi.sarif > report.txt 2>&1 || true
           {
             echo 'text<<TRIDELPHI_EOF'
             cat report.txt

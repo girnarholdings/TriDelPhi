@@ -24,6 +24,8 @@ from pathlib import Path
 from . import __version__
 from .api import AnalysisError, analyze
 from .baseline import DEFAULT_BASELINE, load_baseline, partition, write_baseline
+from .checklist import ExternalStatus as ChecklistStatus
+from .checklist import render_checklist
 from .coverage import render_coverage
 from .html_report import render_html
 from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
@@ -53,8 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true", help="with init: overwrite an existing workflow")
     parser.add_argument(
-        "-f", "--format", choices=("text", "sarif", "json", "html"), default="text",
-        help="output format (default: text; html is a browsable report)",
+        "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default="text",
+        help=(
+            "output format (default: text; 'checklist' is the plain-language, "
+            "no-jargon report a first-time user can act on; html is browsable)"
+        ),
     )
     parser.add_argument("--sarif-file", metavar="PATH", help="also write SARIF here")
     parser.add_argument("--html-file", metavar="PATH", help="also write an HTML report here")
@@ -264,9 +269,15 @@ def main(argv: list[str] | None = None) -> int:
     external_summary: str | None = None
     external_sarifs = []
     external_counts = {s: 0 for s in _SEVERITIES}
+    # Per-tool status for the checklist renderer: did the rung run, and with
+    # what result. A skipped (uninstalled) tool has ran=False.
+    external_status: dict = {}
     for ext in external_runs:
         if ext.diagnostic is not None:
             print(f"tridelphi: {ext.diagnostic.message}", file=sys.stderr)
+        external_status[ext.spec.name] = ChecklistStatus(
+            ran=ext.ok, counts=dict(ext.severity_counts)
+        )
         if ext.sarif is not None:
             external_sarifs.append(ext.sarif)
             for severity, count in ext.severity_counts.items():
@@ -288,9 +299,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         if verify_doc is not None:
             external_sarifs.append(verify_doc)
+            trust_counts = {s: 0 for s in _SEVERITIES}
             for result_obj in verify_doc["runs"][0]["results"]:
                 sev = "critical" if result_obj.get("level") == "error" else "note"
                 external_counts[sev] += 1
+                trust_counts[sev] += 1
+            external_status["trust"] = ChecklistStatus(ran=True, counts=trust_counts)
             n = len(verify_doc["runs"][0]["results"])
             summary_parts.append(f"trust: {n} finding{'s' if n != 1 else ''}")
 
@@ -325,6 +339,17 @@ def main(argv: list[str] | None = None) -> int:
     elif args.format == "html":
         sys.stdout.write(
             render_html(result, repo_label=repo_label, external_summary=external_summary)
+        )
+    elif args.format == "checklist":
+        render_checklist(
+            result,
+            repo_label=repo_label,
+            files_scanned=result.files_scanned,
+            jobs_scanned=result.contexts_scanned,
+            elapsed=elapsed,
+            fail_on=args.fail_on,
+            external=external_status,
+            stream=sys.stdout,
         )
     elif not args.quiet:
         render_text(

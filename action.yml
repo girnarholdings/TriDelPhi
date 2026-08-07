@@ -91,7 +91,7 @@ runs:
           LEVEL_ARGS=(--level "$LEVEL" --evidence-file "$EVIDENCE_FILE" --trust-lock "$TRUST_LOCK")
         fi
         tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" \
-          --format text \
+          --format checklist \
           --sarif-file "$SARIF_FILE" \
           --fail-on "$FAIL_ON" > report.txt 2>&1
         code=$?

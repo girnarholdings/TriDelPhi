@@ -4,7 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TriDelPhi — keep strangers from tricking your robots into stealing your keys</title>
-<meta name="description" content="When you build on GitHub, little helper robots run your project. TriDelPhi checks whether any of them could be tricked by a stranger into handing over your passwords — and shows you the one to fix. Free, one line, plain English.">
+<meta name="description" content="A free security checklist for your GitHub project. It runs offline on your own machine — nothing is uploaded, copied, or shared — and tells you in plain English whether a stranger could trick your automation into leaking your keys. One line to run.">
+
+<!-- Favicon: the brand triangle, inline so it stays self-contained -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpolygon points='20,5 35,32 5,32' fill='none' stroke='%23e6b34a' stroke-width='3' stroke-linejoin='round'/%3E%3Ccircle cx='20' cy='5' r='4' fill='%23f2604f'/%3E%3Ccircle cx='35' cy='32' r='4' fill='%2341bcc8'/%3E%3Ccircle cx='5' cy='32' r='4' fill='%23eaa63a'/%3E%3C/svg%3E">
+
+<!-- Pretty link preview when the URL is shared (Open Graph + Twitter) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="TriDelPhi">
+<meta property="og:title" content="TriDelPhi — a free, offline security checklist for your GitHub project">
+<meta property="og:description" content="Runs on your own machine — nothing uploaded, copied, or shared. Tells you in plain English whether a stranger could trick your automation into leaking your keys, and the one thing to fix. One line to run.">
+<meta property="og:url" content="https://girnarholdings.github.io/TriDelPhi/">
+<meta property="og:image" content="https://girnarholdings.github.io/TriDelPhi/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="TriDelPhi — a free, offline security checklist for GitHub. Two is fine, three is an exploit.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="TriDelPhi — a free, offline security checklist for your GitHub project">
+<meta name="twitter:description" content="Runs on your machine — nothing uploaded or copied. Plain-English pass/fail, and the one thing to fix. One line to run.">
+<meta name="twitter:image" content="https://girnarholdings.github.io/TriDelPhi/og-card.png">
+<meta name="theme-color" content="#10191f">
 <style>
 /* ============================================================= TOKENS
    Dark-first: the bare :root is the intended (dark, teal-ink) look.
@@ -191,6 +210,33 @@ p{margin:0}
 .cmd .pr{color:var(--safe)}
 .cta .fine{font-family:var(--mono);font-size:12.5px;color:var(--faint)}
 .cta .fine b{color:var(--mute);font-weight:500}
+
+/* no-brainer / offline trust banner */
+.nobrainer{margin:26px auto 0;max-width:900px;border:1px solid var(--line);
+  border-radius:16px;background:var(--bg2);padding:8px;display:grid;
+  grid-template-columns:repeat(4,1fr);gap:8px}
+@media(max-width:720px){.nobrainer{grid-template-columns:1fr 1fr}}
+.nb{display:flex;gap:11px;align-items:flex-start;padding:14px 15px;border-radius:11px;text-align:left}
+.nb svg{width:22px;height:22px;flex:none;color:var(--safe);margin-top:1px}
+.nb b{display:block;font-size:14.5px;color:var(--ink);font-weight:650}
+.nb span{font-size:12.5px;color:var(--mute);line-height:1.4}
+.nb.gold svg{color:var(--gold)}
+
+/* checklist sample (the report you actually get) */
+.report{margin-top:34px;border:1px solid var(--line2);border-radius:16px;overflow:hidden;
+  background:#0c1319;box-shadow:var(--shadow)}
+:root[data-theme="light"] .report,
+:root:not([data-theme="dark"]) .report{background:#132029}
+.report .rtop{display:flex;align-items:center;gap:7px;padding:11px 15px;
+  background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.08)}
+.report .rtop i{width:11px;height:11px;border-radius:50%}
+.report .rtop i:nth-child(1){background:#ff5f57}.report .rtop i:nth-child(2){background:#febc2e}
+.report .rtop i:nth-child(3){background:#28c840}
+.report .rtop span{font-family:var(--mono);font-size:11.5px;color:#7d93a0;margin-left:6px}
+.report pre{margin:0;padding:20px 22px;font-family:var(--mono);font-size:13px;
+  line-height:1.7;color:#cdd9e2;overflow-x:auto;white-space:pre}
+.report .ok{color:#5ccb8c}.report .no{color:#f2604f}.report .warn{color:#eaa63a}
+.report .dim{color:#5f7583}.report .head{color:#f4eee2;font-weight:600}.report .gold{color:#e6b34a}
 
 /* ============================================================= SECTIONS */
 section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
@@ -481,6 +527,26 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
         <span class="cmd"><span class="pr">$</span> tridelphi .</span>
       </div>
       <span class="fine"><b>No account. No sign-up. Nothing leaves your computer.</b> It just reads your files and tells you the truth.</span>
+    </div>
+
+    <!-- why it's a no-brainer -->
+    <div class="nobrainer">
+      <div class="nb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/></svg>
+        <div><b>Runs on your machine</b><span>It never uploads, copies, or shares your code. Air-gap safe.</span></div>
+      </div>
+      <div class="nb gold">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M19 5l-3 3M8 16l-3 3"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
+        <div><b>Free &amp; open source</b><span>No plan, no trial, no upsell. Apache-2.0.</span></div>
+      </div>
+      <div class="nb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg>
+        <div><b>One line to run</b><span>Nothing to configure. Get a plain-English pass/fail.</span></div>
+      </div>
+      <div class="nb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <div><b>Reads like a checklist</b><span>Every check ticked ✅ or flagged 🚫, with what to do.</span></div>
+      </div>
     </div>
   </div>
 
@@ -822,6 +888,38 @@ $ tridelphi init
           <span class="pill">already using a workflow? one <span class="mono">uses:</span> line</span>
         </div>
       </div>
+    </div>
+
+    <!-- the report you actually get -->
+    <h3 style="font-family:var(--serif);font-size:clamp(21px,3vw,28px);margin:44px 0 6px;text-align:center">And here's the report you get back.</h3>
+    <p class="lede" style="text-align:center;margin:0 auto 22px">No exit codes, no jargon — a checklist that tells you if you're safe and, if not, the one thing to fix.</p>
+    <div class="report">
+      <div class="rtop"><i></i><i></i><i></i><span>the comment TriDelPhi leaves on your pull request</span></div>
+<pre>────────────────────────────────────────────────────────────
+  <span class="gold">🔺 TriDelPhi security checklist</span>
+  <span class="dim">my-cool-app · 12 jobs across 4 workflows · scanned in 0.2s</span>
+  <span class="ok">✓ Ran entirely on your machine. Nothing was uploaded, copied, or shared.</span>
+────────────────────────────────────────────────────────────
+
+  <span class="no">🚫</span>  Can a stranger trick a robot into leaking your keys?      <span class="no">1 to fix</span>
+  <span class="ok">✅</span>  Any passwords left sitting in your files?                 <span class="ok">all clear</span>
+  <span class="ok">✅</span>  Any known-broken building blocks in use?                 <span class="ok">all clear</span>
+  <span class="ok">✅</span>  Are your automations set up safely?                      <span class="ok">all clear</span>
+
+  ──────────────────────────────────────────────────────
+
+  <span class="head">1 thing needs your attention before this repo is safe:</span>
+
+  <span class="no">🚫 A job can be tricked into leaking your keys</span>
+      <span class="dim">Where:</span>   .github/workflows/assist.yml, job "assist"
+      <span class="dim">Why:</span>     a stranger's input can reach this job, it holds your
+               secrets, and it can reach the internet.
+      <span class="dim">Do this:</span> gate this job so only trusted people can trigger it.
+
+  ──────────────────────────────────────────────────────
+
+  <span class="warn">Result:  ⚠️  NOT YET SAFE</span> — fix the 1 item above, then run this again.
+           <span class="dim">None of it is hard; each fix is usually one setting.</span></pre>
     </div>
 
     <!-- trust strip -->
