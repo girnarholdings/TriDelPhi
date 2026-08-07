@@ -1,0 +1,19 @@
+# gitleaks configuration for the TriDelPhi repository itself.
+#
+# The test suite and red-team corpus deliberately plant *inert, synthetic*
+# credential-shaped strings (fake GitHub PATs, example AWS keys) to prove the
+# L1 rung catches them. Those are test fixtures, not secrets — allowlist the
+# directories they live in so `tridelphi --level 1` runs clean on this repo.
+#
+# Everything outside these paths is scanned with the full default ruleset.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Inert synthetic tokens planted by the test suite and red-team corpus"
+paths = [
+    '''tests/.*''',
+    '''.*__pycache__/.*''',
+    '''\.pytest_cache/.*''',
+]

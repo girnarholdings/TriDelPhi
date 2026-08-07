@@ -26,8 +26,9 @@ from .api import AnalysisError, analyze
 from .baseline import DEFAULT_BASELINE, load_baseline, partition, write_baseline
 from .coverage import render_coverage
 from .html_report import render_html
+from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
 from .model import RULES
-from .orchestrate import merge_runs, run_zizmor, summarize_external_run
+from .orchestrate import merge_runs
 from .render import SEVERITY_ORDER, render_text
 from .sarif import dumps, to_sarif
 
@@ -70,12 +71,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="repository default GITHUB_TOKEN permission when a job declares none",
     )
     parser.add_argument(
+        "--level", type=int, choices=(1, 2, 3), default=None,
+        help=(
+            "run the hardening ladder up to this rung: 1 secrets (gitleaks), "
+            "2 +supply chain (osv-scanner, queries osv.dev), 3 +CI lint (zizmor). "
+            "Rungs are cumulative; TriDelPhi core always runs. See --credits."
+        ),
+    )
+    parser.add_argument(
+        "--offline", action="store_true",
+        help="with --level: skip rungs that need the network (osv-scanner)",
+    )
+    parser.add_argument(
         "--with-zizmor", action="store_true",
         help="also run zizmor (if installed) and merge its findings into the SARIF output",
     )
     parser.add_argument(
         "--zizmor-online", action="store_true",
         help="allow zizmor's online audits (requires GH_TOKEN; not air-gap safe)",
+    )
+    parser.add_argument(
+        "--credits", action="store_true",
+        help="print the open-source tools the ladder wraps, with licenses, and exit",
     )
     parser.add_argument("--strict-parse", action="store_true", help="unparseable workflow exits 2")
     parser.add_argument("--require-workflows", action="store_true")
@@ -134,6 +151,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command is not None:
         path = args.path
 
+    if args.credits:
+        print(credits_text(), file=sys.stdout)
+        return 0
     if args.coverage:
         return render_coverage(sys.stdout)
     if args.list_rules:
@@ -162,28 +182,45 @@ def main(argv: list[str] | None = None) -> int:
             print(f"tridelphi: {diagnostic.path}: {diagnostic.message}", file=sys.stderr)
         return 2
 
-    # Optional zizmor orchestration. This is the only place a subprocess runs,
-    # and only when explicitly requested — the default scan stays offline.
-    external_summary: str | None = None
-    external_sarif = None
-    if args.with_zizmor:
-        zres = run_zizmor(path, offline=not args.zizmor_online)
-        external_summary = summarize_external_run(zres)
-        if zres.diagnostic is not None:
-            print(f"tridelphi: {zres.diagnostic.message}", file=sys.stderr)
-        external_sarif = zres.sarif
-
     baseline: set[str] = set()
     baseline_path = Path(args.baseline) if args.baseline else Path(path) / DEFAULT_BASELINE
     if not args.no_baseline and baseline_path.is_file():
         baseline = load_baseline(baseline_path)
     new, _unchanged, stale = partition(list(result.findings), baseline)
 
+    # --write-baseline records fingerprints and exits before the ladder: no
+    # subprocess (or osv.dev query) should be spent on output that a recording
+    # run immediately discards.
     if args.write_baseline is not None:
         target = Path(args.write_baseline)
         count = write_baseline(target, result.findings, __version__)
         print(f"wrote {count} fingerprints to {target}", file=sys.stderr)
         return 0
+
+    # Optional ladder orchestration. This is the only path that spawns
+    # subprocesses, and only when explicitly requested — the default scan stays
+    # offline and pure. `--level N` runs every rung up to N; `--with-zizmor`
+    # remains as the single-tool spelling of rung 3's linter.
+    external_runs = []
+    if args.level is not None:
+        external_runs = run_ladder(
+            path, level=args.level, offline=args.offline, zizmor_online=args.zizmor_online
+        )
+    elif args.with_zizmor:
+        external_runs = [run_tool(ZIZMOR, path, zizmor_online=args.zizmor_online)]
+
+    external_summary: str | None = None
+    external_sarifs = []
+    external_counts = {s: 0 for s in _SEVERITIES}
+    for ext in external_runs:
+        if ext.diagnostic is not None:
+            print(f"tridelphi: {ext.diagnostic.message}", file=sys.stderr)
+        if ext.sarif is not None:
+            external_sarifs.append(ext.sarif)
+            for severity, count in ext.severity_counts.items():
+                external_counts[severity] += count
+    if external_runs:
+        external_summary = " · ".join(summarize_run(ext) for ext in external_runs)
 
     if stale:
         print(
@@ -202,8 +239,8 @@ def main(argv: list[str] | None = None) -> int:
             baseline=baseline if baseline else None,
             validate=args.self_check,
         )
-        if external_sarif is not None:
-            document = merge_runs(document, external_sarif)
+        for external in external_sarifs:
+            document = merge_runs(document, external)
         return document
 
     repo_label = str(Path(path).resolve().name) or path
@@ -246,6 +283,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     threshold = SEVERITY_ORDER[args.fail_on]
     if any(SEVERITY_ORDER[f.severity] <= threshold for f in gating):
+        return 1
+    # The gate covers the wrapped rungs too: a gitleaks secret or a zizmor error
+    # fails the build under the same --fail-on threshold as a native finding.
+    # External findings are not baselined — they come from tools whose output
+    # has no stable fingerprint, and a committed secret should never be waived.
+    if any(
+        count and SEVERITY_ORDER[severity] <= threshold
+        for severity, count in external_counts.items()
+    ):
         return 1
     return 0
 

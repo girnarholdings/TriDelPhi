@@ -39,11 +39,12 @@ def gating(findings) -> list:
     return [f for f in findings if f.severity in ("critical", "warning")]
 
 
-def run_cli(args: list[str], cwd: Path | None = None):
+def run_cli(args: list[str], cwd: Path | None = None, env: dict | None = None):
     """Invoke the CLI in a subprocess.
 
     Used only where a subprocess proves something in-process calls cannot: the
-    exit-code contract and stdout being parseable JSON.
+    exit-code contract, stdout being parseable JSON, and PATH-dependent
+    behavior (the ladder's wrapped scanners).
     """
     import subprocess
 
@@ -52,4 +53,5 @@ def run_cli(args: list[str], cwd: Path | None = None):
         capture_output=True,
         text=True,
         cwd=str(cwd) if cwd else None,
+        env=env,
     )
