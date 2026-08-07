@@ -79,8 +79,11 @@ def _result(finding: Finding, baseline_state: str | None) -> dict[str, Any]:
     # Raises if the rule is not in the registry. Kept for the side effect: it is
     # what stops rule.py from minting an id that never appears in
     # tool.driver.rules, which would emit SARIF referencing an undeclared rule.
-    rule_by_id(finding.rule_id)
+    spec = rule_by_id(finding.rule_id)
     properties: dict[str, Any] = {
+        # The ADR technique ids let a consumer roll findings up against a
+        # published taxonomy rather than our rule names alone.
+        "adrTechniques": list(spec.adr_techniques),
         "tridelphiSeverity": finding.severity,
         "capabilities": list(finding.capabilities()),
         "jobId": finding.context.job_id,
@@ -151,6 +154,7 @@ def _rules_block() -> list[dict[str, Any]]:
             "fullDescription": {"text": spec.full_description},
             "helpUri": spec.help_uri,
             "defaultConfiguration": {"level": spec.default_level},
+            "properties": {"adrTechniques": list(spec.adr_techniques)},
         }
         for spec in RULES
     ]

@@ -25,6 +25,9 @@ EXPECTED_CRITICAL = {
 EXPECTED_STRIP = {
     "up-no-egress": "U",
     "ue-no-privilege": "U",
+    # A removed guardrail is reported as privilege to strip: narrow who may
+    # invoke the agent and which tools it gets.
+    "agent-overbroad-tools": "P",
 }
 
 

@@ -244,6 +244,10 @@ class RuleSpec:
     full_description: str
     help_uri: str
     default_level: Literal["error", "warning", "note"]
+    # Uber ADR threat-technique ids this rule statically detects. Adopting a
+    # published taxonomy makes coverage checkable by a reader and comparable
+    # against other tools, which a bespoke vocabulary never is.
+    adr_techniques: tuple[str, ...] = ()
 
 
 _HELP = "https://github.com/girnarholdings/TriDelPhi/blob/main/docs/RULES.md"
@@ -265,6 +269,12 @@ RULES: tuple[RuleSpec, ...] = (
         ),
         help_uri=f"{_HELP}#agent-config-ingress",
         default_level="error",
+        adr_techniques=(
+            "agentic-control-flow-hijacking",
+            "indirect-prompt-injection",
+            "semantic-data-poisoning",
+            "unvetted-mcp-server",
+        ),
     ),
     RuleSpec(
         id="tridelphi/agent-prompt-injection",
@@ -280,6 +290,24 @@ RULES: tuple[RuleSpec, ...] = (
         ),
         help_uri=f"{_HELP}#agent-prompt-injection",
         default_level="error",
+        adr_techniques=("agentic-control-flow-hijacking", "indirect-prompt-injection"),
+    ),
+    RuleSpec(
+        id="tridelphi/agent-overbroad-tools",
+        name="AgentOverbroadTools",
+        short_description="Agent step grants more capability than any task needs",
+        full_description=(
+            "The agent step disables its own guardrails: a wildcard user "
+            "allowlist that lets any account invoke it, a permission-skipping "
+            "flag, or an unrestricted tool grant. Each removes the boundary that "
+            "would otherwise contain a successful injection, so it raises the "
+            "blast radius of every other finding in the same job. Grant the "
+            "narrowest tool set the task needs and name the accounts allowed to "
+            "trigger it."
+        ),
+        help_uri=f"{_HELP}#agent-overbroad-tools",
+        default_level="warning",
+        adr_techniques=("excessive-tool-permissions", "code-interpreter-abuse"),
     ),
     RuleSpec(
         id="tridelphi/agent-hook-execution",
@@ -294,6 +322,7 @@ RULES: tuple[RuleSpec, ...] = (
         ),
         help_uri=f"{_HELP}#agent-hook-execution",
         default_level="error",
+        adr_techniques=("code-interpreter-abuse", "excessive-tool-permissions"),
     ),
     RuleSpec(
         id="tridelphi/untrusted-checkout-privileged-egress",
@@ -307,6 +336,7 @@ RULES: tuple[RuleSpec, ...] = (
         ),
         help_uri=f"{_HELP}#untrusted-checkout-privileged-egress",
         default_level="error",
+        adr_techniques=("code-interpreter-abuse",),
     ),
     RuleSpec(
         id="tridelphi/expression-injection-privileged",
@@ -320,6 +350,7 @@ RULES: tuple[RuleSpec, ...] = (
         ),
         help_uri=f"{_HELP}#expression-injection-privileged",
         default_level="error",
+        adr_techniques=("insecure-output-handling",),
     ),
     RuleSpec(
         id="tridelphi/workflow-run-upstream-execution",
@@ -334,6 +365,7 @@ RULES: tuple[RuleSpec, ...] = (
         ),
         help_uri=f"{_HELP}#workflow-run-upstream-execution",
         default_level="error",
+        adr_techniques=("insecure-supply-chain", "code-interpreter-abuse"),
     ),
     RuleSpec(
         id="tridelphi/cross-job-untrusted-flow",
@@ -347,6 +379,7 @@ RULES: tuple[RuleSpec, ...] = (
         ),
         help_uri=f"{_HELP}#cross-job-untrusted-flow",
         default_level="error",
+        adr_techniques=("insecure-output-handling", "agentic-control-flow-hijacking"),
     ),
     RuleSpec(
         id="tridelphi/assumed-privilege-intersection",

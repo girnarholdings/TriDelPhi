@@ -20,7 +20,7 @@ from ruamel.yaml import YAML
 
 __all__ = ["Tables", "load_tables"]
 
-_FILES = ("triggers", "untrusted_expressions", "agent_signals", "egress")
+_FILES = ("triggers", "untrusted_expressions", "agent_signals", "egress", "adr_techniques")
 
 
 class Tables:

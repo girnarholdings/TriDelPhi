@@ -404,6 +404,45 @@ def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[F
                 )
             )
 
+        # A removed guardrail is not a held capability, so it is reported on its
+        # own rather than folded into the U/P/E join. It enlarges the blast
+        # radius of every other finding in this job.
+        overbroad = detect_agent_ingress.detect_overbroad_tools(ctx, tables)
+        if overbroad:
+            findings.append(
+                _make(
+                    "tridelphi/agent-overbroad-tools",
+                    "warning",
+                    ctx,
+                    tuple(overbroad),
+                    overbroad[0].position,
+                    (
+                        f"Job `{ctx.job_id}` runs an AI agent with a guardrail "
+                        f"disabled: {overbroad[0].reason.split('is configured with ')[-1]}"
+                        if "is configured with " in overbroad[0].reason
+                        else f"Job `{ctx.job_id}` runs an AI agent with a guardrail disabled."
+                    ),
+                    Remediation(
+                        strip="P",
+                        kind="narrow-tools",
+                        target=_quoted_token(overbroad[0].reason),
+                        target_position=overbroad[0].position,
+                        breaks="contributors outside the allowlist can no longer invoke the agent",
+                        rendered=(
+                            f"Strip privilege. {_quoted_token(overbroad[0].reason)} at "
+                            f"{_loc(overbroad[0].position)} turns off a guardrail rather "
+                            "than granting a capability, so a successful injection meets "
+                            "no boundary. Name the accounts allowed to trigger it instead "
+                            "of accepting any:\n"
+                            "    if: contains(fromJSON('[\"OWNER\",\"MEMBER\"]'), "
+                            "github.event.comment.author_association)\n"
+                            "and grant the narrowest tool set the task actually needs "
+                            "rather than skipping permission checks."
+                        ),
+                    ),
+                )
+            )
+
         has_u, has_e = bool(u), bool(e)
         observed_p = [h for h in p if h.observed]
         assumed_p = [h for h in p if not h.observed]
