@@ -33,8 +33,9 @@ inputs:
       Hardening-ladder rung to climb to (cumulative): 0 core only; 1 +gitleaks
       (secrets); 2 +osv-scanner (supply chain, queries osv.dev); 3 +zizmor
       (workflow lint); 4 +scorecard (repo posture); 5 +semgrep (code SAST);
-      6 +attest (writes a signed-elsewhere evidence statement). Default 3 stays
-      lean and fast; 5+ pulls in semgrep's dependency tree, so opt into it.
+      6 +attest (writes a signed-elsewhere evidence statement); 7 +trust
+      (verify consumed actions against the committed trust-lock). Default 3
+      stays lean and fast; 5+ pulls in semgrep's dependency tree, so opt into it.
     default: "3"
   fail-on:
     description: Exit non-zero at this level or above (critical | warning | none).
@@ -48,6 +49,9 @@ inputs:
   evidence-file:
     description: With level 6, where to write the in-toto evidence statement.
     default: tridelphi-evidence.json
+  trust-lock:
+    description: With level 7, the committed trust-lock file to verify against.
+    default: .tridelphi/trust.lock
 
 runs:
   using: composite
@@ -77,13 +81,14 @@ runs:
         FAIL_ON: ${{ inputs.fail-on }}
         SARIF_FILE: ${{ inputs.sarif-file }}
         EVIDENCE_FILE: ${{ inputs.evidence-file }}
+        TRUST_LOCK: ${{ inputs.trust-lock }}
       # Never fail this step; the SARIF upload and PR comment must run
       # regardless. The threshold is enforced as the final step.
       run: |
         set +e
         LEVEL_ARGS=()
         if [ "$LEVEL" -ge 1 ] 2>/dev/null; then
-          LEVEL_ARGS=(--level "$LEVEL" --evidence-file "$EVIDENCE_FILE")
+          LEVEL_ARGS=(--level "$LEVEL" --evidence-file "$EVIDENCE_FILE" --trust-lock "$TRUST_LOCK")
         fi
         tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" \
           --format text \

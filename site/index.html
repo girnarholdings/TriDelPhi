@@ -365,31 +365,40 @@ footer a{color:var(--mute)}
 
   <!-- FULL PROCESS -->
   <section id="process">
-    <span class="eyebrow">The full process</span>
-    <h2>From first scan to a gate that holds.</h2>
-    <p class="lede">You do not turn on a blocking check day one — it fails on
-      unrelated backlog and gets deleted by Friday. TriDelPhi walks a repo up the
-      rungs, and the gate arrives last, when it can pass on the first try.</p>
+    <span class="eyebrow">The hardening ladder</span>
+    <h2>One flag climbs all seven rungs.</h2>
+    <p class="lede">TriDelPhi's own capability graph is the rung no linter does.
+      Around it, <code>--level</code> runs best-of-breed open-source scanners and
+      merges everything into one SARIF, one Security tab, one gate. Rungs are
+      cumulative and ordered by signal density; each is credited as its own run.
+      Level&nbsp;3 is the lean default — 5+ opts into heavier tools.</p>
     <div class="ladder">
-      <div class="rung"><span class="lv">1</span>
-        <span class="body"><b>Scan</b><span>See every job's capabilities. Criticals first.</span></span>
-        <code>tridelphi .</code></div>
-      <div class="rung"><span class="lv">2</span>
-        <span class="body"><b>Fix the criticals</b><span>Each finding names the one line to change and what it breaks.</span></span>
-        <code>--explain &lt;rule&gt;</code></div>
-      <div class="rung"><span class="lv">3</span>
-        <span class="body"><b>Freeze the rest</b><span>Baseline the backlog; only new findings block from here.</span></span>
-        <code>--write-baseline</code></div>
-      <div class="rung"><span class="lv">4</span>
-        <span class="body"><b>Widen coverage</b><span>Add zizmor's line-level checks, merged into one SARIF.</span></span>
-        <code>--with-zizmor</code></div>
-      <div class="rung"><span class="lv">5</span>
-        <span class="body"><b>Upload to code scanning</b><span>Findings land in the Security tab and on the PR.</span></span>
-        <code>--sarif-file</code></div>
-      <div class="rung"><span class="lv">6</span>
-        <span class="body"><b>Gate</b><span>Make the check required. It passes, because five rungs made it able to.</span></span>
-        <code>--fail-on critical</code></div>
+      <div class="rung"><span class="lv">L1</span>
+        <span class="body"><b>Secrets</b><span>gitleaks (MIT) — credentials committed to the tree, escalated to error.</span></span>
+        <code>--level 1</code></div>
+      <div class="rung"><span class="lv">L2</span>
+        <span class="body"><b>Supply chain</b><span>osv-scanner (Apache-2.0) — known-vulnerable packages in your lockfiles.</span></span>
+        <code>--level 2</code></div>
+      <div class="rung"><span class="lv">L3</span>
+        <span class="body"><b>CI boundary</b><span>zizmor (MIT) + <b>tridelphi core</b> — workflow lint, and the U∩P∩E join nothing else does.</span></span>
+        <code>--level 3</code></div>
+      <div class="rung"><span class="lv">L4</span>
+        <span class="body"><b>Repo posture</b><span>OSSF scorecard (Apache-2.0) — security policy, token permissions, pinning.</span></span>
+        <code>--level 4</code></div>
+      <div class="rung"><span class="lv">L5</span>
+        <span class="body"><b>Code SAST</b><span>semgrep (LGPL-2.1) — rule-based analysis of the application code itself.</span></span>
+        <code>--level 5</code></div>
+      <div class="rung"><span class="lv">L6</span>
+        <span class="body"><b>Attest &amp; gate</b><span>Native — emit a signed-elsewhere evidence statement, enforce policy as its own step.</span></span>
+        <code>--level 6</code></div>
+      <div class="rung"><span class="lv">L7</span>
+        <span class="body"><b>Trust</b><span>Native trust-lock — a consumed action whose signer or SHA changed fails the build. The pawl SHA-pinning can't provide.</span></span>
+        <code>--level 7</code></div>
     </div>
+    <p class="lede" style="margin-top:18px">And the adoption path stays the same:
+      scan, fix the criticals, <code>--write-baseline</code> to freeze the rest,
+      upload to code scanning, then make the check required — it passes, because
+      the rungs made it able to.</p>
   </section>
 
   <!-- INSTALL -->
@@ -448,7 +457,7 @@ footer a{color:var(--mute)}
     <div class="wrap" style="padding:0">
       TriDelPhi · a static Agents Rule of Two checker for GitHub Actions ·
       <a href="https://github.com/girnarholdings/TriDelPhi">github.com/girnarholdings/TriDelPhi</a><br>
-      Offline by design. One rung of a larger CI hardening ladder.
+      Offline by design. The capability-graph core of a seven-rung CI hardening ladder.
     </div>
   </footer>
 

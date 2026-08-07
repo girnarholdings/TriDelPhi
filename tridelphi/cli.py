@@ -71,18 +71,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="repository default GITHUB_TOKEN permission when a job declares none",
     )
     parser.add_argument(
-        "--level", type=int, choices=(1, 2, 3, 4, 5, 6), default=None,
+        "--level", type=int, choices=(1, 2, 3, 4, 5, 6, 7), default=None,
         help=(
             "run the hardening ladder up to this rung: 1 secrets (gitleaks), "
             "2 +supply chain (osv-scanner, queries osv.dev), 3 +CI lint (zizmor), "
             "4 +repo posture (scorecard), 5 +code SAST (semgrep), 6 +attest "
-            "(writes the evidence statement `tridelphi attest` produces). "
-            "Rungs are cumulative; TriDelPhi core always runs. See --credits."
+            "(writes the evidence statement), 7 +trust (verify consumed actions "
+            "against the trust-lock). Rungs are cumulative; core always runs. "
+            "See --credits."
         ),
     )
     parser.add_argument(
         "--evidence-file", metavar="PATH", default="tridelphi-evidence.json",
         help="with `attest` or --level 6: where to write the in-toto evidence statement",
+    )
+    parser.add_argument(
+        "--trust-lock", metavar="PATH", default=None,
+        help="with `verify` or --level 7: the trust-lock file (default: .tridelphi/trust.lock)",
+    )
+    parser.add_argument(
+        "--write-trust-lock", action="store_true",
+        help="with `verify`: record today's action identities and exit",
     )
     parser.add_argument(
         "--offline", action="store_true",
@@ -167,6 +176,26 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         return run_attest(args.command, evidence_path=args.evidence_file)
+    if args.path == "verify":
+        # L7: `tridelphi verify [repo]` checks the trust-lock (and, when gh is
+        # present and online, upstream provenance). It scans the workflows, not
+        # a SARIF file, so its argument is a repo root like a normal scan.
+        from .verify_cmd import run_verify
+
+        want_sarif = args.format in ("sarif", "json")
+        # Keep stdout clean for SARIF; the human summary goes to stderr then.
+        code, document = run_verify(
+            args.command or ".",
+            trust_lock=args.trust_lock,
+            write_lock=args.write_trust_lock,
+            offline=args.offline,
+            fail_on=args.fail_on,
+            tool_version=__version__,
+            out=sys.stderr if want_sarif else sys.stdout,
+        )
+        if document is not None and want_sarif:
+            sys.stdout.write(dumps(document))
+        return code
 
     path = args.path
     if path == "core":
@@ -242,8 +271,31 @@ def main(argv: list[str] | None = None) -> int:
             external_sarifs.append(ext.sarif)
             for severity, count in ext.severity_counts.items():
                 external_counts[severity] += count
-    if external_runs:
-        external_summary = " · ".join(summarize_run(ext) for ext in external_runs)
+    summary_parts = [summarize_run(ext) for ext in external_runs]
+
+    # L7 · trust runs after the content rungs: it consumes the same workflows
+    # core parsed and folds its findings into the merged SARIF and the gate.
+    if args.level is not None and args.level >= 7:
+        from .verify_cmd import run_verify
+
+        _code, verify_doc = run_verify(
+            path,
+            trust_lock=args.trust_lock,
+            offline=args.offline,
+            fail_on=args.fail_on,
+            tool_version=__version__,
+            out=sys.stderr,
+        )
+        if verify_doc is not None:
+            external_sarifs.append(verify_doc)
+            for result_obj in verify_doc["runs"][0]["results"]:
+                sev = "critical" if result_obj.get("level") == "error" else "note"
+                external_counts[sev] += 1
+            n = len(verify_doc["runs"][0]["results"])
+            summary_parts.append(f"trust: {n} finding{'s' if n != 1 else ''}")
+
+    if summary_parts:
+        external_summary = " · ".join(summary_parts)
 
     if stale:
         print(
