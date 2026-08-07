@@ -7,7 +7,7 @@
 <meta name="description" content="A free security checklist for your GitHub project. It runs offline on your own machine — nothing is uploaded, copied, or shared — and tells you in plain English whether a stranger could trick your automation into leaking your keys. One line to run.">
 
 <!-- Favicon: the brand triangle, inline so it stays self-contained -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpolygon points='20,5 35,32 5,32' fill='none' stroke='%23e6b34a' stroke-width='3' stroke-linejoin='round'/%3E%3Ccircle cx='20' cy='5' r='4' fill='%23f2604f'/%3E%3Ccircle cx='35' cy='32' r='4' fill='%2341bcc8'/%3E%3Ccircle cx='5' cy='32' r='4' fill='%23eaa63a'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpolygon points='20,5 35,32 5,32' fill='none' stroke='%2334a374' stroke-width='3' stroke-linejoin='round'/%3E%3Ccircle cx='20' cy='5' r='4' fill='%23f2604f'/%3E%3Ccircle cx='35' cy='32' r='4' fill='%2341bcc8'/%3E%3Ccircle cx='5' cy='32' r='4' fill='%23eaa63a'/%3E%3C/svg%3E">
 
 <!-- Pretty link preview when the URL is shared (Open Graph + Twitter) -->
 <meta property="og:type" content="website">
@@ -23,57 +23,57 @@
 <meta name="twitter:title" content="TriDelPhi — a free, offline security checklist for your GitHub project">
 <meta name="twitter:description" content="Runs on your machine — nothing uploaded or copied. Plain-English pass/fail, and the one thing to fix. One line to run.">
 <meta name="twitter:image" content="https://girnarholdings.github.io/TriDelPhi/og-card.png">
-<meta name="theme-color" content="#10191f">
+<meta name="theme-color" content="#0f1512">
 <style>
 /* ============================================================= TOKENS
    Dark-first: the bare :root is the intended (dark, teal-ink) look.
    OS-light viewers who never stamped a choice get the marble palette
    via the light media query; an explicit toggle wins over both. */
 :root{
-  --bg:#10191f; --bg2:#16232c; --bg3:#1e303b; --raise:#243a47;
-  --line:#2a3f4d; --line2:#37505f;
-  --ink:#f4eee2; --mute:#a7b6bf; --faint:#6f838f;
-  --gold:#e6b34a; --gold-ink:#f2c86a; --gold-soft:rgba(230,179,74,.14);
-  --u:#f2604f; --p:#eaa63a; --e:#41bcc8; --safe:#5ccb8c; --crit:#f2604f;
-  --u-soft:rgba(242,96,79,.14); --e-soft:rgba(65,188,200,.14);
-  --safe-soft:rgba(92,203,140,.15);
-  --shadow:0 30px 70px -34px rgba(0,0,0,.75);
-  --shadow-lg:0 44px 100px -40px rgba(0,0,0,.85);
+  --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
+  --line:#2a382e; --line2:#3a4d40;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
+  --u:#e8604a; --p:#e0a63a; --e:#4aa7c8; --safe:#57b98a; --crit:#e8604a;
+  --u-soft:rgba(232,96,74,.14); --e-soft:rgba(74,167,200,.14);
+  --safe-soft:rgba(87,185,138,.15);
+  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
+  --shadow-lg:0 44px 100px -40px rgba(0,0,0,.82);
 }
 @media (prefers-color-scheme: light){
   :root:not([data-theme="dark"]){
-    --bg:#f4efe3; --bg2:#fbf7ec; --bg3:#ffffff; --raise:#fff;
-    --line:#e0d6c2; --line2:#cfc2a8;
-    --ink:#23323b; --mute:#5a6a72; --faint:#8a97a0;
-    --gold:#a9761a; --gold-ink:#8f6314; --gold-soft:rgba(169,118,26,.12);
-    --u:#cf4230; --p:#a9761a; --e:#12808d; --safe:#2c9761; --crit:#cf4230;
-    --u-soft:rgba(207,66,48,.10); --e-soft:rgba(18,128,141,.10);
-    --safe-soft:rgba(44,151,97,.12);
-    --shadow:0 26px 60px -34px rgba(60,50,30,.30);
-    --shadow-lg:0 40px 90px -44px rgba(60,50,30,.34);
+    --bg:#f2f4ee; --bg2:#f8faf4; --bg3:#ffffff; --raise:#ffffff;
+    --line:#dde2d6; --line2:#c7d1bd;
+    --ink:#172019; --mute:#586257; --faint:#8a948a;
+    --grn:#1f7a54; --grn-ink:#186145; --grn-soft:rgba(31,122,84,.10);
+    --u:#cc4028; --p:#a5741a; --e:#1a7d9c; --safe:#1f7a54; --crit:#cc4028;
+    --u-soft:rgba(204,64,40,.10); --e-soft:rgba(26,125,156,.10);
+    --safe-soft:rgba(31,122,84,.12);
+    --shadow:0 26px 60px -34px rgba(30,40,30,.26);
+    --shadow-lg:0 40px 90px -44px rgba(30,40,30,.30);
   }
 }
 :root[data-theme="light"]{
-  --bg:#f4efe3; --bg2:#fbf7ec; --bg3:#ffffff; --raise:#fff;
-  --line:#e0d6c2; --line2:#cfc2a8;
-  --ink:#23323b; --mute:#5a6a72; --faint:#8a97a0;
-  --gold:#a9761a; --gold-ink:#8f6314; --gold-soft:rgba(169,118,26,.12);
-  --u:#cf4230; --p:#a9761a; --e:#12808d; --safe:#2c9761; --crit:#cf4230;
-  --u-soft:rgba(207,66,48,.10); --e-soft:rgba(18,128,141,.10);
-  --safe-soft:rgba(44,151,97,.12);
-  --shadow:0 26px 60px -34px rgba(60,50,30,.30);
-  --shadow-lg:0 40px 90px -44px rgba(60,50,30,.34);
+  --bg:#f2f4ee; --bg2:#f8faf4; --bg3:#ffffff; --raise:#ffffff;
+  --line:#dde2d6; --line2:#c7d1bd;
+  --ink:#172019; --mute:#586257; --faint:#8a948a;
+  --grn:#1f7a54; --grn-ink:#186145; --grn-soft:rgba(31,122,84,.10);
+  --u:#cc4028; --p:#a5741a; --e:#1a7d9c; --safe:#1f7a54; --crit:#cc4028;
+  --u-soft:rgba(204,64,40,.10); --e-soft:rgba(26,125,156,.10);
+  --safe-soft:rgba(31,122,84,.12);
+  --shadow:0 26px 60px -34px rgba(30,40,30,.26);
+  --shadow-lg:0 40px 90px -44px rgba(30,40,30,.30);
 }
 :root[data-theme="dark"]{
-  --bg:#10191f; --bg2:#16232c; --bg3:#1e303b; --raise:#243a47;
-  --line:#2a3f4d; --line2:#37505f;
-  --ink:#f4eee2; --mute:#a7b6bf; --faint:#6f838f;
-  --gold:#e6b34a; --gold-ink:#f2c86a; --gold-soft:rgba(230,179,74,.14);
-  --u:#f2604f; --p:#eaa63a; --e:#41bcc8; --safe:#5ccb8c; --crit:#f2604f;
-  --u-soft:rgba(242,96,79,.14); --e-soft:rgba(65,188,200,.14);
-  --safe-soft:rgba(92,203,140,.15);
-  --shadow:0 30px 70px -34px rgba(0,0,0,.75);
-  --shadow-lg:0 44px 100px -40px rgba(0,0,0,.85);
+  --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
+  --line:#2a382e; --line2:#3a4d40;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
+  --u:#e8604a; --p:#e0a63a; --e:#4aa7c8; --safe:#57b98a; --crit:#e8604a;
+  --u-soft:rgba(232,96,74,.14); --e-soft:rgba(74,167,200,.14);
+  --safe-soft:rgba(87,185,138,.15);
+  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
+  --shadow-lg:0 44px 100px -40px rgba(0,0,0,.82);
 }
 
 /* ============================================================= BASE */
@@ -88,14 +88,14 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
   font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;
   text-rendering:optimizeLegibility}
 .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-a{color:var(--gold-ink);text-underline-offset:3px;text-decoration-thickness:1px}
-a:hover{text-decoration-color:var(--gold)}
-:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:6px}
+a{color:var(--grn-ink);text-underline-offset:3px;text-decoration-thickness:1px}
+a:hover{text-decoration-color:var(--grn)}
+:focus-visible{outline:2px solid var(--grn);outline-offset:3px;border-radius:6px}
 h1,h2,h3{font-family:var(--serif);font-weight:600;text-wrap:balance;
   letter-spacing:-.012em;line-height:1.08;margin:0}
 p{margin:0}
 .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;
-  text-transform:uppercase;color:var(--gold);font-weight:600}
+  text-transform:uppercase;color:var(--grn);font-weight:600}
 .lede{font-size:clamp(17px,2.1vw,20px);color:var(--mute);max-width:60ch;line-height:1.6}
 .mono{font-family:var(--mono);font-size:.92em}
 .hl{color:var(--ink);font-weight:500;font-family:var(--sans)}
@@ -107,7 +107,7 @@ p{margin:0}
 .brand{display:flex;align-items:center;gap:11px;font-family:var(--serif);
   font-weight:600;font-size:19px;letter-spacing:-.01em;color:var(--ink)}
 .brand svg{width:26px;height:26px;flex:none}
-.brand b{color:var(--gold)}
+.brand b{color:var(--grn)}
 .top nav{display:flex;align-items:center;gap:26px;font-size:14px}
 .top nav a{color:var(--mute);text-decoration:none}
 .top nav a:hover{color:var(--ink)}
@@ -167,7 +167,7 @@ p{margin:0}
 .stage[data-beat="4"] #g-guard{opacity:1}
 /* pop the power orbs in (inner group scales; outer group holds position) */
 .pw{transform-box:fill-box;transform-origin:center;transform:scale(.4);opacity:0;
-  transition:transform .5s cubic-bezier(.34,1.3,.5,1),opacity .5s}
+  transition:transform .5s cubic-bezier(.22,.61,.36,1),opacity .5s}
 .stage[data-beat="2"] .pw,.stage[data-beat="3"] .pw{transform:scale(1);opacity:1}
 #feed{stroke:var(--u);stroke-width:2;stroke-dasharray:4 5;fill:none;
   animation:march 14s linear infinite}
@@ -190,11 +190,11 @@ p{margin:0}
 .reel-foot{display:flex;align-items:center;gap:14px;padding:13px 18px;
   border-top:1px solid var(--line);background:var(--bg2)}
 .progress{flex:1;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
-.progress i{display:block;height:100%;width:0;background:var(--gold);border-radius:3px}
+.progress i{display:block;height:100%;width:0;background:var(--grn);border-radius:3px}
 .replay{background:none;border:1px solid var(--line2);color:var(--mute);
   font-family:var(--mono);font-size:12px;padding:6px 12px;border-radius:8px;
   cursor:pointer;display:flex;align-items:center;gap:7px;flex:none}
-.replay:hover{color:var(--ink);border-color:var(--gold)}
+.replay:hover{color:var(--ink);border-color:var(--grn)}
 .reduced-note{display:none;font-family:var(--mono);font-size:11px;color:var(--faint)}
 @media(max-width:560px){
   .slbl{font-size:27px} .slbl.sm{font-size:23px} .vtext{font-size:30px} .qmark{font-size:23px}
@@ -220,7 +220,7 @@ p{margin:0}
 .nb svg{width:22px;height:22px;flex:none;color:var(--safe);margin-top:1px}
 .nb b{display:block;font-size:14.5px;color:var(--ink);font-weight:650}
 .nb span{font-size:12.5px;color:var(--mute);line-height:1.4}
-.nb.gold svg{color:var(--gold)}
+.nb.gold svg{color:var(--grn)}
 
 /* checklist sample (the report you actually get) */
 .report{margin-top:34px;border:1px solid var(--line2);border-radius:16px;overflow:hidden;
@@ -236,7 +236,7 @@ p{margin:0}
 .report pre{margin:0;padding:20px 22px;font-family:var(--mono);font-size:13px;
   line-height:1.7;color:#cdd9e2;overflow-x:auto;white-space:pre}
 .report .ok{color:#5ccb8c}.report .no{color:#f2604f}.report .warn{color:#eaa63a}
-.report .dim{color:#5f7583}.report .head{color:#f4eee2;font-weight:600}.report .gold{color:#e6b34a}
+.report .dim{color:#5f7583}.report .head{color:#f4eee2;font-weight:600}.report .gold{color:#74cfa0}
 
 /* ============================================================= SECTIONS */
 section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
@@ -250,7 +250,7 @@ section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
 .story .card{border:1px solid var(--line);border-radius:16px;background:var(--bg2);
   padding:24px 22px}
 .story .card .ic{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;
-  background:var(--gold-soft);color:var(--gold);margin-bottom:16px}
+  background:var(--grn-soft);color:var(--grn);margin-bottom:16px}
 .story .card .ic svg{width:27px;height:27px}
 .story .card h3{font-size:20px;margin-bottom:8px}
 .story .card p{color:var(--mute);font-size:15.5px}
@@ -280,36 +280,39 @@ section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
 .two-copy .k{width:30px;height:30px;border-radius:9px;flex:none;display:grid;place-items:center;
   font-family:var(--mono);font-weight:700;font-size:14px}
 .two-copy .ku{background:var(--u-soft);color:var(--u)}
-.two-copy .kp{background:var(--gold-soft);color:var(--p)}
+.two-copy .kp{background:var(--grn-soft);color:var(--p)}
 .two-copy .ke{background:var(--e-soft);color:var(--e)}
 .two-copy h3{font-size:17px;font-family:var(--sans);font-weight:650;margin-bottom:3px}
 .two-copy p{color:var(--mute);font-size:14.5px}
 .two-punch{margin-top:22px;font-size:18px;color:var(--ink);font-family:var(--serif);
-  border-left:3px solid var(--gold);padding-left:16px;line-height:1.4}
+  border-left:3px solid var(--grn);padding-left:16px;line-height:1.4}
 
 /* one-stop shop — the layer stack */
 .pitch{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:34px}
 @media(max-width:760px){.pitch{grid-template-columns:1fr}}
 .pitch .p1{border:1px solid var(--line);border-radius:14px;background:var(--bg2);padding:20px}
-.pitch .p1 .big{font-family:var(--serif);font-size:30px;color:var(--gold);line-height:1}
+.pitch .p1 .big{font-family:var(--serif);font-size:30px;color:var(--grn);line-height:1}
 .pitch .p1 b{display:block;margin:10px 0 4px;font-size:15px}
 .pitch .p1 span{color:var(--mute);font-size:14px}
-.stack{margin-top:16px;display:grid;gap:9px;counter-reset:layer}
-.layer{display:grid;grid-template-columns:56px 1fr auto;gap:16px;align-items:center;
-  border:1px solid var(--line);border-left:4px solid var(--lc,var(--line2));border-radius:13px;
-  background:var(--bg2);padding:15px 18px;transition:transform .18s,border-color .18s}
-.layer:hover{transform:translateX(4px);border-color:var(--line2)}
-.layer .lc{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--lc,var(--gold));
-  border:1px solid var(--line2);border-radius:9px;width:56px;height:38px;display:grid;place-items:center}
+.stack{margin-top:18px;display:grid;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.layer{display:grid;grid-template-columns:52px 1fr auto;gap:16px;align-items:center;
+  background:var(--bg2);padding:16px 20px;transition:background .18s}
+.layer:hover{background:var(--bg3)}
+/* the level colour rides the chip, not a side-rail (impeccable: no side-tabs) */
+.layer .lc{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--lc,var(--grn));
+  background:color-mix(in srgb,var(--lc,var(--grn)) 15%,var(--bg2));
+  border-radius:9px;width:52px;height:38px;display:grid;place-items:center;letter-spacing:.02em}
 .layer .lt b{font-size:16px;font-family:var(--sans);font-weight:650}
 .layer .lt span{display:block;color:var(--mute);font-size:14px;margin-top:2px}
 .layer .rep{font-family:var(--mono);font-size:11px;color:var(--faint);text-align:right;line-height:1.4;max-width:15ch}
 .layer .rep b{color:var(--mute);font-weight:600;display:block;letter-spacing:.02em}
-.layer.core{background:linear-gradient(110deg,var(--gold-soft),var(--bg2) 55%);border-left-color:var(--gold)}
+.layer.core{background:var(--grn-soft)}
+.layer.core .lt b{color:var(--grn-ink)}
 @media(max-width:640px){
-  .layer{grid-template-columns:48px 1fr;row-gap:10px}
-  .layer .lc{width:48px}
-  .layer .rep{grid-column:1/-1;text-align:left;max-width:none;padding-left:64px;margin-top:-4px}
+  .layer{grid-template-columns:44px 1fr;row-gap:10px}
+  .layer .lc{width:44px}
+  .layer .rep{grid-column:1/-1;text-align:left;max-width:none;padding-left:60px;margin-top:-4px}
 }
 .dial{margin-top:20px;border:1px solid var(--line);border-radius:14px;background:var(--bg2);
   padding:18px 20px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
@@ -324,16 +327,22 @@ section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
 .check{border:1px solid var(--line);border-radius:16px;background:var(--bg2);
   padding:22px 22px;display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:start}
 .check.hero-check{grid-column:1/-1;background:
-  linear-gradient(120deg,var(--gold-soft),var(--bg2) 60%);border-color:var(--line2)}
+  linear-gradient(120deg,var(--grn-soft),var(--bg2) 60%);border-color:var(--line2)}
 .check .ic{width:50px;height:50px;border-radius:14px;flex:none;display:grid;place-items:center;
-  background:var(--bg3);border:1px solid var(--line2);color:var(--gold)}
+  background:var(--bg3);border:1px solid var(--line2);color:var(--grn)}
 .check .ic svg{width:26px;height:26px}
 .check .lv{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
   text-transform:uppercase;color:var(--faint);font-weight:600}
 .check h3{font-size:19px;margin:5px 0 8px;font-family:var(--sans);font-weight:650}
 .check .plain{color:var(--ink);font-size:15px;line-height:1.55}
-.check .tech{margin-top:11px;font-size:13px;color:var(--faint);
-  border-top:1px dashed var(--line);padding-top:10px}
+.check .more{margin-top:13px;display:grid;gap:9px}
+.check .more p{font-size:13.5px;color:var(--mute);line-height:1.5;margin:0}
+.check .tag{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;font-weight:600;margin-bottom:2px}
+.check .more .eg .tag{color:var(--u)}
+.check .more .do .tag{color:var(--grn-ink)}
+.check .tech{margin-top:13px;font-size:12.5px;color:var(--faint);
+  border-top:1px solid var(--line);padding-top:11px}
 .check .tech b{color:var(--mute);font-weight:600;font-family:var(--mono);font-size:12px}
 
 /* glossary */
@@ -341,7 +350,7 @@ section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
   border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--line)}
 @media(max-width:760px){.gloss{grid-template-columns:1fr}}
 .gitem{background:var(--bg2);padding:20px 22px}
-.gitem .term{font-family:var(--mono);font-size:14px;color:var(--gold);font-weight:600;
+.gitem .term{font-family:var(--mono);font-size:14px;color:var(--grn);font-weight:600;
   display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
 .gitem .term .aka{color:var(--faint);font-size:11.5px;letter-spacing:.04em}
 .gitem p{margin-top:8px;color:var(--mute);font-size:15px}
@@ -362,13 +371,13 @@ section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
 .term-top span{font-family:var(--mono);font-size:11.5px;color:#7d93a0;margin-left:6px}
 .term-win pre{margin:0;padding:18px 20px;font-family:var(--mono);font-size:13px;
   line-height:1.75;color:#cdd9e2;overflow-x:auto}
-.term-win .c{color:#5f7583}.term-win .ok{color:#5ccb8c}.term-win .g{color:#e6b34a}
+.term-win .c{color:#5f7583}.term-win .ok{color:#5ccb8c}.term-win .g{color:#74cfa0}
 .setup-copy h3{font-size:21px;margin-bottom:10px}
 .setup-copy p{color:var(--mute);font-size:15.5px;margin-bottom:14px}
 .setup-copy p .hl{color:var(--ink)}
 .stepline{display:flex;gap:14px;margin:16px 0}
-.stepline .n{width:28px;height:28px;border-radius:50%;flex:none;background:var(--gold-soft);
-  color:var(--gold);font-family:var(--mono);font-weight:700;font-size:13px;
+.stepline .n{width:28px;height:28px;border-radius:50%;flex:none;background:var(--grn-soft);
+  color:var(--grn);font-family:var(--mono);font-weight:700;font-size:13px;
   display:grid;place-items:center}
 .stepline div{font-size:15px;color:var(--ink)}
 .stepline div span{display:block;color:var(--mute);font-size:13.5px;margin-top:2px}
@@ -409,7 +418,7 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
   <div class="wrap" style="padding:0 24px;display:flex;align-items:center;justify-content:space-between">
     <div class="brand">
       <svg viewBox="0 0 40 40" aria-hidden="true">
-        <polygon points="20,5 35,32 5,32" fill="none" stroke="var(--gold)" stroke-width="2.5" stroke-linejoin="round"/>
+        <polygon points="20,5 35,32 5,32" fill="none" stroke="var(--grn)" stroke-width="2.5" stroke-linejoin="round"/>
         <circle cx="20" cy="5" r="3.4" fill="var(--u)"/>
         <circle cx="35" cy="32" r="3.4" fill="var(--e)"/>
         <circle cx="5" cy="32" r="3.4" fill="var(--p)"/>
@@ -487,7 +496,7 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <!-- helper robot -->
           <g id="g-robot">
             <line x1="400" y1="140" x2="400" y2="115" stroke="var(--line2)" stroke-width="3"/>
-            <circle cx="400" cy="108" r="6" fill="var(--gold)"/>
+            <circle cx="400" cy="108" r="6" fill="var(--grn)"/>
             <rect class="rbody" x="332" y="140" width="136" height="120" rx="22" fill="var(--bg3)" stroke="var(--line2)" stroke-width="2.5"/>
             <circle class="reye" cx="374" cy="200" r="13"/>
             <circle class="reye" cx="426" cy="200" r="13"/>
@@ -605,7 +614,7 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
               <text x="160" y="48">U<tspan class="sub" x="160" dy="15">stranger</tspan><tspan class="sub" x="160" dy="11">text</tspan></text>
             </g>
             <g class="tnode" data-cap="P" tabindex="0" role="button" aria-pressed="true" aria-label="Toggle: holds your keys">
-              <circle cx="60" cy="230" r="34" fill="var(--gold-soft)" stroke="var(--p)" stroke-width="2.5"/>
+              <circle cx="60" cy="230" r="34" fill="var(--grn-soft)" stroke="var(--p)" stroke-width="2.5"/>
               <text x="60" y="226">P<tspan class="sub" x="60" dy="15">your</tspan><tspan class="sub" x="60" dy="11">keys</tspan></text>
             </g>
             <g class="tnode" data-cap="E" tabindex="0" role="button" aria-pressed="true" aria-label="Toggle: can reach the internet">
@@ -723,7 +732,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
             It maps out every robot and asks the Rule-of-Two question: does one of them read stranger
             text <i>and</i> hold your keys <i>and</i> reach the internet — the exact recipe for theft? If so,
             it names the robot, shows the three powers, and tells you the single easiest thing to change.</p>
-          <p class="tech"><b>In grown-up terms:</b> a static capability-graph analysis of your GitHub Actions jobs, flagging any job where untrusted input, privilege, and egress intersect.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>The exact bug found in MITRE, Splunk, spotipy and others: a workflow runs a stranger's pull-request code while holding your API keys. TriDelPhi flags it before it ever ships.</p>
+            <p class="do"><span class="tag">If it flags this</span>It names the one job and the single line to change — usually gating the trigger so only trusted accounts can reach it.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> a static capability-graph analysis of your GitHub Actions jobs, flagging any job where untrusted input, privilege, and egress intersect.</p>
         </div>
       </div>
 
@@ -735,7 +748,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="plain">Like checking you didn't tape your house key to the front door. It scans your
             files for passwords and keys you accidentally left written in plain sight, where anyone who
             can see your code could grab them.</p>
-          <p class="tech"><b>Grown-up name:</b> secret scanning — we run <b>gitleaks</b> to find committed credentials.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>An AWS key or a GitHub token pasted into a config file and committed — the most common way repos get quietly drained. It's caught the moment it lands.</p>
+            <p class="do"><span class="tag">If it flags this</span>Treat that key as already leaked: rotate it, delete it from the code, and load it from a secret instead.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> secret scanning — <b>gitleaks</b> finds committed credentials.</p>
         </div>
       </div>
 
@@ -747,7 +764,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="plain">Your project is built partly from other people's code — like a recipe using
             store-bought ingredients. This checks whether any of those ingredients are known to be
             broken or dangerous, so you can swap them before they bite you.</p>
-          <p class="tech"><b>Grown-up name:</b> dependency scanning — <b>osv-scanner</b> matches your libraries against a database of known vulnerabilities.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>A version of a library with a publicly-known hole — the Log4Shell class, where a flaw in a dependency you barely think about becomes <i>your</i> flaw.</p>
+            <p class="do"><span class="tag">If it flags this</span>Bump the package to a patched version — the report tells you the exact one that's safe.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> dependency scanning — <b>osv-scanner</b> matches your lockfiles against the OSV vulnerability database.</p>
         </div>
       </div>
 
@@ -759,7 +780,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="plain">Before the big Rule-of-Two check, this looks for the common sloppy setups —
             robots pulling in tools by a nickname that could be swapped out, or copy-pasting stranger
             text straight into a command. The everyday hygiene stuff.</p>
-          <p class="tech"><b>Grown-up name:</b> workflow linting — <b>zizmor</b> catches unpinned actions and template injection.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>An outside tool pulled in as <span class="mono">@main</span> instead of a fixed version — so whoever controls that tool can change what runs in your pipeline overnight, and you'd never know.</p>
+            <p class="do"><span class="tag">If it flags this</span>Pin the tool to one specific version; Level 7 then keeps watch on that pin for you.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> workflow linting — <b>zizmor</b> catches unpinned actions and template injection.</p>
         </div>
       </div>
 
@@ -771,7 +796,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="plain">Like a quick home-safety inspection — are the doors locked, is there a smoke
             detector? It scores your project on the healthy habits security folks look for, so you can
             see where you're strong and where you're exposed.</p>
-          <p class="tech"><b>Grown-up name:</b> posture checks — <b>OSSF Scorecard</b> grades branch protection, token permissions, and more.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>Anyone can push straight to your main branch, or your build robot's token can <i>write</i> when it only ever needs to <i>read</i> — small loose defaults that make every other attack easier.</p>
+            <p class="do"><span class="tag">If it flags this</span>Turn on branch protection and set token permissions to read-only. Each is a single setting, and the score climbs as you go.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> posture checks — <b>OSSF Scorecard</b> grades branch protection, token permissions, pinning, and more.</p>
         </div>
       </div>
 
@@ -783,7 +812,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="plain">A careful proofreader for your code — not the robots, the app itself. It looks
             for the well-known dangerous patterns that let bugs turn into break-ins, and points at the
             exact lines.</p>
-          <p class="tech"><b>Grown-up name:</b> SAST (static application security testing) — powered by <b>semgrep</b>.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>User input dropped straight into a shell command or a database query — the classic injection that quietly turns an ordinary form field into a way in.</p>
+            <p class="do"><span class="tag">If it flags this</span>It points at the exact line; the fix is usually to use a safe, built-in API instead of gluing the command together from text.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> SAST (static application security testing) — powered by <b>semgrep</b>.</p>
         </div>
       </div>
 
@@ -795,7 +828,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="plain">Two things. First, it writes a tamper-proof receipt of exactly what was checked
             and signs it — proof you can show anyone. Second, it acts as a bouncer: if something failed
             the check, it can stop the line and refuse to let the change through.</p>
-          <p class="tech"><b>Grown-up name:</b> attest &amp; gate — a signed in-toto evidence statement, plus policy enforcement as its own step.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>Months later, an auditor (or you) asks: "what was actually scanned before this release shipped?" The signed receipt answers it, and the bouncer means a failing change never got merged in the first place.</p>
+            <p class="do"><span class="tag">If it flags this</span>Nothing to fix — this <i>is</i> the receipt and the bouncer. It signs the evidence and blocks a failing change for you, automatically.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> attest &amp; gate — a signed in-toto evidence statement, plus policy enforcement as its own step.</p>
         </div>
       </div>
 
@@ -807,7 +844,11 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="plain">You trust certain outside tools. This memorizes exactly who they are today. If one
             quietly gets handed to a different owner — or swapped for a different version behind your back —
             it stops everything and tells you. This catches attacks that even careful people miss.</p>
-          <p class="tech"><b>Grown-up name:</b> a trust-lock — detects a signer or commit change in a dependency you consume, the takeover class that pinning alone can't see.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>The March 2025 tj-actions attack: a hugely popular tool everyone trusted was quietly swapped for a malicious version, hitting <b>23,000+ projects</b>. An ordinary pin wouldn't have blinked — the trust-lock catches it. <a href="https://girnarholdings.github.io/TriDelPhi/">(we tested this exact case)</a></p>
+            <p class="do"><span class="tag">If it flags this</span>Review the change: if you meant to upgrade, re-record it in one command; if you didn't, you just caught a supply-chain takeover before it ran.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> a trust-lock — detects a signer or commit change in a dependency you consume, the takeover class that pinning alone cannot see.</p>
         </div>
       </div>
     </div>
