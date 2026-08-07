@@ -31,12 +31,49 @@ from typing import Any
 from .model import Diagnostic
 
 __all__ = [
+    "MAX_OUTPUT_BYTES",
     "ZizmorResult",
     "merge_runs",
     "run_zizmor",
+    "sarif_shape_error",
     "summarize_external_run",
     "zizmor_path",
 ]
+
+# Refuse to parse external tool output larger than this. The wrapped tools scan
+# attacker-influenced content; a report this size is an attack or a bug, and
+# either way it does not belong in memory or in the merged document.
+MAX_OUTPUT_BYTES = 25 * 1024 * 1024
+
+
+def sarif_shape_error(document: Any) -> str | None:
+    """Structural check for an external tool's SARIF document.
+
+    Returns a human-readable defect description, or None if the document is
+    shaped well enough to merge and post-process safely. This is the shared
+    containment gate for *every* wrapped scanner — the tools scan
+    attacker-influenced repositories, so their output is untrusted and nothing
+    downstream (severity counting, URI rewriting, merging) may assume shapes
+    this function has not checked.
+    """
+    if not isinstance(document, dict) or not isinstance(document.get("runs"), list):
+        return "output was not a SARIF document"
+    for run in document["runs"]:
+        if not isinstance(run, dict):
+            return "output had a malformed run"
+        results = run.get("results", [])
+        if not isinstance(results, list) or any(not isinstance(r, dict) for r in results):
+            return "output had malformed results"
+        driver = run.get("tool", {})
+        if not isinstance(driver, dict) or not isinstance(driver.get("driver"), dict):
+            return "output had no tool.driver"
+        for result in results:
+            locations = result.get("locations", [])
+            if not isinstance(locations, list) or any(
+                not isinstance(loc, dict) for loc in locations
+            ):
+                return "output had malformed result locations"
+    return None
 
 
 class ZizmorResult:
@@ -124,6 +161,15 @@ def run_zizmor(repo_root: str | Path, *, offline: bool = True, timeout: int = 12
     # zizmor exits non-zero when it finds problems, which is success for our
     # purposes. A parse failure of its stdout is the real error signal.
     stdout = completed.stdout.strip()
+    if len(stdout.encode("utf-8", errors="replace")) > MAX_OUTPUT_BYTES:
+        return ZizmorResult(
+            diagnostic=Diagnostic(
+                "zizmor",
+                f"zizmor produced over {MAX_OUTPUT_BYTES // (1024 * 1024)} MB of output; "
+                "refusing to parse it",
+                "warning",
+            )
+        )
     if not stdout:
         # No findings, or zizmor wrote to stderr. Treat empty as clean unless it
         # clearly errored.
@@ -144,6 +190,12 @@ def run_zizmor(repo_root: str | Path, *, offline: bool = True, timeout: int = 12
             diagnostic=Diagnostic(
                 "zizmor", "zizmor output was not valid SARIF JSON", "warning"
             )
+        )
+
+    defect = sarif_shape_error(document)
+    if defect is not None:
+        return ZizmorResult(
+            diagnostic=Diagnostic("zizmor", f"zizmor {defect}; skipped", "warning")
         )
 
     count = sum(len(run.get("results", [])) for run in document.get("runs", []))

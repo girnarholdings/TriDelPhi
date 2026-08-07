@@ -10,7 +10,8 @@
 #   * gitleaks  — digest from the official gitleaks_8.28.0_checksums.txt
 #   * osv-scanner — digest from the release's SLSA provenance attestation
 #     (multiple.intoto.jsonl subject for osv-scanner_linux_amd64)
-#   * zizmor — version-pinned from PyPI (binary wheels per platform)
+#   * zizmor — pip --require-hashes against the PyPI-published digests in
+#     zizmor-requirements.txt (one hash per platform artifact)
 #
 # A checksum mismatch is a hard failure on purpose: it means the artifact is
 # not the one that was reviewed, and nothing after that point can be trusted.
@@ -66,8 +67,11 @@ if [ "$LEVEL" -ge 2 ]; then
 fi
 
 if [ "$LEVEL" -ge 3 ]; then
-  python3 -m pip install --quiet "zizmor==${ZIZMOR_VERSION}"
-  echo "installed zizmor v${ZIZMOR_VERSION}"
+  # --require-hashes: the wheel pip resolves must match one of the PyPI-published
+  # digests in zizmor-requirements.txt, or the install hard-fails.
+  python3 -m pip install --quiet --require-hashes \
+    -r "$(dirname "$0")/zizmor-requirements.txt"
+  echo "installed zizmor v${ZIZMOR_VERSION} (verified)"
 fi
 
 # Make the tools visible to later workflow steps when running under Actions.

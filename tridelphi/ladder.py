@@ -46,7 +46,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from .model import Diagnostic
-from .orchestrate import run_zizmor
+from .orchestrate import MAX_OUTPUT_BYTES, run_zizmor, sarif_shape_error
 
 __all__ = [
     "LADDER",
@@ -57,11 +57,6 @@ __all__ = [
     "run_tool",
     "summarize_run",
 ]
-
-# Refuse to parse tool output larger than this. The wrapped tools scan
-# attacker-influenced content; a report this size is an attack or a bug, and
-# either way it does not belong in memory or in the merged document.
-MAX_OUTPUT_BYTES = 25 * 1024 * 1024
 
 _SARIF_LEVEL_TO_SEVERITY = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
 
@@ -148,11 +143,15 @@ class ExternalRun:
         self.diagnostic = diagnostic
         self.severity_counts: dict[str, int] = {"critical": 0, "warning": 0, "note": 0}
         if sarif is not None:
-            for run in sarif.get("runs", []):
-                for result in run.get("results", []):
-                    level = result.get("level") or "warning"  # SARIF default
-                    severity = _SARIF_LEVEL_TO_SEVERITY.get(level, "warning")
-                    self.severity_counts[severity] += 1
+            for result in _iter_results(sarif):
+                # The level is attacker-influenced like the rest of the
+                # document: anything that is not a known SARIF level string
+                # (wrong type included) counts as the SARIF default, warning.
+                level = result.get("level")
+                if not isinstance(level, str):
+                    level = "warning"
+                severity = _SARIF_LEVEL_TO_SEVERITY.get(level, "warning")
+                self.severity_counts[severity] += 1
         self.finding_count = sum(self.severity_counts.values())
 
     @property
@@ -283,18 +282,42 @@ def _contained_parse(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRun:
     except ValueError:
         return _skip(spec, f"{spec.name} output was not valid SARIF JSON; skipped")
 
-    if not isinstance(document, dict) or not isinstance(document.get("runs"), list):
-        return _skip(spec, f"{spec.name} output was not a SARIF document; skipped")
-    for run in document["runs"]:
-        if not isinstance(run, dict):
-            return _skip(spec, f"{spec.name} output had a malformed run; skipped")
-        results = run.get("results", [])
-        if not isinstance(results, list) or any(not isinstance(r, dict) for r in results):
-            return _skip(spec, f"{spec.name} output had malformed results; skipped")
-        driver = run.get("tool", {})
-        if not isinstance(driver, dict) or not isinstance(driver.get("driver"), dict):
-            return _skip(spec, f"{spec.name} output had no tool.driver; skipped")
+    defect = sarif_shape_error(document)
+    if defect is not None:
+        return _skip(spec, f"{spec.name} {defect}; skipped")
     return document
+
+
+def _iter_results(document: dict[str, Any]):
+    """Results of every run, defensively: shapes the gate rejects yield nothing.
+
+    Post-processing must never assume a shape ``sarif_shape_error`` has not
+    checked — and must survive even documents that bypassed the gate (the
+    internally constructed empty runs), so each level re-checks its own type.
+    """
+    runs = document.get("runs", [])
+    if not isinstance(runs, list):
+        return
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        results = run.get("results", [])
+        if not isinstance(results, list):
+            continue
+        for result in results:
+            if isinstance(result, dict):
+                yield result
+
+
+def _iter_result_locations(document: dict[str, Any]):
+    """Every location dict of every result, with the same defensive posture."""
+    for result in _iter_results(document):
+        locations = result.get("locations", [])
+        if not isinstance(locations, list):
+            continue
+        for location in locations:
+            if isinstance(location, dict):
+                yield location
 
 
 def _normalize_uris(document: dict[str, Any], root: Path) -> None:
@@ -314,27 +337,27 @@ def _normalize_uris(document: dict[str, Any], root: Path) -> None:
     """
     resolved = root.resolve()
     git_prefix = _git_prefix(resolved)
-    for run in document.get("runs", []):
-        for result in run.get("results", []):
-            for location in result.get("locations", []):
-                physical = location.get("physicalLocation")
-                if not isinstance(physical, dict):
-                    continue
-                artifact = physical.get("artifactLocation")
-                if not isinstance(artifact, dict):
-                    continue
-                uri = artifact.get("uri")
-                if not isinstance(uri, str):
-                    continue
-                new = _relativize(uri, resolved, git_prefix)
-                if new is not None:
-                    artifact["uri"] = new
-                    artifact.pop("uriBaseId", None)
+    for location in _iter_result_locations(document):
+        physical = location.get("physicalLocation")
+        if not isinstance(physical, dict):
+            continue
+        artifact = physical.get("artifactLocation")
+        if not isinstance(artifact, dict):
+            continue
+        uri = artifact.get("uri")
+        if not isinstance(uri, str):
+            continue
+        new = _relativize(uri, resolved, git_prefix)
+        if new is not None:
+            artifact["uri"] = new
+            artifact.pop("uriBaseId", None)
 
 
 def _git_prefix(root: Path) -> str | None:
     """``root``'s path relative to the enclosing git root, or None if it is the
     git root itself (or not in one)."""
+    if (root / ".git").exists():
+        return None  # root IS the git root; there is no prefix to strip
     for ancestor in root.parents:
         if (ancestor / ".git").exists():
             return root.relative_to(ancestor).as_posix() + "/"
@@ -346,25 +369,26 @@ def _relativize(uri: str, root: Path, git_prefix: str | None) -> str | None:
         path = Path(unquote(urlparse(uri).path))
     elif uri.startswith("/"):
         path = Path(uri)
-    elif git_prefix and uri.startswith(git_prefix):
-        # Relative to the enclosing git root rather than the scanned root.
-        return uri[len(git_prefix):]
     else:
-        # Already relative to the scanned root -- unless resolving it (as any
-        # downstream SARIF consumer would) climbs out via "..". Unlike an
-        # absolute or file:// URI outside the root, a "../"-escaping relative
-        # URI is indistinguishable from a legitimate in-repo path to a naive
-        # resolver, so it cannot simply be "left untouched" like the other
-        # out-of-root shapes below. Rewrite it to an unambiguous absolute
-        # file:// URI instead, so it can never be mistaken for a path inside
-        # the scanned root. The check runs on the percent-decoded form because
-        # that is what a URI consumer resolves ("%2e%2e/" is "../" to them).
-        resolved = (root / unquote(uri)).resolve()
+        # A relative URI: either already relative to the scanned root, or (for
+        # zizmor inside a monorepo) relative to the enclosing git root, in
+        # which case the computable prefix is stripped first.
+        candidate = uri
+        if git_prefix and uri.startswith(git_prefix):
+            candidate = uri[len(git_prefix):]
+        # Either way it must not climb out via "..". Unlike an absolute or
+        # file:// URI outside the root, a "../"-escaping relative URI is
+        # indistinguishable from a legitimate in-repo path to a naive resolver,
+        # so it cannot be passed through: rewrite it to an unambiguous absolute
+        # file:// URI that can never be mistaken for a path inside the scanned
+        # root. The check runs on the percent-decoded form because that is what
+        # a URI consumer resolves ("%2e%2e/" is "../" to them).
+        resolved = (root / unquote(candidate)).resolve()
         try:
             resolved.relative_to(root)
         except ValueError:
             return f"file://{resolved.as_posix()}"
-        return None  # genuinely inside the root; leave as-is
+        return candidate if candidate != uri else None
     try:
         return path.resolve().relative_to(root).as_posix()
     except ValueError:
@@ -379,22 +403,22 @@ def _ensure_workflow_prefix(document: dict[str, Any]) -> None:
     target ("ci.yml"); inside one, _normalize_uris has already produced the
     fully prefixed form and this is a no-op.
     """
-    for run in document.get("runs", []):
-        for result in run.get("results", []):
-            for location in result.get("locations", []):
-                artifact = (location.get("physicalLocation") or {}).get("artifactLocation")
-                if not isinstance(artifact, dict):
-                    continue
-                uri = artifact.get("uri")
-                if isinstance(uri, str) and not uri.startswith((".github/workflows/", "/", "file:")):
-                    artifact["uri"] = f".github/workflows/{uri}"
+    for location in _iter_result_locations(document):
+        physical = location.get("physicalLocation")
+        if not isinstance(physical, dict):
+            continue
+        artifact = physical.get("artifactLocation")
+        if not isinstance(artifact, dict):
+            continue
+        uri = artifact.get("uri")
+        if isinstance(uri, str) and not uri.startswith((".github/workflows/", "/", "file:")):
+            artifact["uri"] = f".github/workflows/{uri}"
 
 
 def _override_levels(document: dict[str, Any], level: str) -> None:
     """Force every result to ``level``, in place. See the module docstring."""
-    for run in document.get("runs", []):
-        for result in run.get("results", []):
-            result["level"] = level
+    for result in _iter_results(document):
+        result["level"] = level
 
 
 def run_ladder(

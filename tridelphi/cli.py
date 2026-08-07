@@ -182,6 +182,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"tridelphi: {diagnostic.path}: {diagnostic.message}", file=sys.stderr)
         return 2
 
+    baseline: set[str] = set()
+    baseline_path = Path(args.baseline) if args.baseline else Path(path) / DEFAULT_BASELINE
+    if not args.no_baseline and baseline_path.is_file():
+        baseline = load_baseline(baseline_path)
+    new, _unchanged, stale = partition(list(result.findings), baseline)
+
+    # --write-baseline records fingerprints and exits before the ladder: no
+    # subprocess (or osv.dev query) should be spent on output that a recording
+    # run immediately discards.
+    if args.write_baseline is not None:
+        target = Path(args.write_baseline)
+        count = write_baseline(target, result.findings, __version__)
+        print(f"wrote {count} fingerprints to {target}", file=sys.stderr)
+        return 0
+
     # Optional ladder orchestration. This is the only path that spawns
     # subprocesses, and only when explicitly requested — the default scan stays
     # offline and pure. `--level N` runs every rung up to N; `--with-zizmor`
@@ -206,18 +221,6 @@ def main(argv: list[str] | None = None) -> int:
                 external_counts[severity] += count
     if external_runs:
         external_summary = " · ".join(summarize_run(ext) for ext in external_runs)
-
-    baseline: set[str] = set()
-    baseline_path = Path(args.baseline) if args.baseline else Path(path) / DEFAULT_BASELINE
-    if not args.no_baseline and baseline_path.is_file():
-        baseline = load_baseline(baseline_path)
-    new, _unchanged, stale = partition(list(result.findings), baseline)
-
-    if args.write_baseline is not None:
-        target = Path(args.write_baseline)
-        count = write_baseline(target, result.findings, __version__)
-        print(f"wrote {count} fingerprints to {target}", file=sys.stderr)
-        return 0
 
     if stale:
         print(

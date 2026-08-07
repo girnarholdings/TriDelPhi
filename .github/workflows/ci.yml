@@ -146,7 +146,15 @@ jobs:
       - name: Install the pinned scanners (checksum-verified)
         run: bash scripts/install-ladder.sh 3
       - name: Ladder tests with real binaries
-        run: python -m pytest tests/test_ladder.py tests/test_orchestrate.py -q
+        # This is the only job where all three scanners exist, so it must run
+        # every ladder test file — including the live schema-contract and
+        # adversarial tests that skip themselves elsewhere.
+        run: >
+          python -m pytest -q
+          tests/test_ladder.py
+          tests/test_ladder_adversarial.py
+          tests/test_ladder_sarif.py
+          tests/test_orchestrate.py
       - name: Dogfood the full bundle on this repo
         run: tridelphi . --level 3 --offline --format text
 
