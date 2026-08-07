@@ -305,7 +305,12 @@ def _normalize_uris(document: dict[str, Any], root: Path) -> None:
     zizmor emits URIs relative to the *enclosing git root* (observed live), so
     when the scanned root is a subdirectory of a git repo — monorepos, our own
     fixtures — the URIs carry a computable prefix that must be stripped. URIs
-    outside the root are left untouched rather than guessed at.
+    outside the root are left untouched rather than guessed at -- except a
+    relative URI that climbs out via "..", which is rewritten to an
+    unambiguous absolute ``file://`` URI (see ``_relativize``): a wrapped
+    scanner's output is attacker-influenced, and a "../"-escaping relative
+    path is the one out-of-root shape that would otherwise look identical to
+    a legitimate in-repo path to a downstream consumer resolving it.
     """
     resolved = root.resolve()
     git_prefix = _git_prefix(resolved)
@@ -345,7 +350,21 @@ def _relativize(uri: str, root: Path, git_prefix: str | None) -> str | None:
         # Relative to the enclosing git root rather than the scanned root.
         return uri[len(git_prefix):]
     else:
-        return None  # already relative to the scanned root
+        # Already relative to the scanned root -- unless resolving it (as any
+        # downstream SARIF consumer would) climbs out via "..". Unlike an
+        # absolute or file:// URI outside the root, a "../"-escaping relative
+        # URI is indistinguishable from a legitimate in-repo path to a naive
+        # resolver, so it cannot simply be "left untouched" like the other
+        # out-of-root shapes below. Rewrite it to an unambiguous absolute
+        # file:// URI instead, so it can never be mistaken for a path inside
+        # the scanned root. The check runs on the percent-decoded form because
+        # that is what a URI consumer resolves ("%2e%2e/" is "../" to them).
+        resolved = (root / unquote(uri)).resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return f"file://{resolved.as_posix()}"
+        return None  # genuinely inside the root; leave as-is
     try:
         return path.resolve().relative_to(root).as_posix()
     except ValueError:
