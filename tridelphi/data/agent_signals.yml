@@ -156,3 +156,22 @@ prompt_inputs:
   - claude_args
   - query
   - system_prompt
+
+# Guardrail-disabling settings on an agent step. Each of these removes a
+# boundary that would otherwise contain a successful injection, so they raise
+# the blast radius of every other finding in the same job.
+# Maps to ADR "Exploitation of Excessive Tool Permissions".
+overbroad_tool_markers:
+  # Any account, including a drive-by, may invoke the agent. This is the
+  # setting Trail of Bits called out in zizmor issue #1605.
+  # Quoted as whole strings: unquoted, `key: "*"` parses as a nested mapping
+  # rather than the literal text we want to match.
+  - 'allowed_non_write_users: *'
+  - 'allowed_users: *'
+  # Permission prompts disabled outright.
+  - "--dangerously-skip-permissions"
+  - "--yolo"
+  - "--approval-mode full_auto"
+  - "--allowedTools *"
+  - "--allowed-tools *"
+  - bypassPermissions

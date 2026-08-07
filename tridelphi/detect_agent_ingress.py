@@ -192,6 +192,53 @@ def detect(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
     return sorted(hits, key=lambda h: h.sort_key)
 
 
+def detect_overbroad_tools(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
+    """Guardrails the agent step turned off.
+
+    Unlike the U/P/E rules this is not about a capability the job *holds* — it is
+    about a boundary the job *removed*. A wildcard user allowlist means any
+    drive-by account can invoke the agent; a permission-skipping flag means a
+    successful injection meets no confirmation prompt. Neither is exploitable on
+    its own, which is why it is a warning rather than a critical, but both
+    enlarge the blast radius of every other finding in the same job.
+    """
+    markers = tables.tuple_of("agent_signals", "overbroad_tool_markers")
+    hits: list[CapabilityHit] = []
+
+    for agent in agent_steps(context, tables):
+        blob_parts: list[tuple[str, object]] = []
+        with_node = agent.node.get("with")
+        if with_node is not None and with_node.is_mapping():
+            for key, node in with_node.items():
+                if node.text:
+                    blob_parts.append((f"{key}: {node.text}", node))
+        run = agent.node.get("run")
+        if run is not None and run.text:
+            blob_parts.append((run.text, run))
+
+        for marker in markers:
+            normalised = " ".join(marker.split())
+            for text, node in blob_parts:
+                flat = " ".join(text.split())
+                if normalised in flat:
+                    hits.append(
+                        CapabilityHit(
+                            capability="P",
+                            kind="agent-overbroad-tools",
+                            reason=(
+                                f"{agent.display} is configured with `{marker}`, which "
+                                "removes a guardrail rather than granting a capability — "
+                                "any successful injection meets no boundary"
+                            ),
+                            position=node.find_substring(marker.split(":")[0].split()[0])
+                            if hasattr(node, "find_substring")
+                            else agent.node.position(),
+                        )
+                    )
+                    break
+    return sorted(hits, key=lambda h: h.sort_key)
+
+
 def detect_hook_execution(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
     """Agent hook config on an untrusted tree — direct execution, no model involved.
 

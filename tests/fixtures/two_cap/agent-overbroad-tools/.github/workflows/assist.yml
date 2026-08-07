@@ -1,0 +1,16 @@
+name: Assist
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  assist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: "Summarise the repository conventions."
+          allowed_non_write_users: "*"

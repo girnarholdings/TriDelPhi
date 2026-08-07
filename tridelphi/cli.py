@@ -24,6 +24,7 @@ from pathlib import Path
 from . import __version__
 from .api import AnalysisError, analyze
 from .baseline import DEFAULT_BASELINE, load_baseline, partition, write_baseline
+from .coverage import render_coverage
 from .html_report import render_html
 from .model import RULES
 from .orchestrate import merge_runs, run_zizmor, summarize_external_run
@@ -77,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--self-check", action="store_true", help="validate SARIF against the schema")
     parser.add_argument("--explain", metavar="RULE_ID")
     parser.add_argument("--list-rules", action="store_true", help="print every rule id and exit")
+    parser.add_argument(
+        "--coverage", action="store_true",
+        help="show coverage against Uber ADR's 17 agent threat techniques and exit",
+    )
     parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument("--no-color", action="store_true")
     parser.add_argument("--version", action="version", version=f"tridelphi {__version__}")
@@ -95,6 +100,8 @@ def _explain(rule_id: str, out) -> int:
     print(f"{spec.id}  ({spec.default_level})", file=out)
     print(f"\n{spec.short_description}\n", file=out)
     print(spec.full_description, file=out)
+    if spec.adr_techniques:
+        print("\nADR threat techniques: " + ", ".join(spec.adr_techniques), file=out)
     print(f"\n{spec.help_uri}", file=out)
     return 0
 
@@ -118,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command is not None:
         path = args.path
 
+    if args.coverage:
+        return render_coverage(sys.stdout)
     if args.list_rules:
         return _list_rules(sys.stdout)
     if args.explain:

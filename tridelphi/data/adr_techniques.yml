@@ -1,0 +1,138 @@
+# Uber's ADR agent threat-technique taxonomy, and what a static scan can reach.
+#
+# Source: github.com/uber/ADR (Apache-2.0) — "ADR: An Agentic Detection System
+# for Enterprise Agentic AI Security", MLSys 2026, arXiv:2605.17380. The 17
+# technique names below are ADR-Bench's own labels, extracted from its task set.
+#
+# Why adopt someone else's taxonomy rather than invent one: the same reason we
+# lead with the Agents Rule of Two. A named, published, production-deployed
+# framework is checkable by a reader and comparable across tools. A bespoke
+# severity vocabulary is neither.
+#
+# ADR is a RUNTIME system: it observes agent sessions and detects risky
+# behaviour as it happens. TriDelPhi is STATIC: it reads configuration and finds
+# the jobs where those attacks would land, before anything runs. The two halves
+# are complementary, and `reach` below records honestly which is which.
+#
+#   static   the dangerous configuration is visible in files on disk
+#   partial  a precondition is visible statically; confirming the attack needs
+#            runtime evidence
+#   runtime  nothing in the repository distinguishes benign from malicious;
+#            only observed behaviour can
+#
+# Claiming static coverage of a runtime-only technique would be the same
+# dishonesty as flagging a compliant job critical.
+
+techniques:
+  - id: agentic-control-flow-hijacking
+    name: Agentic Control-Flow Hijacking
+    reach: static
+    note: >-
+      Attacker text redirects what the agent does. Statically visible as
+      untrusted input reaching an agent prompt or an agent reading an
+      attacker-editable instruction file.
+
+  - id: indirect-prompt-injection
+    name: Indirect Prompt Injection
+    reach: static
+    note: >-
+      Injection arrives through content the agent reads rather than the prompt
+      itself. Visible as an agent operating over a pull-request working tree.
+
+  - id: semantic-data-poisoning
+    name: Semantic Data Poisoning
+    reach: partial
+    note: >-
+      Poisoned data steers the agent's conclusions. The ingestion path is
+      statically visible; whether the data is poisoned is not.
+
+  - id: excessive-tool-permissions
+    name: Exploitation of Excessive Tool Permissions
+    reach: static
+    note: >-
+      The agent is granted more capability than the task needs. Wildcard user
+      allowlists and permission-skipping flags are declared in the workflow.
+
+  - id: unvetted-mcp-server
+    name: Unvetted MCP Server Connection
+    reach: static
+    note: >-
+      An MCP server whose tools cannot be enumerated offline, or which declares
+      state-changing tools, is named in .mcp.json.
+
+  - id: insecure-supply-chain
+    name: Insecure Supply Chain for Agentic Components
+    reach: partial
+    note: >-
+      Mutable references to agent actions and MCP packages are visible; whether
+      a given version is malicious is not. zizmor covers the general unpinned
+      case via --with-zizmor.
+
+  - id: code-interpreter-abuse
+    name: Abuse of Agent's Code Interpreter
+    reach: static
+    note: >-
+      The agent can execute code. Visible as Bash-class tools enabled on the
+      agent step, which is exactly the E capability.
+
+  - id: agent-identity-spoofing
+    name: Agent Identity Spoofing
+    reach: partial
+    note: >-
+      Spoofable actor checks are statically visible; establishing that a given
+      identity was forged requires runtime evidence.
+
+  - id: tool-shadowing
+    name: Tool Shadowing
+    reach: partial
+    note: >-
+      A malicious tool masquerades as a trusted one. Name collisions across
+      configured MCP servers are visible statically; intent is not.
+
+  - id: tool-rug-pull
+    name: Tool Rug Pull
+    reach: partial
+    note: >-
+      A tool changes behaviour after being trusted. Only the mutable reference
+      that permits it is statically visible.
+
+  - id: insecure-output-handling
+    name: Insecure Output Handling
+    reach: static
+    note: >-
+      Agent output flows into a sink that executes or publishes it. Visible as
+      an agent step followed by a run block or a publishing action.
+
+  - id: long-term-goal-hijacking
+    name: Long-Term Goal Hijacking
+    reach: runtime
+    note: >-
+      Persistent redirection of the agent's objective across a session. Needs
+      session traces; nothing in the repository shows it.
+
+  - id: malicious-agent-collusion
+    name: Malicious Agent Collusion
+    reach: runtime
+    note: Multi-agent coordination is observable only while it happens.
+
+  - id: temporal-data-attack
+    name: Temporal Data Attack
+    reach: runtime
+    note: Timing-dependent manipulation leaves no static signature.
+
+  - id: tool-hallucination-manipulation
+    name: Tool Hallucination Manipulation
+    reach: runtime
+    note: A model inventing tool calls is a property of inference, not config.
+
+  - id: resource-exhaustion
+    name: Agent-Facilitated Resource Exhaustion
+    reach: runtime
+    note: >-
+      Consumption is a runtime property. CI concurrency limits mitigate it but
+      do not make the attack statically visible.
+
+  - id: model-dos
+    name: Model-Layer Denial of Service
+    reach: runtime
+    note: Requires observing request volume and model behaviour.
