@@ -105,8 +105,8 @@ p{margin:0}
   background:color-mix(in srgb,var(--bg) 86%,transparent);
   backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:11px;font-family:var(--serif);
-  font-weight:600;font-size:19px;letter-spacing:-.01em;color:var(--ink)}
-.brand svg{width:26px;height:26px;flex:none}
+  font-weight:600;font-size:19px;letter-spacing:-.01em;color:var(--ink);white-space:nowrap}
+.brand svg{width:27px;height:27px;flex:none}
 .brand b{color:var(--grn)}
 .top nav{display:flex;align-items:center;gap:26px;font-size:14px}
 .top nav a{color:var(--mute);text-decoration:none}
@@ -151,9 +151,9 @@ p{margin:0}
 .stage[data-beat="4"] .reye{fill:var(--safe)}
 .stage[data-beat="4"] .rbody{stroke:var(--safe)}
 /* scene text — sized in SVG units so it stays legible at any scale */
-.slbl{font-family:var(--mono);font-size:23px;fill:var(--mute);text-anchor:middle}
+.slbl{font-family:var(--mono);font-size:21px;fill:var(--mute);text-anchor:middle}
 .slbl.strong{fill:var(--ink);font-weight:600}
-.slbl.sm{font-size:19px;fill:var(--faint)}
+.slbl.sm{font-size:18px;fill:var(--faint)}
 .pw-u .slbl{fill:var(--u)} .pw-p .slbl{fill:var(--p)} .pw-e .slbl{fill:var(--e)}
 .qmark{font-family:var(--mono);font-weight:700;font-size:19px;fill:var(--u);text-anchor:middle}
 /* reveals, keyed off the beat */
@@ -197,7 +197,7 @@ p{margin:0}
 .replay:hover{color:var(--ink);border-color:var(--grn)}
 .reduced-note{display:none;font-family:var(--mono);font-size:11px;color:var(--faint)}
 @media(max-width:560px){
-  .slbl{font-size:27px} .slbl.sm{font-size:23px} .vtext{font-size:30px} .qmark{font-size:23px}
+  .slbl{font-size:24px} .slbl.sm{font-size:21px} .vtext{font-size:29px} .qmark{font-size:22px}
   .capband{min-height:96px}
 }
 
@@ -372,6 +372,12 @@ section{padding:64px 0;border-top:1px solid var(--line);scroll-margin-top:78px}
 .term-win pre{margin:0;padding:18px 20px;font-family:var(--mono);font-size:13px;
   line-height:1.75;color:#cdd9e2;overflow-x:auto}
 .term-win .c{color:#5f7583}.term-win .ok{color:#5ccb8c}.term-win .g{color:#74cfa0}
+/* On phones, shrink the terminal-demo type so more of each line fits before the
+   horizontal scroll begins. Placed after the base pre rules so it wins the
+   cascade (media queries add no specificity). */
+@media(max-width:560px){
+  .report pre,.term-win pre{font-size:11px;line-height:1.6;padding:15px 14px}
+}
 .setup-copy h3{font-size:21px;margin-bottom:10px}
 .setup-copy p{color:var(--mute);font-size:15.5px;margin-bottom:14px}
 .setup-copy p .hl{color:var(--ink)}
@@ -444,9 +450,10 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
     <span class="eyebrow">Security for people who build with AI</span>
     <h1>Stop strangers from tricking your robots into stealing your keys.</h1>
     <p class="lede">When you build on GitHub, little <span class="hl">helper robots</span> run your
-      project for you. TriDelPhi checks whether any of them could be fooled by a stranger
-      into handing over your <span class="hl">passwords and keys</span> — and shows you the exact
-      one to fix. Free, plain English, one line to turn on.</p>
+      project for you — and some of them hold your <span class="hl">passwords and keys</span>.
+      TriDelPhi is like a <span class="hl">smoke detector</span> for those robots: it checks whether a
+      stranger could trick one into handing your keys over, and points to the exact one to fix.
+      Free, plain English, one line to turn on.</p>
 
     <!-- the "video" -->
     <div class="reel" id="reel">
@@ -470,12 +477,12 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
             <g transform="translate(214,114)"><g class="pw pw-u">
               <rect x="-30" y="-30" width="60" height="60" rx="15" fill="var(--bg2)" stroke="var(--u)" stroke-width="2.5"/>
               <g stroke="var(--u)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(-12,-13)"><path d="M8 10h8M8 14h5"/><path d="M21 12a9 9 0 1 1-3.6-7.2L21 3v6h-6"/></g>
-              <text class="slbl" x="0" y="52">reads</text><text class="slbl" x="0" y="72">stranger text</text>
+              <text class="slbl" x="0" y="-52">reads</text><text class="slbl" x="0" y="-32">stranger text</text>
             </g></g>
             <g transform="translate(586,114)"><g class="pw pw-p">
               <rect x="-30" y="-30" width="60" height="60" rx="15" fill="var(--bg2)" stroke="var(--p)" stroke-width="2.5"/>
               <g stroke="var(--p)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(-12,-12)"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M17 6l2 2M14 9l2 2"/></g>
-              <text class="slbl" x="0" y="52">holds</text><text class="slbl" x="0" y="72">your keys</text>
+              <text class="slbl" x="0" y="-52">holds</text><text class="slbl" x="0" y="-32">your keys</text>
             </g></g>
             <g transform="translate(400,364)"><g class="pw pw-e">
               <rect x="-30" y="-30" width="60" height="60" rx="15" fill="var(--bg2)" stroke="var(--e)" stroke-width="2.5"/>
@@ -500,7 +507,6 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
             <rect class="rbody" x="332" y="140" width="136" height="120" rx="22" fill="var(--bg3)" stroke="var(--line2)" stroke-width="2.5"/>
             <circle class="reye" cx="374" cy="200" r="13"/>
             <circle class="reye" cx="426" cy="200" r="13"/>
-            <text class="slbl strong" x="400" y="292">your helper robot</text>
           </g>
 
           <!-- guard (safe beat) -->
@@ -961,6 +967,31 @@ $ tridelphi init
 
   <span class="warn">Result:  ⚠️  NOT YET SAFE</span> — fix the 1 item above, then run this again.
            <span class="dim">None of it is hard; each fix is usually one setting.</span></pre>
+    </div>
+
+    <!-- and it hands you the fix -->
+    <h3 style="font-family:var(--serif);font-size:clamp(21px,3vw,28px);margin:52px 0 6px;text-align:center">Not sure what to change? Ask for the fix.</h3>
+    <p class="lede" style="text-align:center;margin:0 auto 22px">Run <span class="mono">tridelphi&nbsp;fix</span> and it turns the findings into a to-do list — <span class="hl">easiest change first</span>, with the exact lines. It only reads; it never touches your files. Add <span class="mono">--markdown</span> to paste it straight into a pull request.</p>
+    <div class="report">
+      <div class="rtop"><i></i><i></i><i></i><span>tridelphi fix — your ordered to-do list</span></div>
+<pre>  <span class="head">tridelphi fix plan · my-cool-app</span>
+
+  1 thing to fix, easiest first. This is a checklist — no files are changed.
+
+  ──────────────────────────────────────────────────────
+  <span class="gold">1 · one-line change</span>   <span class="dim">strip U</span>
+    .github/workflows/assist.yml:9   job "assist"
+
+    Remove the <span class="mono">ref:</span> input so the checkout returns to the
+    base branch — the reason <span class="mono">pull_request_target</span> exists.
+    The stranger's code stops running with your keys in reach.
+
+    <span class="dim">Trade-off: this job stops seeing the PR's code — move that</span>
+    <span class="dim">work to a plain `pull_request` job.</span>
+  ──────────────────────────────────────────────────────
+
+  <span class="dim">Work top-down. After each fix, run `tridelphi .` again —</span>
+  <span class="dim">a fixed item drops off the list.</span></pre>
     </div>
 
     <!-- trust strip -->
