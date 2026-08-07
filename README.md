@@ -58,10 +58,12 @@ a plain-language sticky comment, and (if you turn on code scanning) files
 findings in the Security tab. That's the whole setup — it's the **bot**, and
 GitHub Actions is what runs it.
 
-Prefer a one-liner in an existing workflow?
+Prefer a one-liner in an existing workflow? This runs the **whole hardening
+ladder** — secrets (gitleaks), supply chain (osv-scanner), workflow lint
+(zizmor) and TriDelPhi's own capability scan — merged into one report:
 
 ```yaml
-- uses: girnarholdings/TriDelPhi@v1      # scans + comments on the PR
+- uses: girnarholdings/TriDelPhi@v1      # full L1-L3 ladder + PR comment
 ```
 
 Running a hosted bot across many repos? There's a Cloudflare Worker webhook front
@@ -209,23 +211,37 @@ tridelphi .                    # from now on, only new findings count
 
 Fingerprints ignore line numbers, so adding a step above a job does not re-flag it.
 
-### 🤝 Add zizmor's line-level checks
+### 🪜 Climb the ladder — the full bundle in one flag
 
-TriDelPhi finds the **combination**; [zizmor](https://github.com/zizmorcore/zizmor)
-finds the **commodity** problems — unpinned actions, mutable tags, line-level
-template injection. Complementary, so run both into one merged SARIF:
+TriDelPhi core finds the **combination** no per-rule linter sees. The rungs
+below it are commodity checks that best-of-breed open-source tools already do
+superbly — so instead of reimplementing them, `--level` runs them and merges
+everything into **one SARIF document, one Security tab, one gate**:
+
+| Rung | Tool | License | Catches |
+|:--:|---|:--:|---|
+| **L1** | [gitleaks](https://github.com/gitleaks/gitleaks) | MIT | credentials committed to the tree |
+| **L2** | [osv-scanner](https://github.com/google/osv-scanner) | Apache-2.0 | known-vulnerable packages in your lockfiles¹ |
+| **L3** | [zizmor](https://github.com/zizmorcore/zizmor) | MIT | unpinned actions, template injection, workflow lint |
+| **L3** | **tridelphi core** | Apache-2.0 | the U∩P∩E capability intersection — always runs |
 
 ```console
-pipx install zizmor
-tridelphi . --with-zizmor --format sarif --sarif-file out.sarif
+tridelphi . --level 3      # the whole ladder; rungs are cumulative
+tridelphi . --level 1      # just secrets + core
+tridelphi --credits        # who built what — the wrapped tools, with licenses
 ```
 
-zizmor's findings land as a second SARIF run. If zizmor isn't installed,
-`--with-zizmor` prints a note and TriDelPhi's own findings are unaffected — it
-never fails a scan over a missing optional tool. Stays offline unless you add
-`--zizmor-online`.
+Missing a tool? That rung is skipped with an install hint — a missing optional
+scanner **never** fails the scan or hides TriDelPhi's own findings. A gitleaks
+hit is escalated to error severity: a live secret in the tree is never just a
+warning. ¹ osv-scanner queries [osv.dev](https://osv.dev); pass `--offline` to
+skip network rungs. `--with-zizmor` remains as the single-tool spelling of L3's
+linter.
 
-## ⚡ Put it in CI
+## ⚡ Put it in CI — one line
+
+The composite action installs everything (version-pinned, checksum-verified),
+climbs the ladder, uploads the merged SARIF, and posts a sticky PR comment:
 
 ```yaml
 name: tridelphi
@@ -235,10 +251,19 @@ on:
 permissions:
   contents: read
   security-events: write
+  pull-requests: write
 jobs:
-  rule-of-two:
+  harden:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: girnarholdings/TriDelPhi@v1   # the whole ladder, one line
+        with: { level: '3' }
+```
+
+Or hand-roll it — the CLI is a normal exit-code-honest scanner:
+
+```yaml
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
@@ -263,9 +288,22 @@ without turning day one red.
 
 ## 🔒 Offline by design
 
-No network calls, no account, no API token. It reads files on disk and nothing
-else — air-gap safe and auditable in one sitting. The only subprocess it ever
-spawns is zizmor, and only when you pass `--with-zizmor`.
+No network calls, no account, no API token. By default it reads files on disk
+and nothing else — air-gap safe and auditable in one sitting. Subprocesses are
+spawned only when you explicitly ask for the ladder (`--level`, `--with-zizmor`),
+and the only rung that touches the network is osv-scanner's osv.dev lookup —
+which `--offline` skips, and which the credit line labels honestly.
+
+## 🙏 Standing on the shoulders
+
+The ladder exists because these projects do the commodity layers superbly;
+TriDelPhi orchestrates them and adds the capability-graph join they don't do.
+Each keeps its own name, rule metadata, and provenance as a separate run in the
+merged SARIF — attribution is structural, not a footnote:
+[gitleaks](https://github.com/gitleaks/gitleaks) (MIT) ·
+[osv-scanner](https://github.com/google/osv-scanner) (Apache-2.0) ·
+[zizmor](https://github.com/zizmorcore/zizmor) (MIT). Run `tridelphi --credits`
+for the same table from the CLI.
 
 ## 📊 Honest calibration
 

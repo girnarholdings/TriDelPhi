@@ -1,13 +1,25 @@
-# Composite action — the one-line way to run TriDelPhi as a PR bot.
+# Composite action — the one-line way to run the TriDelPhi hardening ladder.
 #
 #   - uses: girnarholdings/TriDelPhi@v1
 #
-# It scans the checked-out repo, uploads results to code scanning, and (on a
-# pull request) posts a sticky comment. Prefer `tridelphi init`, which writes a
-# complete workflow; this is for people who already have a workflow and want one
-# step.
+# By default it climbs the full L1-L3 ladder over the checked-out repo:
+#
+#   L1  gitleaks     (MIT)         secrets committed to the tree
+#   L2  osv-scanner  (Apache-2.0)  known-vulnerable dependencies (queries osv.dev)
+#   L3  zizmor       (MIT)         workflow lint  +  tridelphi core (native)
+#
+# then uploads one merged SARIF to code scanning and (on a pull request) posts
+# a sticky plain-language comment. The wrapped scanners are pinned by version
+# and checksum-verified at install; see scripts/install-ladder.sh. Full credit
+# to their authors — run `tridelphi --credits`.
+#
+# Prefer `tridelphi init`, which writes a complete workflow; this is for people
+# who already have a workflow and want one step.
 name: TriDelPhi
-description: Static Agents Rule of Two scan for GitHub Actions — find the CI job that turns a comment into RCE.
+description: >-
+  The GitHub Actions hardening ladder in one step — TriDelPhi's Agents Rule of
+  Two capability scan plus wrapped runs of gitleaks, osv-scanner and zizmor,
+  merged into a single code-scanning upload.
 branding:
   icon: shield
   color: red
@@ -16,6 +28,12 @@ inputs:
   path:
     description: Repository root to scan.
     default: "."
+  level:
+    description: >-
+      Hardening-ladder rung to climb to: 0 runs only TriDelPhi core; 1 adds
+      gitleaks (secrets); 2 adds osv-scanner (supply chain, queries osv.dev);
+      3 adds zizmor (workflow lint). Rungs are cumulative.
+    default: "3"
   fail-on:
     description: Exit non-zero at this level or above (critical | warning | none).
     default: critical
@@ -29,23 +47,42 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
         python-version: '3.12'
 
     - name: Install TriDelPhi
       shell: bash
-      run: pipx install tridelphi
+      # Installed from the action's own checkout, so the scan always runs the
+      # exact code this action's ref points at — no registry in the path.
+      run: python3 -m pip install --quiet "$GITHUB_ACTION_PATH"
+
+    - name: Install the ladder scanners (pinned, checksum-verified)
+      shell: bash
+      env:
+        LEVEL: ${{ inputs.level }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/install-ladder.sh" "$LEVEL"
 
     - name: Scan
       id: scan
       shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        LEVEL: ${{ inputs.level }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        SARIF_FILE: ${{ inputs.sarif-file }}
+      # Never fail this step; the SARIF upload and PR comment must run
+      # regardless. The threshold is enforced as the final step.
       run: |
         set +e
-        tridelphi "${{ inputs.path }}" \
+        LEVEL_ARGS=()
+        if [ "$LEVEL" -ge 1 ] 2>/dev/null; then
+          LEVEL_ARGS=(--level "$LEVEL")
+        fi
+        tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" \
           --format text \
-          --sarif-file "${{ inputs.sarif-file }}" \
-          --fail-on "${{ inputs.fail-on }}" > report.txt 2>&1
+          --sarif-file "$SARIF_FILE" \
+          --fail-on "$FAIL_ON" > report.txt 2>&1
         code=$?
         {
           echo 'text<<TRIDELPHI_EOF'
@@ -58,13 +95,13 @@ runs:
 
     - name: Upload to code scanning
       if: always()
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
       with:
         sarif_file: ${{ inputs.sarif-file }}
 
     - name: Comment on the pull request
       if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
       env:
         REPORT: ${{ steps.scan.outputs.text }}
       with:
@@ -92,4 +129,6 @@ runs:
 
     - name: Enforce the threshold
       shell: bash
-      run: exit ${{ steps.scan.outputs.exit_code }}
+      env:
+        EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
+      run: exit "$EXIT_CODE"

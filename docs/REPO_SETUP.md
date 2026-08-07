@@ -77,3 +77,27 @@ add a **Code scanning results** requirement to the same ruleset with
 
 That is the L6 rung of the ladder this project is about: the gate goes on last,
 once it can pass on the first try.
+
+---
+
+## Publishing the action (the `@v1` tag)
+
+`- uses: girnarholdings/TriDelPhi@v1` resolves to a git tag, and Marketplace
+listing hangs off a release. Neither can be created from inside CI safely, so
+after the bundle PR merges:
+
+```console
+git tag -f v1 <merge-commit>     # the major tag users pin to
+git tag v1.0.0 <merge-commit>    # the immutable release tag
+git push origin v1 v1.0.0
+```
+
+Then draft a GitHub release from `v1.0.0` and tick **Publish this Action to
+the GitHub Marketplace** (requires the repo to be public and `action.yml` at
+the root — both already true). On every future release, move `v1` forward to
+the new release commit; never move `v1.0.0`.
+
+The wrapped scanners are pinned by version + SHA-256 in
+`scripts/install-ladder.sh`; bumping them is a normal PR that updates the
+digest alongside the version, with the digest taken from the upstream
+release's own checksums file (gitleaks) or SLSA provenance (osv-scanner).

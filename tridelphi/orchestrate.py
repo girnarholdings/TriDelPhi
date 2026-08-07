@@ -90,10 +90,17 @@ def run_zizmor(repo_root: str | Path, *, offline: bool = True, timeout: int = 12
     if not workflows.is_dir():
         return ZizmorResult(sarif=_empty_run(), finding_count=0)
 
+    # Scan `.github/workflows` (relative, cwd=repo_root) — the same surface
+    # TriDelPhi core scans, because that is the only place GitHub executes
+    # workflows from. Scanning "." would also sweep vendored/example workflows
+    # deeper in the tree (test fixtures, monorepo templates) that never run.
+    # URI caveat, observed live: zizmor keys URIs to the enclosing *git* root
+    # when one exists, and to the scan target otherwise; the ladder layer
+    # normalizes both shapes to repo-relative paths.
     cmd = [binary, "--format", "sarif"]
     if offline:
         cmd.append("--offline")
-    cmd.append(str(workflows))
+    cmd.append(".github/workflows")
 
     try:
         completed = subprocess.run(
