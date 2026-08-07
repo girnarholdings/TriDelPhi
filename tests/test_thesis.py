@@ -20,6 +20,8 @@ EXPECTED_CRITICAL = {
     "agent-config-poisoning": "tridelphi/agent-config-ingress",
     "cross-job-laundering": "tridelphi/cross-job-untrusted-flow",
     "self-hosted-runner-takeover": "tridelphi/untrusted-checkout-privileged-egress",
+    # Real, disclosed pull_request_target pwn-request (MITRE/Splunk/spotipy/pgai).
+    "pwn-request-target": "tridelphi/untrusted-checkout-privileged-egress",
 }
 
 EXPECTED_STRIP = {

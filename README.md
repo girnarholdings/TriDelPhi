@@ -53,6 +53,14 @@ default**, emits **SARIF 2.1.0**, and is the **L3 core** of an optional
 seven-rung hardening ladder that wraps best-of-breed open-source scanners into
 one merged report.
 
+> **Proven against real attacks.** TriDelPhi catches the shape of the
+> `tj-actions/changed-files` supply-chain takeover ([CVE-2025-30066][cve], 23,000+
+> repos) and the `pull_request_target` pwn-request secret-exfiltration class
+> (MITRE, Splunk, spotipy, timescale/pgai). Reproductions and unedited output:
+> [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md), guarded by `tests/test_realworld.py`.
+
+[cve]: https://www.wiz.io/blog/github-action-tj-actions-changed-files-supply-chain-attack-cve-2025-30066
+
 ---
 
 ## 📑 Contents
@@ -568,6 +576,7 @@ script from *outside* the checkout, catching missing `package-data` before a use
 | Doc | What it is |
 |---|---|
 | 🌐 [**Website**](https://girnarholdings.github.io/TriDelPhi/) | The plain-English landing page, deployed from [`site/`](site/) |
+| 🎯 [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md) | TriDelPhi run against real disclosed attacks (tj-actions CVE-2025-30066, pwn-request), with output |
 | 📖 [`docs/RULES.md`](docs/RULES.md) | Every rule, its ADR technique, why it fires |
 | 🧭 [`docs/DECISIONS.md`](docs/DECISIONS.md) | What adversarial reviews changed before a line was written |
 | 🔑 [`docs/L7_PROPOSAL.md`](docs/L7_PROPOSAL.md) | The senior-audit-engineer L7 design and its honest limits |

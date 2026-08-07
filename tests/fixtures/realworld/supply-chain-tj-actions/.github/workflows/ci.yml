@@ -1,0 +1,12 @@
+# Reproduces CVE-2025-30066: a consumer that SHA-pinned tj-actions/changed-files,
+# whose pin was then moved to the malicious commit
+# 0e58ed8671d6b60d0890c21b07f8835ace038e67. The committed trust-lock below
+# records the legitimate identity, so `tridelphi verify` flags the swap.
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: tj-actions/changed-files@0e58ed8671d6b60d0890c21b07f8835ace038e67 # v45.0.7
