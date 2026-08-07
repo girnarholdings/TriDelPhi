@@ -1,0 +1,15 @@
+# TriDelPhi bot — Cloudflare Worker webhook receiver.
+#
+#   npx wrangler dev       # run locally at http://localhost:8787
+#   npx wrangler deploy    # ship it
+#
+# Secrets (never commit these):
+#   npx wrangler secret put GITHUB_WEBHOOK_SECRET   # the webhook's shared secret
+#   npx wrangler secret put GITHUB_DISPATCH_TOKEN   # optional: PAT with actions:write
+name = "tridelphi-bot"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# For `wrangler dev` only. Real secrets go through `wrangler secret put`, not here.
+[vars]
+GITHUB_WEBHOOK_SECRET = "dev-secret-change-me"

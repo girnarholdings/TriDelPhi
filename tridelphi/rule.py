@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from . import detect_agent_ingress, detect_egress, detect_privilege, detect_untrusted
+from . import detect_agent_ingress, detect_egress, detect_guards, detect_privilege, detect_untrusted
 from .detect_untrusted import expression_paths, matches_untrusted_path
 from .model import (
     CapabilityHit,
@@ -44,6 +44,7 @@ _RULE_FOR_U_KIND = {
     "untrusted-checkout": "tridelphi/untrusted-checkout-privileged-egress",
     "expression-injection": "tridelphi/expression-injection-privileged",
     "expression-injection-via-env": "tridelphi/expression-injection-privileged",
+    "env-file-injection": "tridelphi/env-file-injection",
     "upstream-artifact": "tridelphi/workflow-run-upstream-execution",
     "cross-job-flow": "tridelphi/cross-job-untrusted-flow",
 }
@@ -56,6 +57,7 @@ _U_KIND_PRIORITY = (
     "agent-mcp-ingress",
     "upstream-artifact",
     "cross-job-flow",
+    "env-file-injection",
     "untrusted-checkout",
     "expression-injection",
     "expression-injection-via-env",
@@ -168,6 +170,26 @@ def _remediation(
     load-bearing, so it is proposed only when it is a single identifiable step.
     """
     u_kinds = {h.kind: h for h in u_hits}
+
+    # 0. Environment-file injection: the value must not reach the env file at all.
+    hit = u_kinds.get("env-file-injection")
+    if hit is not None:
+        token = _quoted_token(hit.reason)
+        return Remediation(
+            strip="U",
+            kind="drop-env-file-write",
+            target=token,
+            target_position=hit.position,
+            breaks="later steps stop reading the value as an env var — pass it explicitly instead",
+            rendered=(
+                f"Strip untrusted input. {token} is written into a GitHub environment "
+                f"file at {_loc(hit.position)}, where it persists as a variable later "
+                "steps execute (NODE_OPTIONS, PATH, LD_PRELOAD). Do not put untrusted "
+                "data in $GITHUB_ENV / $GITHUB_OUTPUT / $GITHUB_PATH. If a later step "
+                "needs the value, hand it over through a quoted step-scoped `env:` and "
+                "read it with `\"$VAR\"` — never through the environment file."
+            ),
+        )
 
     # 1. Expression injection has a one-line fix that breaks nothing.
     hit = u_kinds.get("expression-injection")
@@ -438,6 +460,42 @@ def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[F
                             "github.event.comment.author_association)\n"
                             "and grant the narrowest tool set the task actually needs "
                             "rather than skipping permission checks."
+                        ),
+                    ),
+                )
+            )
+
+        # A spoofable actor guard is a false sense of authorization, not a held
+        # capability, so it is reported standalone like the overbroad-tools case.
+        weak_guards = detect_guards.detect(ctx, tables)
+        if weak_guards:
+            findings.append(
+                _make(
+                    "tridelphi/weak-actor-guard",
+                    "warning",
+                    ctx,
+                    tuple(weak_guards),
+                    weak_guards[0].position,
+                    (
+                        f"Job `{ctx.job_id}` is reachable by an outside party and gated "
+                        "only by a `github.actor` check, which is spoofable and is not an "
+                        "authorization check."
+                    ),
+                    Remediation(
+                        strip="P",
+                        kind="strong-guard",
+                        target="`github.actor` guard",
+                        target_position=weak_guards[0].position,
+                        breaks="nothing for real maintainers — it only stops spoofed identities",
+                        rendered=(
+                            f"Strip privilege. The guard at {_loc(weak_guards[0].position)} "
+                            "trusts `github.actor`, which the Dependabot confused-deputy "
+                            "trick and forged git identities defeat. Gate on the event's "
+                            "association instead:\n"
+                            "    if: contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), "
+                            "github.event.comment.author_association)\n"
+                            "or check the caller's real repository permission with a "
+                            "permission-lookup action. Actor identity is not authorization."
                         ),
                     ),
                 )

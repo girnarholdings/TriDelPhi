@@ -45,8 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog="Offline by design: no network calls, no account, no API token.",
     )
-    parser.add_argument("path", nargs="?", default=".", help="repository root (default: .)")
+    parser.add_argument(
+        "path", nargs="?", default=".",
+        help="repository root, or `init` to add the scan workflow (default: .)",
+    )
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--force", action="store_true", help="with init: overwrite an existing workflow")
     parser.add_argument(
         "-f", "--format", choices=("text", "sarif", "json", "html"), default="text",
         help="output format (default: text; html is a browsable report)",
@@ -117,8 +121,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # `tridelphi core .` and `tridelphi .` both work; `core` is canonical for
-    # forward compatibility with later subcommands.
+    # `tridelphi init` sets up the scan workflow; `tridelphi core .` and
+    # `tridelphi .` both scan. `core` stays canonical for later subcommands.
+    if args.path == "init":
+        from .init_cmd import run_init
+
+        return run_init(args.command or ".", force=args.force)
+
     path = args.path
     if path == "core":
         path = args.command or "."

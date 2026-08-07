@@ -15,6 +15,8 @@ in the result's property bag alongside `adrTechniques`.
 | [`tridelphi/agent-hook-execution`](#agent-hook-execution) | `error` | Abuse of Agent's Code Interpreter, Exploitation of Excessive Tool Permissions | Agent hook configuration executes shell from an untrusted checkout |
 | [`tridelphi/untrusted-checkout-privileged-egress`](#untrusted-checkout-privileged-egress) | `error` | Abuse of Agent's Code Interpreter | Privileged job checks out and runs attacker-controlled code |
 | [`tridelphi/expression-injection-privileged`](#expression-injection-privileged) | `error` | Insecure Output Handling | Attacker-controlled expression reaches an interpreter in a privileged job |
+| [`tridelphi/env-file-injection`](#env-file-injection) | `error` | Insecure Output Handling, Agentic Control-Flow Hijacking | Attacker text is written into a GitHub environment file in a privileged job |
+| [`tridelphi/weak-actor-guard`](#weak-actor-guard) | `warning` | Agent Identity Spoofing | Attacker-reachable job is gated only by a spoofable github.actor check |
 | [`tridelphi/workflow-run-upstream-execution`](#workflow-run-upstream-execution) | `error` | Insecure Supply Chain for Agentic Components, Abuse of Agent's Code Interpreter | Privileged workflow_run job consumes state produced by an untrusted run |
 | [`tridelphi/cross-job-untrusted-flow`](#cross-job-untrusted-flow) | `error` | Insecure Output Handling, Agentic Control-Flow Hijacking | Untrusted value flows through job outputs into a privileged job |
 | [`tridelphi/assumed-privilege-intersection`](#assumed-privilege-intersection) | `warning` | — | Untrusted ingress and egress, with privilege assumed from repository defaults |
@@ -83,6 +85,26 @@ ADR threat techniques: *Abuse of Agent's Code Interpreter*
 An untrusted github.event expression is interpolated directly into a shell or script body in a job that also holds credentials and egress. Interpolation happens before the shell runs, so the attacker's text becomes part of the command.
 
 ADR threat techniques: *Insecure Output Handling*
+
+## env-file-injection
+
+`tridelphi/env-file-injection` · default level `error`
+
+**Attacker text is written into a GitHub environment file in a privileged job**
+
+The job writes an untrusted expression into $GITHUB_ENV, $GITHUB_OUTPUT or $GITHUB_PATH. Values placed there persist into later steps as environment variables and PATH entries, so an attacker can set NODE_OPTIONS, LD_PRELOAD or PATH and have a subsequent privileged step execute their code — even though no single line looks like a shell command. Google Firebase and Apache were both found vulnerable to this. Route the value through a quoted step-scoped `env:` instead of the environment file.
+
+ADR threat techniques: *Insecure Output Handling*, *Agentic Control-Flow Hijacking*
+
+## weak-actor-guard
+
+`tridelphi/weak-actor-guard` · default level `warning`
+
+**Attacker-reachable job is gated only by a spoofable github.actor check**
+
+The job runs on a trigger an outside party can fire and its only authorization gate is a `github.actor` or `github.triggering_actor` comparison. Actor identity is not authorization: the Dependabot confused-deputy trick makes github.actor read as a trusted bot on an attacker's pull request, and git authorship is trivially forged. Gate on the event's `author_association` (OWNER / MEMBER / COLLABORATOR) or a real permission lookup instead.
+
+ADR threat techniques: *Agent Identity Spoofing*
 
 ## workflow-run-upstream-execution
 

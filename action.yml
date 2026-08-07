@@ -1,0 +1,95 @@
+# Composite action — the one-line way to run TriDelPhi as a PR bot.
+#
+#   - uses: girnarholdings/TriDelPhi@v1
+#
+# It scans the checked-out repo, uploads results to code scanning, and (on a
+# pull request) posts a sticky comment. Prefer `tridelphi init`, which writes a
+# complete workflow; this is for people who already have a workflow and want one
+# step.
+name: TriDelPhi
+description: Static Agents Rule of Two scan for GitHub Actions — find the CI job that turns a comment into RCE.
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  path:
+    description: Repository root to scan.
+    default: "."
+  fail-on:
+    description: Exit non-zero at this level or above (critical | warning | none).
+    default: critical
+  comment:
+    description: Post a sticky PR comment with the report (true | false).
+    default: "true"
+  sarif-file:
+    description: Where to write SARIF for code-scanning upload.
+    default: tridelphi.sarif
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install TriDelPhi
+      shell: bash
+      run: pipx install tridelphi
+
+    - name: Scan
+      id: scan
+      shell: bash
+      run: |
+        set +e
+        tridelphi "${{ inputs.path }}" \
+          --format text \
+          --sarif-file "${{ inputs.sarif-file }}" \
+          --fail-on "${{ inputs.fail-on }}" > report.txt 2>&1
+        code=$?
+        {
+          echo 'text<<TRIDELPHI_EOF'
+          cat report.txt
+          echo TRIDELPHI_EOF
+          echo "exit_code=${code}"
+        } >> "$GITHUB_OUTPUT"
+        cat report.txt
+        exit 0
+
+    - name: Upload to code scanning
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+
+    - name: Comment on the pull request
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        REPORT: ${{ steps.scan.outputs.text }}
+      with:
+        script: |
+          const report = process.env.REPORT || 'TriDelPhi produced no output.';
+          const body = [
+            '<!-- tridelphi -->',
+            '### 🔺 TriDelPhi — Agents Rule of Two',
+            '',
+            '```',
+            report.slice(0, 60000),
+            '```',
+            '',
+            '_[What this means](https://girnarholdings.github.io/TriDelPhi/)._',
+          ].join('\n');
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner, repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c => c.body && c.body.includes('<!-- tridelphi -->'));
+          const api = existing
+            ? github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body })
+            : github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+          await api;
+
+    - name: Enforce the threshold
+      shell: bash
+      run: exit ${{ steps.scan.outputs.exit_code }}
