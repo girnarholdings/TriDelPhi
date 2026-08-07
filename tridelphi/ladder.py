@@ -394,11 +394,15 @@ def _scorecard_to_sarif(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRu
 
     rules: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
+    seen_rule_ids: set[str] = set()
     checks = [c for c in doc["checks"] if isinstance(c, dict)]
     for check in sorted(checks, key=lambda c: str(c.get("name", ""))):
         name = check.get("name")
         score = check.get("score")
-        if not isinstance(name, str) or not isinstance(score, int):
+        # bool is a subclass of int; a JSON boolean score is not a scorecard
+        # score, so exclude it explicitly rather than letting True/False read
+        # as 1/0.
+        if not isinstance(name, str) or not isinstance(score, int) or isinstance(score, bool):
             continue
         if score < 0 or score >= 8:  # -1 = not applicable; 8+ = healthy
             continue
@@ -407,14 +411,18 @@ def _scorecard_to_sarif(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRu
         reason = reason if isinstance(reason, str) else ""
         rule_id = f"scorecard/{name}"
         anchor = name.lower()
-        rules.append(
-            {
-                "id": rule_id,
-                "name": name.replace("-", ""),
-                "shortDescription": {"text": f"OSSF Scorecard: {name}"},
-                "helpUri": f"{_SCORECARD_DOCS}#{anchor}",
-            }
-        )
+        # One rule entry per id even if a hostile report repeats a check name;
+        # duplicate rules would still validate but muddy the tool metadata.
+        if rule_id not in seen_rule_ids:
+            seen_rule_ids.add(rule_id)
+            rules.append(
+                {
+                    "id": rule_id,
+                    "name": name.replace("-", ""),
+                    "shortDescription": {"text": f"OSSF Scorecard: {name}"},
+                    "helpUri": f"{_SCORECARD_DOCS}#{anchor}",
+                }
+            )
         results.append(
             {
                 "ruleId": rule_id,
