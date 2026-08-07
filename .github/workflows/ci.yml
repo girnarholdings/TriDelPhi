@@ -143,20 +143,25 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
-      - name: Install the pinned scanners (checksum-verified)
-        run: bash scripts/install-ladder.sh 3
+      - name: Install every pinned scanner (checksum-verified)
+        # Level 5 installs all five wrapped tools; L6 adds only native code.
+        run: bash scripts/install-ladder.sh 5
       - name: Ladder tests with real binaries
-        # This is the only job where all three scanners exist, so it must run
-        # every ladder test file — including the live schema-contract and
-        # adversarial tests that skip themselves elsewhere.
+        # This is the only job where all five scanners exist, so it must run
+        # every ladder test file — including the live schema-contract, L4-L6
+        # and adversarial tests that skip themselves elsewhere.
         run: >
           python -m pytest -q
           tests/test_ladder.py
           tests/test_ladder_adversarial.py
           tests/test_ladder_sarif.py
+          tests/test_ladder_l456.py
           tests/test_orchestrate.py
       - name: Dogfood the full bundle on this repo
-        run: tridelphi . --level 3 --offline --format text
+        # Level 6: run every rung, then attest over the merged SARIF.
+        run: tridelphi . --level 6 --sarif-file tridelphi.sarif --format text
+      - name: The gate re-checks the merged SARIF as its own step
+        run: tridelphi gate tridelphi.sarif
 
   bot:
     name: bot

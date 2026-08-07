@@ -1,4 +1,4 @@
-"""The hardening ladder: orchestrate the L1-L3 open-source scanners.
+"""The hardening ladder: orchestrate the L1-L6 open-source scanners.
 
 TriDelPhi core is the L3 capability-graph analysis — the finding no per-rule
 linter produces. The ladder wraps the commodity rungs below and beside it by
@@ -7,6 +7,14 @@ running best-of-breed open-source tools and merging their SARIF alongside ours:
     L1  secrets in the tree      gitleaks        (MIT)
     L2  known-bad dependencies   osv-scanner     (Apache-2.0)
     L3  CI boundary lint         zizmor          (MIT)  + tridelphi core
+    L4  repo security posture    scorecard       (Apache-2.0)
+    L5  code-level SAST          semgrep         (LGPL-2.1)
+    L6  attest & gate            tridelphi attest / tridelphi gate (native)
+
+L6 is not a wrapped tool: it is the spec's two closing processes, implemented
+natively in gate_cmd.py — ``tridelphi gate`` re-checks a merged SARIF against
+policy as its own step, and ``tridelphi attest`` emits an in-toto evidence
+statement over the SARIF for downstream signing.
 
 ``--level N`` runs every rung up to and including N; rungs are cumulative
 because the ladder's ordering is signal density, not preference. TriDelPhi core
@@ -79,6 +87,11 @@ class ToolSpec:
     # Exit codes that mean "nothing here for me to scan" — a clean empty run,
     # not a failure (e.g. osv-scanner in a repo with no lockfiles).
     no_targets_exit_codes: frozenset[int] = frozenset()
+    # How the tool reports: "sarif-file" (writes SARIF where told),
+    # "sarif-stdout" is handled by the zizmor delegate, "scorecard-json"
+    # (JSON on stdout, converted to SARIF by our adapter — observed live:
+    # scorecard --local does not support --format sarif).
+    output_format: str = "sarif-file"
 
 
 GITLEAKS = ToolSpec(
@@ -122,9 +135,40 @@ ZIZMOR = ToolSpec(
     timeout=120,
 )
 
+SCORECARD = ToolSpec(
+    name="scorecard",
+    level=4,
+    rung="L4 · repo posture",
+    what="OSSF checks for security policy, binary artifacts, token permissions and pinning",
+    homepage="https://github.com/ossf/scorecard",
+    license="Apache-2.0",
+    install_hint="https://github.com/ossf/scorecard#installation",
+    # Local mode is file-based, but its Vulnerabilities check queries osv.dev,
+    # so the honest label is network.
+    network=True,
+    ok_exit_codes=frozenset({0}),
+    timeout=300,
+    output_format="scorecard-json",
+)
+
+SEMGREP = ToolSpec(
+    name="semgrep",
+    level=5,
+    rung="L5 · code SAST",
+    what="rule-based static analysis of the application code itself",
+    homepage="https://github.com/semgrep/semgrep",
+    license="LGPL-2.1",
+    install_hint="pipx install semgrep",
+    network=True,  # fetches the p/security-audit ruleset from the registry
+    ok_exit_codes=frozenset({0, 1}),
+    timeout=600,
+)
+
 # Ordered by rung. TriDelPhi core is not in this list on purpose: it is the
-# native analysis and always runs; the ladder is only the wrapped tools.
-LADDER: tuple[ToolSpec, ...] = (GITLEAKS, OSV_SCANNER, ZIZMOR)
+# native analysis and always runs; the ladder is only the wrapped tools. L6 is
+# native too (gate_cmd.py) — the ladder's registry ends at the wrapped rungs.
+LADDER: tuple[ToolSpec, ...] = (GITLEAKS, OSV_SCANNER, ZIZMOR, SCORECARD, SEMGREP)
+MAX_LEVEL = 6
 
 
 class ExternalRun:
@@ -226,6 +270,22 @@ def run_tool(
                 "--output", str(report),
                 ".",
             ]
+        elif spec is SCORECARD:
+            # Local mode emits JSON on stdout only (no SARIF, no --output —
+            # both observed live); the adapter below converts it.
+            cmd = [binary, "--local", ".", "--format", "json"]
+        elif spec is SEMGREP:
+            # A named public ruleset with metrics off: never `--config auto`,
+            # which uploads project metadata to the registry.
+            cmd = [
+                binary, "scan",
+                "--config", "p/security-audit",
+                "--sarif", "--output", str(report),
+                "--metrics", "off",
+                "--disable-version-check",
+                "--quiet",
+                ".",
+            ]
         else:  # pragma: no cover - registry and runner out of sync
             return _skip(spec, f"no runner wired for {spec.name}")
 
@@ -248,17 +308,29 @@ def run_tool(
             stderr = (completed.stderr or "").strip()[:200]
             return _skip(spec, f"{spec.name} exited {completed.returncode}: {stderr}")
 
-        if not report.is_file():
-            return _skip(spec, f"{spec.name} ran but wrote no report; skipped")
-        if report.stat().st_size > MAX_OUTPUT_BYTES:
-            return _skip(
-                spec,
-                f"{spec.name} produced a report over {MAX_OUTPUT_BYTES // (1024 * 1024)} MB; "
-                "refusing to parse it",
-            )
-        raw = report.read_text(encoding="utf-8", errors="replace")
+        if spec.output_format == "scorecard-json":
+            raw = completed.stdout or ""
+            if len(raw.encode("utf-8", errors="replace")) > MAX_OUTPUT_BYTES:
+                return _skip(
+                    spec,
+                    f"{spec.name} produced over {MAX_OUTPUT_BYTES // (1024 * 1024)} MB "
+                    "of output; refusing to parse it",
+                )
+        else:
+            if not report.is_file():
+                return _skip(spec, f"{spec.name} ran but wrote no report; skipped")
+            if report.stat().st_size > MAX_OUTPUT_BYTES:
+                return _skip(
+                    spec,
+                    f"{spec.name} produced a report over {MAX_OUTPUT_BYTES // (1024 * 1024)} MB; "
+                    "refusing to parse it",
+                )
+            raw = report.read_text(encoding="utf-8", errors="replace")
 
-    document = _contained_parse(spec, raw)
+    if spec.output_format == "scorecard-json":
+        document = _scorecard_to_sarif(spec, raw)
+    else:
+        document = _contained_parse(spec, raw)
     if isinstance(document, ExternalRun):
         return document
     _normalize_uris(document, root)
@@ -285,6 +357,99 @@ def _contained_parse(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRun:
     defect = sarif_shape_error(document)
     if defect is not None:
         return _skip(spec, f"{spec.name} {defect}; skipped")
+    return document
+
+
+_SCORECARD_DOCS = "https://github.com/ossf/scorecard/blob/main/docs/checks.md"
+
+
+def _scorecard_to_sarif(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRun:
+    """Convert scorecard's local-mode JSON into a SARIF run.
+
+    Mapping, chosen to be honest rather than alarming: a check is a finding
+    only when its score says the posture is actually weak. Scores are 0-10;
+    -1 means the check did not apply and is dropped.
+
+        score 0-3   -> SARIF "warning"  (posture gap worth fixing)
+        score 4-7   -> SARIF "note"     (partial credit, informational)
+        score 8-10  -> no finding
+
+    Results carry no file locations because local-mode scorecard reports
+    repo-level posture, not line-level defects. Checks are sorted by name so
+    the run is deterministic. The constructed document still goes through the
+    shared shape gate afterwards — the converter is not exempt from the
+    containment bar it feeds.
+    """
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return _skip(spec, f"{spec.name} output was not valid JSON; skipped")
+    if not isinstance(doc, dict) or not isinstance(doc.get("checks"), list):
+        return _skip(spec, f"{spec.name} output had no checks list; skipped")
+
+    version = "unknown"
+    meta = doc.get("scorecard")
+    if isinstance(meta, dict) and isinstance(meta.get("version"), str):
+        version = meta["version"].lstrip("v")
+
+    rules: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    seen_rule_ids: set[str] = set()
+    checks = [c for c in doc["checks"] if isinstance(c, dict)]
+    for check in sorted(checks, key=lambda c: str(c.get("name", ""))):
+        name = check.get("name")
+        score = check.get("score")
+        # bool is a subclass of int; a JSON boolean score is not a scorecard
+        # score, so exclude it explicitly rather than letting True/False read
+        # as 1/0.
+        if not isinstance(name, str) or not isinstance(score, int) or isinstance(score, bool):
+            continue
+        if score < 0 or score >= 8:  # -1 = not applicable; 8+ = healthy
+            continue
+        level = "warning" if score <= 3 else "note"
+        reason = check.get("reason")
+        reason = reason if isinstance(reason, str) else ""
+        rule_id = f"scorecard/{name}"
+        anchor = name.lower()
+        # One rule entry per id even if a hostile report repeats a check name;
+        # duplicate rules would still validate but muddy the tool metadata.
+        if rule_id not in seen_rule_ids:
+            seen_rule_ids.add(rule_id)
+            rules.append(
+                {
+                    "id": rule_id,
+                    "name": name.replace("-", ""),
+                    "shortDescription": {"text": f"OSSF Scorecard: {name}"},
+                    "helpUri": f"{_SCORECARD_DOCS}#{anchor}",
+                }
+            )
+        results.append(
+            {
+                "ruleId": rule_id,
+                "level": level,
+                "message": {"text": f"{name} scored {score}/10: {reason}".strip()},
+            }
+        )
+
+    document = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": spec.name,
+                        "semanticVersion": version,
+                        "informationUri": spec.homepage,
+                        "rules": rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+    defect = sarif_shape_error(document)
+    if defect is not None:  # pragma: no cover - converter and gate out of sync
+        return _skip(spec, f"{spec.name} converted {defect}; skipped")
     return document
 
 
@@ -458,4 +623,8 @@ def credits_text() -> str:
         lines.append(f"  {'':20} {spec.homepage}")
         lines.append("")
     lines.append("TriDelPhi core (the capability-graph analysis) is native and always runs.")
+    lines.append(
+        "L6 (attest & gate) is native too: `tridelphi attest` and `tridelphi gate` — "
+        "no wrapped tool, nothing further to install."
+    )
     return "\n".join(lines)

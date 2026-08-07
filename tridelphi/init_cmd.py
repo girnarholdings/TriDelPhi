@@ -45,6 +45,13 @@ jobs:
     name: Agents Rule of Two
     runs-on: ubuntu-latest
     steps:
+      # Egress telemetry for this job itself (step-security/harden-runner,
+      # Apache-2.0). Audit mode only observes; tighten to block once you have
+      # a baseline of expected endpoints.
+      - uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
