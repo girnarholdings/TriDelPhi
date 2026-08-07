@@ -50,10 +50,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "path", nargs="?", default=".",
-        help="repository root, or `init` to add the scan workflow (default: .)",
+        help="repository root, `init` to add the scan workflow, or `fix` for a remediation plan (default: .)",
     )
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true", help="with init: overwrite an existing workflow")
+    parser.add_argument(
+        "--markdown", action="store_true",
+        help="with `fix`: render the plan as Markdown to paste into a PR or ticket",
+    )
+    parser.add_argument(
+        "--include-warnings", action="store_true",
+        help="with `fix`: also plan the two-power near-misses, not just criticals",
+    )
     parser.add_argument(
         "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default="text",
         help=(
@@ -164,6 +172,14 @@ def main(argv: list[str] | None = None) -> int:
         from .init_cmd import run_init
 
         return run_init(args.command or ".", force=args.force)
+    if args.path == "fix":
+        from .fix_cmd import run_fix
+
+        return run_fix(
+            args.command or ".",
+            markdown=args.markdown,
+            include_warnings=args.include_warnings,
+        )
     if args.path == "gate":
         from .gate_cmd import run_gate
 

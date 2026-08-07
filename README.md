@@ -419,12 +419,25 @@ are optional and detected on `PATH`.
 
 ```console
 tridelphi .                                    # scan, human-readable
+tridelphi . --format checklist                 # plain-language pass/fail, no jargon
+tridelphi fix                                  # an ordered to-do list, cheapest change first
+tridelphi fix --markdown                       # the same plan, ready to paste into a PR
 tridelphi . --format sarif --sarif-file s.json # for GitHub code scanning
 tridelphi . --format html  --html-file r.html  # a self-contained report page
 tridelphi --explain agent-config-ingress       # what a rule means and why
 tridelphi --coverage                           # ADR taxonomy coverage
 tridelphi --list-rules                         # every rule at a glance
 ```
+
+### 🛠️ From finding to fix
+
+`tridelphi fix` reads the same findings and turns them into a remediation plan
+ordered by cost — a one-line change before a job restructure — so the shortest
+path back to green is at the top. Each item names the exact `file:line`, the
+capability to strip, the concrete change, and what it trades off. It is
+**read-only**: like every other command, it only reads your workflows and never
+edits them. `--markdown` renders the plan for a pull request or a ticket, and
+the exit code follows the gate (1 while a critical remains, else 0).
 
 ### 🔁 The ratchet
 
