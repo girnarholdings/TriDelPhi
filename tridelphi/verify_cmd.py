@@ -89,8 +89,19 @@ class ActionRef:
     @property
     def lock_key(self) -> str:
         """Identity independent of the pin, so a SHA change is a diff not a new
-        entry. Subpath included: two subactions of one repo lock separately."""
-        return self.slug
+        entry. Subpath included: two subactions of one repo lock separately.
+
+        Lower-cased: GitHub resolves ``owner/repo`` case-insensitively (repo
+        routing does not distinguish ``Actions/checkout`` from
+        ``actions/checkout``), so the lock key must not either. Otherwise an
+        attacker can evade the pawl for free: change the case of a `uses:`
+        line and its SHA in the same PR, and a case-sensitive key would treat
+        the locked action as brand new — downgrading what should be a gating
+        ``trust-lock-regression`` error to a non-gating ``unlocked-action``
+        note. Matching GitHub's own case-insensitivity here is what keeps a
+        tampered casing from being a way to launder a takeover as "unseen
+        before" instead of "changed"."""
+        return self.slug.lower()
 
 
 def _uses_value(line: str) -> str | None:
@@ -104,6 +115,45 @@ def _uses_value(line: str) -> str | None:
     if stripped.startswith("#"):
         return None
     m = re.match(r"^-?\s*uses:\s*(.+?)\s*(?:#.*)?$", stripped)
+    if not m:
+        return None
+    value = m.group(1).strip().strip("'\"")
+    return value or None
+
+
+# A bare `uses:` key with nothing after the colon (besides a comment) — the
+# shape whose value YAML folds onto the next line.
+_BARE_USES_KEY_RE = re.compile(r"^-?\s*uses:\s*(?:#.*)?$")
+
+
+def _folded_uses_value(lines: list[str], key_idx: int) -> str | None:
+    """Handle `uses:` value folded onto the very next line — plain, valid
+    YAML that GitHub Actions parses identically to the single-line form:
+
+        - uses:
+            actions/checkout@<sha>
+
+    is the same action reference as `- uses: actions/checkout@<sha>`. A
+    same-line-only scan misses it entirely — not as an "unlocked" note, but
+    invisibly, with no finding at all — which makes it a way to place a
+    third-party action completely outside the pawl's view. Handles only the
+    direct one-line fold (the realistic shape); deeper multi-line YAML
+    folding remains out of the line-scan's stated scope.
+    """
+    key_line = lines[key_idx]
+    if not _BARE_USES_KEY_RE.match(key_line.strip()):
+        return None
+    if key_idx + 1 >= len(lines):
+        return None
+    nxt = lines[key_idx + 1]
+    nxt_stripped = nxt.strip()
+    if not nxt_stripped or nxt_stripped.startswith(("#", "-")):
+        return None
+    key_indent = len(key_line) - len(key_line.lstrip(" "))
+    nxt_indent = len(nxt) - len(nxt.lstrip(" "))
+    if nxt_indent <= key_indent:
+        return None  # not a continuation — a sibling key or dedented content
+    m = re.match(r"^(.+?)\s*(?:#.*)?$", nxt_stripped)
     if not m:
         return None
     value = m.group(1).strip().strip("'\"")
@@ -128,8 +178,11 @@ def enumerate_uses(repo_root: str | Path) -> list[ActionRef]:
         except OSError:
             continue
         rel = wf.relative_to(root).as_posix()
-        for i, line in enumerate(text.splitlines(), start=1):
+        lines = text.splitlines()
+        for i, line in enumerate(lines, start=1):
             value = _uses_value(line)
+            if value is None:
+                value = _folded_uses_value(lines, i - 1)
             if value is None or value.startswith(("./", "docker://")):
                 continue
             m = _USES_RE.match(value)
@@ -157,7 +210,14 @@ def _load_lock(path: Path) -> dict[str, dict[str, str]]:
             sha = entry.get("sha")
             owner = entry.get("owner")
             if isinstance(sha, str) and isinstance(owner, str):
-                clean[key] = {"sha": sha, "owner": owner}
+                # Normalized the same way as ActionRef.lock_key: a lock file
+                # is attacker-influenceable too (committed to a repo a PR can
+                # edit), and if the on-disk key casing diverged from what a
+                # correctly-pinned workflow now computes, a real regression
+                # would fail to match this entry and read as "unlocked" (a
+                # note) instead of "changed" (an error) — the same gate
+                # bypass in the other direction.
+                clean[key.lower()] = {"sha": sha, "owner": owner}
     return clean
 
 
@@ -209,7 +269,7 @@ def _check_against_lock(
                 )
             )
             continue
-        if locked["owner"] != ref.owner:
+        if locked["owner"].lower() != ref.owner.lower():
             findings.append(
                 VerifyFinding(
                     "error",
