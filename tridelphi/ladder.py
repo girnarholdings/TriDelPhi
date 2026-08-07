@@ -622,9 +622,15 @@ def credits_text() -> str:
         lines.append(f"  {'':20} {spec.what}; {net}")
         lines.append(f"  {'':20} {spec.homepage}")
         lines.append("")
+    lines.append("")
+    lines.append("  L7 · trust           gh CLI  (MIT, optional)")
+    lines.append(f"  {'':20} verifies upstream SLSA provenance; only the fetch is online")
+    lines.append(f"  {'':20} https://github.com/cli/cli")
+    lines.append("")
     lines.append("TriDelPhi core (the capability-graph analysis) is native and always runs.")
     lines.append(
-        "L6 (attest & gate) is native too: `tridelphi attest` and `tridelphi gate` — "
-        "no wrapped tool, nothing further to install."
+        "L6 (attest & gate) and L7's trust-lock pawl are native too: "
+        "`tridelphi attest` / `gate` / `verify` — no wrapped tool for those, "
+        "and the trust-lock verifies fully offline."
     )
     return "\n".join(lines)

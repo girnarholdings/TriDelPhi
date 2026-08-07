@@ -227,10 +227,12 @@ everything into **one SARIF document, one Security tab, one gate**:
 | **L4** | [scorecard](https://github.com/ossf/scorecard) | Apache-2.0 | OSSF repo posture: security policy, token permissions, pinning¹ |
 | **L5** | [semgrep](https://github.com/semgrep/semgrep) | LGPL-2.1 | rule-based SAST of the application code itself¹ |
 | **L6** | **tridelphi attest / gate** | Apache-2.0 | native: emit signed evidence + enforce policy as its own step |
+| **L7** | **tridelphi verify** + [gh](https://github.com/cli/cli) | Apache-2.0 / MIT | native trust-lock pawl (offline) + upstream provenance verification |
 
 ```console
 tridelphi . --level 3      # lean default: secrets + supply chain + workflow lint + core
 tridelphi . --level 6      # the whole ladder, then write the evidence statement
+tridelphi . --level 7      # + verify consumed actions against the trust-lock
 tridelphi . --level 1      # just secrets + core
 tridelphi --credits        # who built what — the wrapped tools, with licenses
 ```
@@ -262,6 +264,33 @@ the composite action feeds the evidence to `actions/attest-build-provenance`,
 which signs it with the workflow's OIDC identity. The generated `init`
 workflow also drops in [step-security/harden-runner](https://github.com/step-security/harden-runner)
 (Apache-2.0) to audit the scan job's own egress.
+
+### 🔑 L7 — trust: the pawl SHA-pinning can't provide
+
+L6 *produces* signed evidence; L7 is the **consumer** half nothing below it
+provides — it asks the one question the content rungs don't: *is what I consume
+still pinned to who it claims to be?*
+
+```console
+tridelphi verify --write-trust-lock   # once: record each action's owner + pinned SHA
+git add .tridelphi/trust.lock          # commit the pawl
+tridelphi verify .                     # from now on, a changed signer fails the build
+```
+
+The **trust-lock** records the owner and pinned SHA of every third-party
+`uses:` in your workflows. On a later run, an action whose SHA changed *under
+the same ref*, or whose owner changed (a repo transfer), is an **error** that
+fails the gate. This is the case SHA-pinning cannot see: pinning defeats tag
+*mutation*, but a hijacked or transferred upstream repo — the tj-actions class —
+looks like a legitimate new SHA. The lock catches it. The whole pawl is
+**offline and deterministic**: no network, no crypto, just the diff between
+what you locked and what the workflow says now.
+
+Where the [gh CLI](https://github.com/cli/cli) is present and online, L7 also
+verifies upstream SLSA build provenance — reported honestly at `note` level,
+because in 2026 most actions publish none, and a finding you can't act on
+should never break your build. See [`docs/L7_PROPOSAL.md`](docs/L7_PROPOSAL.md)
+for the full design and its honest limits.
 
 ## ⚡ Put it in CI — one line
 
@@ -331,7 +360,8 @@ merged SARIF — attribution is structural, not a footnote:
 [scorecard](https://github.com/ossf/scorecard) (Apache-2.0) ·
 [semgrep](https://github.com/semgrep/semgrep) (LGPL-2.1) ·
 [step-security/harden-runner](https://github.com/step-security/harden-runner) (Apache-2.0) ·
-[actions/attest-build-provenance](https://github.com/actions/attest-build-provenance) (MIT).
+[actions/attest-build-provenance](https://github.com/actions/attest-build-provenance) (MIT) ·
+[gh CLI](https://github.com/cli/cli) (MIT, L7 provenance).
 Run `tridelphi --credits` for the same table from the CLI.
 
 ## 📊 Honest calibration

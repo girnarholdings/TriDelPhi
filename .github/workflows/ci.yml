@@ -148,7 +148,7 @@ jobs:
         run: bash scripts/install-ladder.sh 5
       - name: Ladder tests with real binaries
         # This is the only job where all five scanners exist, so it must run
-        # every ladder test file — including the live schema-contract, L4-L6
+        # every ladder test file — including the live schema-contract, L4-L7
         # and adversarial tests that skip themselves elsewhere.
         run: >
           python -m pytest -q
@@ -156,12 +156,17 @@ jobs:
           tests/test_ladder_adversarial.py
           tests/test_ladder_sarif.py
           tests/test_ladder_l456.py
+          tests/test_verify_l7.py
           tests/test_orchestrate.py
       - name: Dogfood the full bundle on this repo
-        # Level 6: run every rung, then attest over the merged SARIF.
-        run: tridelphi . --level 6 --sarif-file tridelphi.sarif --format text
+        # Level 7: run every rung, attest over the merged SARIF, then verify the
+        # committed trust-lock. --offline keeps it deterministic (no osv.dev, no
+        # provenance fetch); the trust-lock pawl is offline by design anyway.
+        run: tridelphi . --level 7 --offline --sarif-file tridelphi.sarif --format text
       - name: The gate re-checks the merged SARIF as its own step
         run: tridelphi gate tridelphi.sarif
+      - name: The trust-lock pawl must pass on this repo
+        run: tridelphi verify . --offline
 
   bot:
     name: bot

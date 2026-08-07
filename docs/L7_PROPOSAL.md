@@ -1,5 +1,14 @@
 # L7 proposal — capping the TriDelPhi hardening ladder
 
+> **Status: implemented.** L7 · trust shipped as `tridelphi verify` (and
+> `--level 7`) — the offline **trust-lock pawl** as the headline, with
+> opportunistic `gh attestation verify` for upstream provenance at `note`
+> level, exactly as this proposal recommended. See `tridelphi/verify_cmd.py`
+> and `tests/test_verify_l7.py`. The audit findings in §1 that this rung does
+> **not** close (scorecard gating, external-finding baselining) remain recorded
+> here as honest known-limitations. This document is preserved as the design
+> rationale.
+
 **Author:** external supply-chain / CI security audit
 **Scope:** a candid audit of L1–L6 as built, then one proposed L7 rung, the
 alternatives rejected to get there, and the effort/risk to build it.
