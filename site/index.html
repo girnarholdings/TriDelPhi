@@ -118,6 +118,35 @@ section{padding:46px 0;border-top:1px solid var(--line)}
 .file.good .verdict{background:rgba(61,220,151,.16);color:var(--ok)}
 .file p{margin:10px 0 0;font-size:13px;color:#c3cce0}
 
+/* ---- two-half compare (static vs runtime) ---- */
+.halves{display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:stretch;margin-top:24px}
+@media(max-width:760px){.halves{grid-template-columns:1fr;gap:12px}}
+.half{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:18px 18px 16px}
+.half.static{border-top:3px solid var(--e)} .half.runtime{border-top:3px solid var(--p)}
+.half .who{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+.half.static .who{color:var(--e)} .half.runtime .who{color:var(--p)}
+.half h3{margin:6px 0 4px;font-size:17px}
+.half .when{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-bottom:10px}
+.half ul{margin:0;padding-left:18px} .half li{font-size:13px;color:#c3cce0;margin:5px 0}
+.vs{display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-size:12px;color:var(--faint)}
+@media(max-width:760px){.vs{padding:4px 0}}
+.cov{margin-top:20px;border:1px solid var(--line);border-radius:12px;background:#05070c;
+  padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.75;color:#c3cce0;overflow-x:auto}
+.cov .yes{color:var(--ok)} .cov .no{color:var(--faint)} .cov .gap{color:var(--p)}
+
+/* ---- process ladder ---- */
+.ladder{margin-top:24px;display:grid;gap:10px}
+.rung{display:grid;grid-template-columns:34px 1fr auto;gap:14px;align-items:center;
+  border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:13px 16px}
+.rung .lv{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--e);
+  border:1px solid var(--line);border-radius:8px;width:34px;height:30px;display:flex;
+  align-items:center;justify-content:center}
+.rung .body b{font-size:14px} .rung .body span{display:block;font-size:12.5px;color:var(--mute);margin-top:2px}
+.rung code{font-family:var(--mono);font-size:12px;background:#05070c;border:1px solid var(--line);
+  border-radius:6px;padding:3px 8px;color:#c3cce0;white-space:nowrap}
+@media(max-width:640px){.rung{grid-template-columns:34px 1fr}.rung code{display:none}}
+
 /* ---- steps ---- */
 .steps{display:grid;gap:12px;margin-top:22px}
 .step{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start;
@@ -149,8 +178,10 @@ footer a{color:var(--mute)}
     <div class="logo">Tri<b>Del</b>Phi</div>
     <nav>
       <a href="#how">How it works</a>
-      <a href="#install">Install</a>
       <a href="#moat">The hard part</a>
+      <a href="#picture">Static + runtime</a>
+      <a href="#process">Process</a>
+      <a href="#install">Install</a>
       <a href="https://github.com/girnarholdings/TriDelPhi">GitHub</a>
     </nav>
   </div>
@@ -168,6 +199,10 @@ footer a{color:var(--mute)}
         <span class="cmd"><span class="p">$</span> tridelphi .</span>
       </div>
       <p class="sub"><b>Python 3.11+.</b> One dependency. Reads files on disk — nothing leaves the machine.</p>
+      <div class="facts" style="margin-top:18px">
+        <span class="fact"><b>87/87</b> attack shapes caught in the red-team sweep</span>
+        <span class="fact"><b>zero</b> network calls</span>
+      </div>
     </div>
 
     <div class="venn-card">
@@ -276,6 +311,84 @@ footer a{color:var(--mute)}
         <p>Not in the restore list — it stays at pull-request head, attacker-controlled,
           and the agent reads it as instructions. This is the real finding.</p>
       </div>
+    </div>
+  </section>
+
+  <!-- ADR: STATIC + RUNTIME -->
+  <section id="picture">
+    <span class="eyebrow">The complete picture</span>
+    <h2>Static analysis is half of agent security. This is that half.</h2>
+    <p class="lede">Uber's <a href="https://github.com/uber/ADR">ADR</a> (MLSys 2026)
+      secures AI agents at <b>runtime</b> — it watches sessions and catches a
+      hijack as it happens. TriDelPhi works <b>before</b> anything runs: it finds
+      the jobs where those attacks would land. Two halves of one problem, and
+      TriDelPhi says plainly where its half ends.</p>
+
+    <div class="halves">
+      <div class="half static">
+        <div class="who">TriDelPhi · static</div>
+        <h3>Find it before it ships</h3>
+        <div class="when">reads config on disk · offline · one command</div>
+        <ul>
+          <li>Which jobs can an attacker's comment reach?</li>
+          <li>Do any hold secrets and egress at the same time?</li>
+          <li>Which agent config does the action <i>not</i> restore?</li>
+          <li>Fix the finding and it never runs.</li>
+        </ul>
+      </div>
+      <div class="vs">complements</div>
+      <div class="half runtime">
+        <div class="who">Uber ADR · runtime</div>
+        <h3>Catch what got through</h3>
+        <div class="when">observes live agent sessions · telemetry</div>
+        <ul>
+          <li>Is a running agent being steered off-task?</li>
+          <li>Did a tool call deviate from intent?</li>
+          <li>Long-term goal drift across a session.</li>
+          <li>Things no repository file can reveal.</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="sub" style="margin-top:20px"><code style="background:none;border:0;padding:0;color:var(--e)">tridelphi --coverage</code>
+      maps every rule onto ADR's 17 threat techniques — and marks the ones static analysis cannot reach:</p>
+    <div class="cov"><span class="yes">[x]</span> Agentic Control-Flow Hijacking             <span class="yes">detected</span>
+<span class="yes">[x]</span> Indirect Prompt Injection                  <span class="yes">detected</span>
+<span class="yes">[x]</span> Exploitation of Excessive Tool Permissions <span class="yes">detected</span>
+<span class="gap">[ ]</span> Tool Shadowing                             <span class="gap">gap — reachable, no rule yet</span>
+<span class="no">[-]</span> Long-Term Goal Hijacking                   <span class="no">runtime-only</span>
+<span class="no">...</span>
+<span class="mono">8 of 11 statically reachable techniques covered · 6 of 17 are runtime-only</span></div>
+    <p class="sub" style="margin-top:14px">A technique with no rule is reported as a <span style="color:var(--p)">gap</span> —
+      our backlog — never hidden among the runtime-only ones. Honest coverage is the point.</p>
+  </section>
+
+  <!-- FULL PROCESS -->
+  <section id="process">
+    <span class="eyebrow">The full process</span>
+    <h2>From first scan to a gate that holds.</h2>
+    <p class="lede">You do not turn on a blocking check day one — it fails on
+      unrelated backlog and gets deleted by Friday. TriDelPhi walks a repo up the
+      rungs, and the gate arrives last, when it can pass on the first try.</p>
+    <div class="ladder">
+      <div class="rung"><span class="lv">1</span>
+        <span class="body"><b>Scan</b><span>See every job's capabilities. Criticals first.</span></span>
+        <code>tridelphi .</code></div>
+      <div class="rung"><span class="lv">2</span>
+        <span class="body"><b>Fix the criticals</b><span>Each finding names the one line to change and what it breaks.</span></span>
+        <code>--explain &lt;rule&gt;</code></div>
+      <div class="rung"><span class="lv">3</span>
+        <span class="body"><b>Freeze the rest</b><span>Baseline the backlog; only new findings block from here.</span></span>
+        <code>--write-baseline</code></div>
+      <div class="rung"><span class="lv">4</span>
+        <span class="body"><b>Widen coverage</b><span>Add zizmor's line-level checks, merged into one SARIF.</span></span>
+        <code>--with-zizmor</code></div>
+      <div class="rung"><span class="lv">5</span>
+        <span class="body"><b>Upload to code scanning</b><span>Findings land in the Security tab and on the PR.</span></span>
+        <code>--sarif-file</code></div>
+      <div class="rung"><span class="lv">6</span>
+        <span class="body"><b>Gate</b><span>Make the check required. It passes, because five rungs made it able to.</span></span>
+        <code>--fail-on critical</code></div>
     </div>
   </section>
 
