@@ -923,11 +923,12 @@ $ tridelphi init
       <div class="setup-copy">
         <h3>Three steps, then never think about it again.</h3>
         <p>The guard robot runs on GitHub, for free. On every suggested change it posts a friendly
-          comment: <span class="hl">all clear, or here's the one thing to fix and how.</span> No dashboards,
+          comment: <span class="hl">all clear, or here's the one thing to fix and how.</span> If the change is
+          dangerous, it <span class="hl">stops it from merging</span> until you've seen it. No dashboards,
           no subscription, no data leaving your project.</p>
         <div class="stepline"><span class="n">1</span><div>Install it<span>One line. Works with <span class="mono">pip</span> or <span class="mono">uvx</span> too — Python is all it needs.</span></div></div>
         <div class="stepline"><span class="n">2</span><div>Let it set up the guard<span><span class="mono">tridelphi init</span> writes the robot for you. Nothing to configure.</span></div></div>
-        <div class="stepline"><span class="n">3</span><div>Commit and forget<span>It comments on every change from then on. Green means you're good.</span></div></div>
+        <div class="stepline"><span class="n">3</span><div>Commit and forget<span>It checks every change from then on — and a dangerous one <b>fails the build</b>, with the fix written out for you.</span></div></div>
         <div class="pills">
           <span class="pill"><b>free</b> &amp; open source</span>
           <span class="pill"><b>no</b> account or token</span>
@@ -992,6 +993,31 @@ $ tridelphi init
 
   <span class="dim">Work top-down. After each fix, run `tridelphi .` again —</span>
   <span class="dim">a fixed item drops off the list.</span></pre>
+    </div>
+
+    <!-- and, with your yes, it fixes it -->
+    <h3 style="font-family:var(--serif);font-size:clamp(21px,3vw,28px);margin:52px 0 6px;text-align:center">Or just say yes — and it's fixed.</h3>
+    <p class="lede" style="text-align:center;margin:0 auto 22px"><span class="mono">tridelphi&nbsp;guard</span> shows each problem with its exact solution and asks before touching anything. Say <span class="hl">y</span> and it makes the change, <span class="hl">re-scans to prove the problem is gone</span> — and if it can't prove it, it puts your file back exactly as it was. You can also comment out the risky step or switch the whole workflow off.</p>
+    <div class="report">
+      <div class="rtop"><i></i><i></i><i></i><span>tridelphi guard — you decide, it fixes</span></div>
+<pre>  <span class="head">tridelphi guard · my-cool-app</span>
+
+  1 finding. For each one: the exact solution, and the choice is yours.
+
+  ──────────────────────────────────────────────────────
+  <span class="gold">1/1 · CRITICAL · one-line change</span>
+    .github/workflows/assist.yml:19   job "assist"
+
+    A stranger's comment is placed in the robot's instructions.
+    Gate the job so only trusted people can reach it.
+
+  [<span class="ok">y</span>] fix it now  [c] comment out the step  [d] disable this workflow  [s] skip
+  > <span class="ok">y</span>
+  <span class="ok">✓ edited and re-scanned — the finding is gone</span>
+  ──────────────────────────────────────────────────────
+
+  <span class="ok">1 fix applied and verified.</span>
+  <span class="ok">No criticals remain. You're good.</span></pre>
     </div>
 
     <!-- trust strip -->

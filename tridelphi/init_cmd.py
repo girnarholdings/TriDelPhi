@@ -1,9 +1,11 @@
-"""`tridelphi init` — drop a ready-to-run workflow into a repo.
+"""`tridelphi init` — drop a ready-to-run guard workflow into a repo.
 
 The whole point is that a non-expert can protect their repo in one command. It
 writes `.github/workflows/tridelphi.yml`, a workflow that scans on every pull
-request, uploads results to the Security tab, and posts a plain-language sticky
-comment on the PR. No flags to learn, no config to write.
+request, uploads results to the Security tab, posts a plain-language sticky
+comment on the PR — and *fails the build* when a critical exists, with the
+ordered fix plan in the run's Summary tab. Explain first, then block: the
+comment and the SARIF always land before the gate fires.
 
 Idempotent: it refuses to clobber an existing file unless `--force` is given,
 and it prints exactly what to do next.
@@ -63,14 +65,17 @@ jobs:
 
       - name: Scan
         id: scan
-        # Never fail the job here; we want the SARIF upload and the PR comment to
-        # run regardless. The gate is code scanning + branch protection, not this
-        # step's exit code.
+        # Don't fail *this* step; the SARIF upload and the PR comment must run
+        # regardless. The exit code is captured and enforced by the Gate step
+        # at the end, so a critical still fails the build — loudly, and after
+        # the explanation has already been posted.
         # `--format checklist` is the plain-language report: a first-time reader
         # gets pass/fail and what to do, not exit codes and rule ids. SARIF still
         # carries the full detail to the Security tab.
         run: |
-          tridelphi . --format checklist --sarif-file tridelphi.sarif > report.txt 2>&1 || true
+          code=0
+          tridelphi . --format checklist --sarif-file tridelphi.sarif > report.txt 2>&1 || code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
           {
             echo 'text<<TRIDELPHI_EOF'
             cat report.txt
@@ -120,10 +125,28 @@ jobs:
                 issue_number: context.issue.number, body,
               });
             }
+
+      - name: Gate
+        # The guard's teeth: after the report is uploaded and the comment is
+        # posted, a critical fails the build — with the exact solution one
+        # click away in the run's Summary tab, ordered easiest-first.
+        if: steps.scan.outputs.code != '0'
+        run: |
+          {
+            echo '## 🔺 TriDelPhi found something a stranger could exploit'
+            echo
+            tridelphi fix --markdown || true
+            echo
+            echo 'Fix it from your terminal, interactively: `pipx install tridelphi && tridelphi guard`'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "TriDelPhi: critical finding — see the job Summary for the fix plan." >&2
+          exit 1
 """
 
 _NEXT_STEPS = """\
-Done. TriDelPhi will now scan every pull request and post a sticky comment.
+Done. TriDelPhi now guards this repo: every pull request is scanned, a
+plain-English comment explains what it found, and a critical FAILS the build —
+with the fix plan in the run's Summary tab.
 
 Next:
   1. Commit and push this file:
@@ -131,7 +154,9 @@ Next:
        git commit -m "Add TriDelPhi security scan"
        git push
   2. Open a pull request — you'll get a comment within a minute.
-  3. (Optional) Turn on GitHub code scanning to see findings in the Security tab:
+  3. If it ever goes red, run `tridelphi guard` here in your terminal: it shows
+     each problem with its exact solution and asks before fixing anything.
+  4. (Optional) Turn on GitHub code scanning to see findings in the Security tab:
        Settings -> Code security -> Code scanning -> set up.
 
 Nothing else to configure. It reads only files on disk and makes no network calls.

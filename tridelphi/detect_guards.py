@@ -23,7 +23,7 @@ from collections.abc import Iterator
 from .model import CapabilityHit, ExecutionContext
 from .tables import Tables
 
-__all__ = ["detect"]
+__all__ = ["detect", "has_strong_association_gate"]
 
 # An actor-identity reference used as a guard.
 _ACTOR_REF = re.compile(r"github\.(?:triggering_actor|actor)\b")
@@ -35,6 +35,31 @@ _STRONG = (
     "MEMBER",
     "COLLABORATOR",
 )
+
+_TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+
+
+def has_strong_association_gate(context: ExecutionContext) -> bool:
+    """Does a job-level ``if:`` gate the event author on ``author_association``?
+
+    This is the gate our own remediation recommends (see ``rule.py``): only
+    OWNER / MEMBER / COLLABORATOR authors can make the job run, so a drive-by
+    stranger's text never reaches it. If the detectors did not honour it, a user
+    who applies our exact advice would still be red — advice the tool gives must
+    be advice the tool accepts.
+
+    The check is deliberately narrow: the expression must reference
+    ``author_association`` together with a trusted association name, and must
+    not be an inverted test (``!contains``, ``!=``), which would *admit*
+    strangers rather than exclude them. Step-level gates do not count — they
+    protect one step, not the job the finding is about.
+    """
+    expr = context.job_if or ""
+    if "author_association" not in expr:
+        return False
+    if not any(assoc in expr for assoc in _TRUSTED_ASSOCIATIONS):
+        return False
+    return not ("!contains" in expr.replace(" ", "") or "!=" in expr)
 
 
 def _guard_expressions(context: ExecutionContext) -> Iterator[tuple[str, object]]:

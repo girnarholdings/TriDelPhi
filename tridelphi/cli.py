@@ -50,7 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "path", nargs="?", default=".",
-        help="repository root, `init` to add the scan workflow, or `fix` for a remediation plan (default: .)",
+        help=(
+            "repository root, or a command: `init` adds the scan workflow, `fix` "
+            "prints a remediation plan, `guard` fixes interactively (default: .)"
+        ),
     )
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true", help="with init: overwrite an existing workflow")
@@ -60,7 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--include-warnings", action="store_true",
-        help="with `fix`: also plan the two-power near-misses, not just criticals",
+        help="with `fix`/`guard`: also handle the two-power near-misses, not just criticals",
+    )
+    parser.add_argument(
+        "--apply", action="store_true",
+        help="with `fix`: apply the automatic fixes (batch; every edit verified or rolled back)",
+    )
+    parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="with `guard`: apply automatic fixes without prompting (never disables workflows)",
     )
     parser.add_argument(
         "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default="text",
@@ -173,12 +184,34 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_init(args.command or ".", force=args.force)
     if args.path == "fix":
+        if args.apply:
+            # `fix --apply` is the batch spelling of guard: automatic fixers
+            # only, every edit verified against a re-scan or rolled back.
+            from .guard_cmd import run_guard
+
+            return run_guard(
+                args.command or ".",
+                yes=True,
+                include_warnings=args.include_warnings,
+                level=args.level,
+                offline=args.offline,
+            )
         from .fix_cmd import run_fix
 
         return run_fix(
             args.command or ".",
             markdown=args.markdown,
             include_warnings=args.include_warnings,
+        )
+    if args.path == "guard":
+        from .guard_cmd import run_guard
+
+        return run_guard(
+            args.command or ".",
+            yes=args.yes,
+            include_warnings=args.include_warnings,
+            level=args.level,
+            offline=args.offline,
         )
     if args.path == "gate":
         from .gate_cmd import run_gate

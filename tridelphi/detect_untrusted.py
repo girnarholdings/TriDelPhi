@@ -85,11 +85,23 @@ def _scan_interpreter_sinks(
 
     env_files = tables.tuple_of("untrusted_expressions", "env_file_targets")
 
+    # A strong author_association job gate means only trusted accounts can make
+    # this job run at all, so event-payload text is no longer stranger-writable.
+    # This is the remediation rule.py recommends for expression injection —
+    # honouring it here is what makes that advice actually turn the scan green.
+    # Scope: `github.event.*` paths only (the payload the gate vets the author
+    # of); env-file writes and re-expansion keep firing as defence in depth.
+    from .detect_guards import has_strong_association_gate
+
+    gated = has_strong_association_gate(context)
+
     for step in _iter_steps(context):
         run = step.get("run")
         if run is not None and run.text:
             for path in expression_paths(run.text):
                 matched = matches_untrusted_path(path, patterns)
+                if matched and gated and path.startswith("github.event."):
+                    continue
                 if matched:
                     yield CapabilityHit(
                         capability="U",
@@ -134,6 +146,8 @@ def _scan_interpreter_sinks(
                         continue
                     for path in expression_paths(node.text):
                         matched = matches_untrusted_path(path, patterns)
+                        if matched and gated and path.startswith("github.event."):
+                            continue
                         if matched:
                             yield CapabilityHit(
                                 capability="U",
