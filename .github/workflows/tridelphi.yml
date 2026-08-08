@@ -1,0 +1,68 @@
+# TriDelPhi guarding TriDelPhi — the dogfood watcher.
+#
+# This is the workflow `tridelphi init` gives every user, with one difference:
+# instead of installing from a registry it runs the composite action from this
+# very checkout (`uses: ./`), so every new update is scanned by the version of
+# TriDelPhi contained in that update. If a change breaks the scanner, the
+# action, or the pinned ladder installs, this goes red on the PR that did it.
+#
+# What a red run gives you is the product experience end to end: the sticky
+# plain-language PR comment, the merged SARIF in the Security tab, the ordered
+# fix plan in the run's Summary — and a failed build.
+name: TriDelPhi
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+concurrency:
+  group: tridelphi-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Agents Rule of Two
+    runs-on: ubuntu-latest
+    steps:
+      # Egress telemetry for this job itself (step-security/harden-runner,
+      # Apache-2.0). Audit mode only observes; the ladder's osv rung needs
+      # osv.dev, so a block policy would need that endpoint allowlisted.
+      - uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        with:
+          egress-policy: audit
+
+      # The scan only reads the tree; don't leave the token in .git/config for
+      # later steps to find (zizmor: artipacked).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # The one-line install path users take, run against its own source:
+      # climbs L1-L3 (gitleaks + osv-scanner + zizmor + core), uploads the
+      # merged SARIF, posts the sticky checklist comment, and fails the job
+      # on a critical.
+      - name: Run the ladder from this checkout
+        uses: ./
+        with:
+          level: 3
+
+      # The action already failed the job; this adds the guard's Summary-tab
+      # fix plan, same as the init-generated workflow. tridelphi is on PATH
+      # because the composite action installed this checkout.
+      - name: Fix plan to the run summary
+        if: failure()
+        run: |
+          {
+            echo '## 🔺 TriDelPhi found something a stranger could exploit'
+            echo
+            tridelphi fix --markdown || true
+            echo
+            echo 'Fix it from your terminal, interactively: `tridelphi guard`'
+          } >> "$GITHUB_STEP_SUMMARY"
