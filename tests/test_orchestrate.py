@@ -57,6 +57,39 @@ def test_merge_preserves_each_tools_results():
     assert merged["runs"][1]["results"] == [3]
 
 
+def test_merge_gives_every_locationless_result_a_location():
+    """One locationless result takes down the entire code-scanning upload
+    ("locationFromSarifResult: expected at least one location"), so the merge
+    boundary must guarantee an anchor — whichever tool forgot one."""
+    primary = {"version": "2.1.0", "runs": []}
+    external = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "sometool"}},
+                "results": [
+                    {"ruleId": "bare"},  # no locations at all
+                    {"ruleId": "empty", "locations": []},  # empty list
+                    {
+                        "ruleId": "kept",
+                        "locations": [
+                            {"physicalLocation": {"artifactLocation": {"uri": "a.yml"}}}
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    merged = merge_runs(primary, external)
+    results = merged["runs"][0]["results"]
+    for res in results:
+        assert res["locations"], f"result {res['ruleId']} left without a location"
+    # a valid location is never rewritten
+    assert results[2]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "a.yml"
+    # the original external document is not mutated
+    assert "locations" not in external["runs"][0]["results"][0]
+
+
 def test_summary_line_is_stable():
     from tridelphi.orchestrate import ZizmorResult
 

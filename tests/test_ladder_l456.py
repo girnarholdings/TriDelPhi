@@ -98,6 +98,20 @@ def test_scorecard_json_becomes_sarif_by_score():
     }
 
 
+def test_scorecard_results_always_carry_a_location():
+    """GitHub code scanning rejects the whole uploaded SARIF file when any one
+    result lacks a location — observed live on the first level-7 watcher run.
+    Repo-level posture findings get the conventional README.md anchor."""
+    raw = json.dumps({"checks": [{"name": "Fuzzing", "score": 0, "reason": "not fuzzed"}]})
+    result = _scorecard_to_sarif(SCORECARD, raw)
+    for res in result["runs"][0]["results"]:
+        locs = res["locations"]
+        assert locs, "every scorecard result must carry a location"
+        phys = locs[0]["physicalLocation"]
+        assert phys["artifactLocation"]["uri"] == "README.md"
+        assert phys["region"]["startLine"] == 1
+
+
 def test_scorecard_results_are_deterministic():
     raw = json.dumps(
         {
