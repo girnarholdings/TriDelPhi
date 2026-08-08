@@ -21,6 +21,10 @@ permissions:
   contents: read
   security-events: write
   pull-requests: write
+  # Level 7 signs the scan-evidence statement on push (skipped on PRs, which
+  # never get OIDC). Signing needs the workflow's OIDC identity:
+  id-token: write
+  attestations: write
 
 concurrency:
   group: tridelphi-${{ github.ref }}
