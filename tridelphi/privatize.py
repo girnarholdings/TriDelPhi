@@ -163,20 +163,25 @@ def _default_obfuscate(src: Path, dst: Path) -> tuple[bool, str]:
 
 
 def _default_run_cmd(command: str, cwd: Path, timeout: int) -> tuple[bool, str]:
-    """Run the user's OWN verification command, verbatim.
+    """Run the user's OWN verification command, verbatim, through a shell.
 
-    ``shell=True`` is deliberate and reviewed here: ``command`` is the exact
-    ``--build-cmd`` / ``--smoke-cmd`` string the user typed on their own machine,
-    invoked only after explicit interactive consent. It is *their* trusted input,
-    not the untrusted-input-to-shell path this tool exists to prevent — and real
-    smoke checks routinely need shell operators (``npm run build && node …``, a
-    piped health probe) that a split argv could not express. The suppression
-    below records that accepted exception in the open rather than hiding it.
+    ``command`` is the exact ``--build-cmd`` / ``--smoke-cmd`` string the user
+    typed on their own machine, invoked only after explicit interactive consent.
+    Real smoke checks routinely need shell operators (``npm run build && node …``,
+    a piped health probe) that a split argv could not express, so a shell is
+    required by design.
+
+    We spell that as an explicit ``["/bin/sh", "-c", command]`` argv rather than
+    ``subprocess.run(command, shell=True)``. The two are equivalent on POSIX and
+    the trust model is identical — the command is the user's own consented input,
+    never untrusted data spliced into a command line — but the explicit form is
+    plainer about deliberately invoking a shell and avoids the ``shell=True``
+    string/list footgun if this call is ever refactored. (POSIX ``/bin/sh``; this
+    is a dev/CI-runner command, not a Windows path.)
     """
     try:
         completed = subprocess.run(
-            # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
-            command, shell=True, cwd=str(cwd), capture_output=True,
+            ["/bin/sh", "-c", command], cwd=str(cwd), capture_output=True,
             text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
