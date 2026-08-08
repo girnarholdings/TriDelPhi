@@ -596,6 +596,11 @@ jobs:
         with: { level: '3' }
 ```
 
+Add `expose: 'true'` to also audit your **shipped product** (source maps, client
+secrets, weak hashing, open database) and upload it as a separate code-scanning
+category. It's **advisory** — it never fails the build — and it only sees built
+output present in the checkout, so run your build step first or it finds nothing.
+
 Or `tridelphi init` writes a complete workflow for you. Prefer a hosted bot
 across many repos? A Cloudflare Worker webhook front door lives in
 [`bot/`](bot/), testable with `wrangler dev`.
