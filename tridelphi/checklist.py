@@ -14,12 +14,13 @@ still exist for the CI path; here they become ✅ / ⚠️ / 🚫 and a plain ve
 
 from __future__ import annotations
 
+import re
 from typing import TextIO
 
 from .model import AnalysisResult
 from .render import SEVERITY_ORDER
 
-__all__ = ["ExternalStatus", "render_checklist"]
+__all__ = ["ExternalStatus", "items_from_sarif", "render_checklist"]
 
 # name → (ladder level, the plain question the check answers)
 _LADDER_ROWS: tuple[tuple[str, int, str], ...] = (
@@ -38,15 +39,100 @@ _PLAIN_FIX = {
     "E": "stop this job from reaching the internet",
 }
 
+# One plain sentence per rung explaining what its "worth a look" items are.
+_RUNG_GLOSS = {
+    "gitleaks": (
+        "Something that looks like a password or key is sitting in a file. "
+        "If it's real, make a new one and move it to Settings → Secrets."
+    ),
+    "osv-scanner": (
+        "A building block (package) this project uses has a published flaw, "
+        "and a fixed newer version exists — upgrade it when you can."
+    ),
+    "zizmor": (
+        "A hardening habit in your automation files that professionals "
+        "tighten — each line names the file and the setting."
+    ),
+    "scorecard": (
+        "A repository setting that could follow safer defaults. These are "
+        "changed on GitHub's Settings pages, not in your code."
+    ),
+    "semgrep": (
+        "A pattern in your app code that can be risky in some situations — "
+        "worth reading, often fine once you've looked."
+    ),
+    "trust": "A heads-up from the check that watches your outside tools' identity.",
+}
+
+# How many concrete items to spell out per rung before pointing at the report.
+_MAX_ITEMS = 4
+
 
 class ExternalStatus:
-    """One wrapped-tool's outcome, reduced to what the checklist needs."""
+    """One wrapped-tool's outcome, reduced to what the checklist needs.
 
-    __slots__ = ("counts", "ran")
+    ``items`` carries the actual findings as (severity, one-line text) pairs so
+    the checklist can *show* what "worth a look" refers to instead of a bare
+    count. The text comes from the wrapped tool and is untrusted — build it
+    with :func:`items_from_sarif`, which sanitizes it.
+    """
 
-    def __init__(self, ran: bool, counts: dict[str, int] | None = None) -> None:
+    __slots__ = ("counts", "items", "ran")
+
+    def __init__(
+        self,
+        ran: bool,
+        counts: dict[str, int] | None = None,
+        items: list[tuple[str, str]] | None = None,
+    ) -> None:
         self.ran = ran
         self.counts = counts or {"critical": 0, "warning": 0, "note": 0}
+        self.items = items or []
+
+
+_SARIF_LEVEL = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
+_UNPRINTABLE = re.compile("[^\\x20-\\x7e\\u00a0-\\uffff]")
+_ITEM_WIDTH = 96
+
+
+def _sanitize(text: str, width: int = _ITEM_WIDTH) -> str:
+    """Wrapped-tool text is untrusted input: one line, printable, bounded."""
+    flat = " ".join(_UNPRINTABLE.sub(" ", text).split())
+    return flat if len(flat) <= width else flat[: width - 1] + "…"
+
+
+def items_from_sarif(sarif: dict) -> list[tuple[str, str]]:
+    """(severity, "file:line — message") for each result, sanitized and sorted
+    worst-first. Malformed results are skipped, never fatal — this is display,
+    and the document came from a subprocess we do not control."""
+    items: list[tuple[str, str]] = []
+    for run in sarif.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        for result in run.get("results") or []:
+            if not isinstance(result, dict):
+                continue
+            level = result.get("level")
+            severity = _SARIF_LEVEL.get(level if isinstance(level, str) else "", "warning")
+            message = result.get("message")
+            text = message.get("text", "") if isinstance(message, dict) else ""
+            where = ""
+            locs = result.get("locations")
+            if isinstance(locs, list) and locs and isinstance(locs[0], dict):
+                phys = locs[0].get("physicalLocation") or {}
+                if isinstance(phys, dict):
+                    art = phys.get("artifactLocation") or {}
+                    region = phys.get("region") or {}
+                    uri = art.get("uri", "") if isinstance(art, dict) else ""
+                    line = region.get("startLine") if isinstance(region, dict) else None
+                    if isinstance(uri, str) and uri:
+                        where = _sanitize(uri, 60)
+                        if isinstance(line, int):
+                            where += f":{line}"
+            body = _sanitize(text) or "(no description given)"
+            items.append((severity, f"{where} — {body}" if where else body))
+    items.sort(key=lambda it: SEVERITY_ORDER.get(it[0], 3))
+    return items
 
 
 def _plain_why(capabilities: set[str]) -> str:
@@ -177,6 +263,55 @@ def render_checklist(
         }.get(name, "issue(s)")
         print(f"  🚫 {n} {label} — see the full report for the exact spots.", file=stream)
 
+    # --- the minor items, spelled out -----------------------------------
+    # "worth a look" as a bare count teaches nothing. This section shows the
+    # actual items and, once, what that phrase means — so the log itself
+    # answers "should I be worried?" without a trip to the docs.
+    advisory_core = [f for f in core_warn if SEVERITY_ORDER[f.severity] > threshold]
+    advisory_rungs = [
+        (name, question, st)
+        for name, _lvl, question in _LADDER_ROWS
+        if (st := external.get(name)) is not None
+        and st.ran
+        and st.counts["warning"]
+        and not st.counts["critical"]
+    ]
+    if advisory_core or advisory_rungs:
+        print(f"\n  {'─' * 54}\n", file=stream)
+        print('  What "worth a look" means, in plain terms:', file=stream)
+        print("      Not an open door — a stranger cannot use any of these to", file=stream)
+        print("      get in today. They are good-practice gaps, like a front", file=stream)
+        print("      door that locks but has no deadbolt yet. Tidy them when", file=stream)
+        print("      convenient; none of them blocks you.\n", file=stream)
+
+        for finding in advisory_core:
+            where = f"{finding.primary_position.file}, job \"{finding.context.job_id}\""
+            caps = {h.capability for h in finding.hits if h.observed}
+            print("  ⚠️  A job is one small change away from being risky", file=stream)
+            print(f"      Where:   {where}", file=stream)
+            print(f"      Why:     {_plain_why(caps)}", file=stream)
+            if finding.remediation is not None:
+                fix = _PLAIN_FIX.get(finding.remediation.strip, "remove one of the three powers")
+                print(f"      Do this: {fix}.", file=stream)
+            print("", file=stream)
+
+        for name, question, st in advisory_rungs:
+            gloss = _RUNG_GLOSS.get(name, "the tool's message names the exact spot.")
+            shown = [it for it in st.items if it[0] != "note"][:_MAX_ITEMS]
+            n = st.counts["warning"]
+            print(f"  ⚠️  {question.rstrip('?')} — {n} worth a look", file=stream)
+            print(f"      {gloss}", file=stream)
+            for _sev, text in shown:
+                print(f"      · {text}", file=stream)
+            hidden = n - len(shown)
+            if hidden > 0:
+                print(
+                    f"      · …and {hidden} more — the saved report (SARIF / "
+                    "Security tab) lists every one.",
+                    file=stream,
+                )
+            print("", file=stream)
+
     # --- verdict, in plain words ---
     print(f"\n  {'─' * 54}\n", file=stream)
     safe = total_to_fix == 0
@@ -185,7 +320,7 @@ def render_checklist(
         print("           Run this again whenever you change your workflows.", file=stream)
     elif safe:
         print("  Result:  ✅  YOU'RE GOOD — nothing urgent to fix.", file=stream)
-        print("           A few minor items are flagged above if you'd like to tidy up.", file=stream)
+        print("           The minor items are spelled out above if you'd like to tidy up.", file=stream)
     else:
         item = "item" if total_to_fix == 1 else "items"
         print(f"  Result:  ⚠️  NOT YET SAFE — fix the {total_to_fix} {item} above, then run this again.", file=stream)
