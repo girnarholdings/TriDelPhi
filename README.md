@@ -422,6 +422,8 @@ tridelphi .                                    # scan, human-readable
 tridelphi . --format checklist                 # plain-language pass/fail, no jargon
 tridelphi fix                                  # an ordered to-do list, cheapest change first
 tridelphi fix --markdown                       # the same plan, ready to paste into a PR
+tridelphi guard                                # fix interactively: yes/no per finding
+tridelphi fix --apply                          # apply the automatic fixes, no prompts
 tridelphi . --format sarif --sarif-file s.json # for GitHub code scanning
 tridelphi . --format html  --html-file r.html  # a self-contained report page
 tridelphi --explain agent-config-ingress       # what a rule means and why
@@ -435,9 +437,46 @@ tridelphi --list-rules                         # every rule at a glance
 ordered by cost — a one-line change before a job restructure — so the shortest
 path back to green is at the top. Each item names the exact `file:line`, the
 capability to strip, the concrete change, and what it trades off. It is
-**read-only**: like every other command, it only reads your workflows and never
-edits them. `--markdown` renders the plan for a pull request or a ticket, and
-the exit code follows the gate (1 while a critical remains, else 0).
+**read-only** by default. `--markdown` renders the plan for a pull request or a
+ticket, and the exit code follows the gate (1 while a critical remains, else 0).
+
+### 🛡️ From fix to fixed — `tridelphi guard`
+
+`tridelphi guard` closes the loop: for each finding it shows the exact solution
+and asks one question — fix it now?
+
+```
+[y] fix it now   [c] comment out the step   [d] disable this workflow   [s] skip   [q] quit
+```
+
+Three findings have fully automatic fixes, because their remediation is
+mechanical:
+
+| Finding | The fix guard applies |
+|---|---|
+| expression injection | hoists **every** injected `${{ }}` in the step into a step `env:` var and quotes it in the script |
+| pwn-request checkout | removes the `ref:`/`repository:` inputs that point checkout at the PR head |
+| agent prompt injection | inserts the `author_association` job gate the remediation recommends |
+
+Every accepted edit follows one contract: **snapshot → transform → re-scan →
+verified clean, or rolled back to the exact original bytes**. A fix that cannot
+prove it cleared the finding does not survive — guard will never leave a file
+both changed *and* still vulnerable. Consent is per finding; skip, quit, and a
+closed stdin all mean *no*. `--yes` (and `tridelphi fix --apply`) is the batch
+spelling: automatic fixers only — it never comments out or disables anything.
+
+Two details make the automatic fixes trustworthy rather than cosmetic. First,
+the detectors **honor the tool's own advice**: adding the recommended
+`author_association` gate genuinely clears the finding (and weak `github.actor`
+gates or inverted tests deliberately do not). Second, the generated CI workflow
+(`tridelphi init`) is a real gate: it posts the plain-English comment, uploads
+the SARIF, **then fails the build** on a critical — with the ordered fix plan
+written to the run's Summary tab and a pointer to `tridelphi guard`.
+
+For ladder rungs (`--level N`) guard does not pretend to auto-edit other tools'
+findings — it prints each tool's result with the exact next step a person
+should take (rotate the leaked key, bump to the fixed release, which Settings
+page to open).
 
 ### 🔁 The ratchet
 
