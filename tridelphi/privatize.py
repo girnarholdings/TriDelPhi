@@ -163,12 +163,20 @@ def _default_obfuscate(src: Path, dst: Path) -> tuple[bool, str]:
 
 
 def _default_run_cmd(command: str, cwd: Path, timeout: int) -> tuple[bool, str]:
-    """Run the user's OWN verification command. It is their trusted input on
-    their own machine, invoked only after explicit interactive consent — not the
-    untrusted-input-to-shell path this tool exists to prevent."""
+    """Run the user's OWN verification command, verbatim.
+
+    ``shell=True`` is deliberate and reviewed here: ``command`` is the exact
+    ``--build-cmd`` / ``--smoke-cmd`` string the user typed on their own machine,
+    invoked only after explicit interactive consent. It is *their* trusted input,
+    not the untrusted-input-to-shell path this tool exists to prevent — and real
+    smoke checks routinely need shell operators (``npm run build && node …``, a
+    piped health probe) that a split argv could not express. The suppression
+    below records that accepted exception in the open rather than hiding it.
+    """
     try:
         completed = subprocess.run(
-            command, shell=True, cwd=str(cwd), capture_output=True,  # user's own command, by consent
+            # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
+            command, shell=True, cwd=str(cwd), capture_output=True,
             text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
