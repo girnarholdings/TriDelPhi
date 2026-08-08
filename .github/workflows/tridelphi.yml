@@ -38,7 +38,11 @@ jobs:
         with:
           egress-policy: audit
 
+      # The scan only reads the tree; don't leave the token in .git/config for
+      # later steps to find (zizmor: artipacked).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # The one-line install path users take, run against its own source:
       # climbs L1-L3 (gitleaks + osv-scanner + zizmor + core), uploads the
