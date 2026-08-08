@@ -44,14 +44,16 @@ jobs:
         with:
           persist-credentials: false
 
-      # The one-line install path users take, run against its own source:
-      # climbs L1-L3 (gitleaks + osv-scanner + zizmor + core), uploads the
-      # merged SARIF, posts the sticky checklist comment, and fails the job
-      # on a critical.
-      - name: Run the ladder from this checkout
+      # The one-line install path users take, run against its own source, at
+      # the FULL ladder: gitleaks, osv-scanner, zizmor, scorecard (local mode),
+      # semgrep, the Rule-of-Two core, the L6 evidence statement, and the L7
+      # trust-lock check of every pinned action. Uploads the merged SARIF,
+      # posts the sticky checklist comment — which now spells out what each
+      # "worth a look" item is — and fails the job on a critical.
+      - name: Run the full ladder from this checkout
         uses: ./
         with:
-          level: 3
+          level: 7
 
       # The action already failed the job; this adds the guard's Summary-tab
       # fix plan, same as the init-generated workflow. tridelphi is on PATH

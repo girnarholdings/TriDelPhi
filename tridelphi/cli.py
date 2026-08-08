@@ -25,7 +25,7 @@ from . import __version__
 from .api import AnalysisError, analyze
 from .baseline import DEFAULT_BASELINE, load_baseline, partition, write_baseline
 from .checklist import ExternalStatus as ChecklistStatus
-from .checklist import render_checklist
+from .checklist import items_from_sarif, render_checklist
 from .coverage import render_coverage
 from .html_report import render_html
 from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
@@ -325,7 +325,9 @@ def main(argv: list[str] | None = None) -> int:
         if ext.diagnostic is not None:
             print(f"tridelphi: {ext.diagnostic.message}", file=sys.stderr)
         external_status[ext.spec.name] = ChecklistStatus(
-            ran=ext.ok, counts=dict(ext.severity_counts)
+            ran=ext.ok,
+            counts=dict(ext.severity_counts),
+            items=items_from_sarif(ext.sarif) if ext.sarif is not None else None,
         )
         if ext.sarif is not None:
             external_sarifs.append(ext.sarif)
@@ -353,7 +355,9 @@ def main(argv: list[str] | None = None) -> int:
                 sev = "critical" if result_obj.get("level") == "error" else "note"
                 external_counts[sev] += 1
                 trust_counts[sev] += 1
-            external_status["trust"] = ChecklistStatus(ran=True, counts=trust_counts)
+            external_status["trust"] = ChecklistStatus(
+                ran=True, counts=trust_counts, items=items_from_sarif(verify_doc)
+            )
             n = len(verify_doc["runs"][0]["results"])
             summary_parts.append(f"trust: {n} finding{'s' if n != 1 else ''}")
 

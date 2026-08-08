@@ -374,11 +374,14 @@ def _scorecard_to_sarif(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRu
         score 4-7   -> SARIF "note"     (partial credit, informational)
         score 8-10  -> no finding
 
-    Results carry no file locations because local-mode scorecard reports
-    repo-level posture, not line-level defects. Checks are sorted by name so
-    the run is deterministic. The constructed document still goes through the
-    shared shape gate afterwards — the converter is not exempt from the
-    containment bar it feeds.
+    Local-mode scorecard reports repo-level posture, not line-level defects,
+    so there is no natural file to point at — but GitHub code scanning
+    rejects an entire uploaded SARIF file if any result lacks a location
+    (observed live on the first level-7 watcher run). Each result therefore
+    carries the conventional repo-level anchor, README.md:1. Checks are
+    sorted by name so the run is deterministic. The constructed document
+    still goes through the shared shape gate afterwards — the converter is
+    not exempt from the containment bar it feeds.
     """
     try:
         doc = json.loads(raw)
@@ -428,6 +431,14 @@ def _scorecard_to_sarif(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRu
                 "ruleId": rule_id,
                 "level": level,
                 "message": {"text": f"{name} scored {score}/10: {reason}".strip()},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": "README.md"},
+                            "region": {"startLine": 1},
+                        }
+                    }
+                ],
             }
         )
 

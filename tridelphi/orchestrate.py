@@ -209,17 +209,59 @@ def _empty_run() -> dict[str, Any]:
     }
 
 
+# GitHub code scanning rejects the WHOLE uploaded file if any single result
+# lacks a location ("locationFromSarifResult: expected at least one location").
+# Repo-level findings — scorecard posture is the standing example — have no
+# file to point at, so they get the conventional repo-level anchor. README.md
+# is where a repository describes itself, and the path does not have to exist
+# for ingestion to succeed; what must exist is the location object.
+_REPO_LEVEL_LOCATION = {
+    "physicalLocation": {
+        "artifactLocation": {"uri": "README.md"},
+        "region": {"startLine": 1},
+    }
+}
+
+
+def _ensure_result_locations(run: dict[str, Any]) -> dict[str, Any]:
+    """Give every result at least one location, without touching valid ones.
+
+    This is a containment net at the merge boundary: whichever wrapped tool
+    (current or future) emits a locationless result, the merged upload must
+    never be the thing that breaks — one bad result would take the entire
+    code-scanning upload down with it.
+    """
+    results = run.get("results")
+    if not isinstance(results, list):
+        return run
+    patched: list[Any] = []
+    changed = False
+    for result in results:
+        if isinstance(result, dict):
+            locs = result.get("locations")
+            if not (isinstance(locs, list) and locs):
+                result = {**result, "locations": [_REPO_LEVEL_LOCATION]}
+                changed = True
+        patched.append(result)
+    if not changed:
+        return run
+    return {**run, "results": patched}
+
+
 def merge_runs(primary: dict[str, Any], external: dict[str, Any]) -> dict[str, Any]:
     """Append ``external``'s runs to ``primary``'s ``runs`` array.
 
     Kept as separate runs on purpose: each tool keeps its own driver metadata,
     rule set, and result provenance, which is exactly what SARIF's multi-run
     model is for. The result is deterministic — no reordering of ``primary``.
+    Every appended result is guaranteed a location (see
+    :func:`_ensure_result_locations`) so the merged document stays uploadable
+    to GitHub code scanning.
     """
     merged = dict(primary)
     merged_runs = list(primary.get("runs", []))
     for run in external.get("runs", []):
-        merged_runs.append(run)
+        merged_runs.append(_ensure_result_locations(run) if isinstance(run, dict) else run)
     merged["runs"] = merged_runs
     return merged
 
