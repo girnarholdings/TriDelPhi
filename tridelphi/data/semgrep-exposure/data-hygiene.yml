@@ -1,0 +1,87 @@
+# Curated, LOCAL semgrep rules for `tridelphi expose` — data-hygiene patterns
+# in application code. Shipped inside the package and run with an explicit
+# `--config <this dir> --metrics off`, never `--config auto` and never the
+# registry, so the exposure audit stays fully offline.
+#
+# These are heuristics: they name a file:line to check, they do not prove a
+# defect. Severity is deliberately conservative — WARNING ("worth a look"),
+# never a build-gating error — because a false positive that fails someone's
+# build is worse than a missed advisory. The native detectors in expose.py
+# own the high-confidence, gating findings (public DB + default password,
+# published source maps, live secrets in shipped bundles).
+rules:
+  - id: tridelphi-weak-password-hash-python
+    languages: [python]
+    severity: WARNING
+    message: >-
+      This hashes what looks like a password/secret with a fast hash (md5/sha1).
+      A stolen table is brute-forceable in minutes. Use a slow password hash —
+      argon2id or bcrypt (cost >= 12) — not a general-purpose digest.
+    metadata:
+      category: security
+      tridelphi: weak-password-hash
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5($X)
+          - pattern: hashlib.sha1($X)
+          - pattern: hashlib.sha256($X)
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i).*(pass|pwd|secret|passwd).*
+
+  - id: tridelphi-weak-password-hash-js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      If this hashes a password, md5/sha1 is not safe — a stolen table is
+      brute-forceable. Use bcrypt or argon2 (a real password-hashing library),
+      not crypto.createHash.
+    metadata:
+      category: security
+      tridelphi: weak-password-hash
+    pattern-either:
+      - pattern: crypto.createHash("md5")
+      - pattern: crypto.createHash('md5')
+      - pattern: crypto.createHash("sha1")
+      - pattern: crypto.createHash('sha1')
+
+  - id: tridelphi-token-in-web-storage
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A token/credential written to localStorage or sessionStorage is readable
+      by any script on the page, so any XSS steals it. Keep session tokens in an
+      HttpOnly, Secure cookie instead — JavaScript should not be able to read them.
+    metadata:
+      category: security
+      tridelphi: token-in-web-storage
+    patterns:
+      - pattern-either:
+          - pattern: localStorage.setItem($K, ...)
+          - pattern: sessionStorage.setItem($K, ...)
+      - metavariable-regex:
+          metavariable: $K
+          regex: (?i).*(token|jwt|auth|secret|session|password|pwd).*
+
+  - id: tridelphi-hardcoded-db-credential
+    languages: [generic]
+    severity: WARNING
+    message: >-
+      A database connection string with an inline username:password was found in
+      code. Read it from a server-side environment variable or secret store, and
+      rotate the credential if this file is committed or shipped.
+    metadata:
+      category: security
+      tridelphi: hardcoded-db-credential
+    options:
+      generic_ellipsis_max_span: 0
+    # `.env` and compose files are owned by expose's native category D, which
+    # runs even when semgrep is absent — exclude them here to avoid a duplicate.
+    paths:
+      exclude:
+        - ".env"
+        - ".env.*"
+        - "*compose*.yml"
+        - "*compose*.yaml"
+        - "*.md"
+    pattern-regex: (?i)\b(postgres|postgresql|mysql|mariadb|mongodb(\+srv)?|redis|amqp)://[^:@/\s"']+:[^@/\s"']+@

@@ -39,7 +39,7 @@ Homepage = "https://github.com/girnarholdings/TriDelPhi"
 packages = ["tridelphi"]
 
 [tool.setuptools.package-data]
-tridelphi = ["data/*.yml", "data/*.json", "data/*.md", "py.typed"]
+tridelphi = ["data/*.yml", "data/*.json", "data/*.md", "data/semgrep-exposure/*.yml", "py.typed"]
 
 [tool.ruff]
 line-length = 100
