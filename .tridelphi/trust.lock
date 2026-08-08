@@ -13,6 +13,10 @@
       "owner": "actions",
       "sha": "d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e"
     },
+    "actions/github-script": {
+      "owner": "actions",
+      "sha": "f28e40c7f34bde8b3046d885e986cb6290c5673b"
+    },
     "actions/setup-node": {
       "owner": "actions",
       "sha": "49933ea5288caeca8642d1e84afbd3f7d6820020"
@@ -25,9 +29,9 @@
       "owner": "actions",
       "sha": "56afc609e74202658d3ffba0e8f6dda462b719fa"
     },
-    "github/codeql-action/upload-sarif": {
-      "owner": "github",
-      "sha": "c4dd10e44af883a891fe31ced449bcb4a6728b9b"
+    "step-security/harden-runner": {
+      "owner": "step-security",
+      "sha": "5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde"
     }
   }
 }

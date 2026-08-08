@@ -478,6 +478,26 @@ findings — it prints each tool's result with the exact next step a person
 should take (rotate the leaked key, bump to the fixed release, which Settings
 page to open).
 
+### 💬 Reply-to-fix — `tridelphi fix` as a PR comment
+
+`tridelphi init` installs a second workflow, `tridelphi-fix.yml`: reply
+**`tridelphi fix`** on any pull request and the bot applies the automatic
+fixes to the PR branch — the same `fix --apply` batch, every edit re-scanned
+and kept only if the finding provably cleared — then replies with what it did.
+
+A comment-triggered workflow holding `contents: write` is exactly the U∩P∩E
+shape this tool exists to catch, so the bot is built the way our own
+remediation demands, and it passes the scanner that ships it:
+
+- only **OWNER / MEMBER / COLLABORATOR** comment authors can trigger it (the
+  `author_association` gate — spoofable `github.actor` names don't count);
+- the comment body is read **only inside `if:` expressions**, which GitHub
+  evaluates before any shell exists — event text never reaches a shell;
+- **fork PRs are skipped before checkout**: it only scans and pushes branches
+  of the same repository, i.e. code written by someone with write access; and
+  because `issue_comment` workflows run the file from the *default* branch, a
+  PR cannot modify the bot that acts on it.
+
 ### 🔁 The ratchet
 
 You cannot fix everything today. Freeze what exists, block only what is new

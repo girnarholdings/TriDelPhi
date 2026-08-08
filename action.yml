@@ -93,11 +93,15 @@ runs:
         tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" \
           --format checklist \
           --sarif-file "$SARIF_FILE" \
+          --checklist-md-file report.md \
           --fail-on "$FAIL_ON" > report.txt 2>&1
         code=$?
         {
           echo 'text<<TRIDELPHI_EOF'
           cat report.txt
+          echo TRIDELPHI_EOF
+          echo 'md<<TRIDELPHI_EOF'
+          cat report.md 2>/dev/null || cat report.txt
           echo TRIDELPHI_EOF
           echo "exit_code=${code}"
         } >> "$GITHUB_OUTPUT"
@@ -124,17 +128,16 @@ runs:
       if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
       env:
-        REPORT: ${{ steps.scan.outputs.text }}
+        REPORT_MD: ${{ steps.scan.outputs.md }}
       with:
         script: |
-          const report = process.env.REPORT || 'TriDelPhi produced no output.';
+          // The comment is what the notification email renders, so it is real
+          // Markdown — verdict heading, status table, details fold — not a
+          // monospace dump.
+          const report = process.env.REPORT_MD || 'TriDelPhi produced no output.';
           const body = [
             '<!-- tridelphi -->',
-            '### 🔺 TriDelPhi — Agents Rule of Two',
-            '',
-            '```',
             report.slice(0, 60000),
-            '```',
             '',
             '_[What this means](https://girnarholdings.github.io/TriDelPhi/)._',
           ].join('\n');

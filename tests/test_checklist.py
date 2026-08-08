@@ -84,8 +84,8 @@ def test_worth_a_look_is_explained_and_itemized(repo_root):
             ran=True,
             counts={"critical": 0, "warning": 2, "note": 0},
             items=[
-                ("warning", ".github/workflows/ci.yml:25 — does not set persist-credentials"),
-                ("warning", ".github/workflows/ci.yml:41 — does not set persist-credentials"),
+                ("warning", ".github/workflows/ci.yml:25", "does not set persist-credentials"),
+                ("warning", ".github/workflows/other.yml:41", "uses a mutable action tag"),
             ],
         ),
     }
@@ -96,22 +96,136 @@ def test_worth_a_look_is_explained_and_itemized(repo_root):
     # the per-rung gloss and the concrete items
     assert "hardening habit in your automation files" in out
     assert ".github/workflows/ci.yml:25" in out
-    assert ".github/workflows/ci.yml:41" in out
+    assert ".github/workflows/other.yml:41" in out
     # still a pass — advisory items never flip the verdict
     assert "YOU'RE GOOD" in out
 
 
 def test_items_are_capped_with_a_pointer_to_the_full_report(repo_root):
-    items = [("warning", f"file.txt:{i} — advisory item {i}") for i in range(9)]
+    items = [("warning", f"file{i}.txt:1", f"advisory item {i}") for i in range(9)]
     external = {
-        "osv-scanner": ExternalStatus(
+        "zizmor": ExternalStatus(
             ran=True, counts={"critical": 0, "warning": 9, "note": 0}, items=items
         ),
     }
     out = _render(repo_root / CLEAN, external=external)
-    assert "file.txt:0" in out and "file.txt:3" in out
-    assert "file.txt:4" not in out, "more than 4 items must collapse into a pointer"
+    assert "advisory item 0" in out and "advisory item 3" in out
+    assert "advisory item 4" not in out, "more than 4 items must collapse into a pointer"
     assert "…and 5 more" in out
+
+
+def test_repeated_messages_group_into_one_line_with_all_locations(repo_root):
+    """Eight copies of the same lint message is a data dump; one line naming
+    every location is a report."""
+    msg = "does not set persist-credentials: false"
+    items = [
+        ("warning", ".github/workflows/ci.yml:25", msg),
+        ("warning", ".github/workflows/ci.yml:41", msg),
+        ("warning", ".github/workflows/ci.yml:41", msg),  # exact dupe drops
+        ("warning", ".github/workflows/pages.yml:32", msg),
+    ]
+    external = {
+        "zizmor": ExternalStatus(
+            ran=True, counts={"critical": 0, "warning": 4, "note": 0}, items=items
+        ),
+    }
+    out = _render(repo_root / CLEAN, external=external)
+    assert out.count(msg) == 1, "the repeated message must appear exactly once"
+    assert "ci.yml lines 25, 41" in out
+    assert "pages.yml line 32" in out
+
+
+def test_cve_lists_group_per_package(repo_root):
+    where = "scripts/reqs.txt"
+    items = [
+        ("warning", where, "Package 'mcp@1.23.3' is vulnerable to 'CVE-2026-52870'"),
+        ("warning", where, "Package 'mcp@1.23.3' is vulnerable to 'CVE-2026-52869'"),
+        ("warning", where, "Package 'mcp@1.23.3' is vulnerable to 'CVE-2026-52870'"),  # dupe
+        ("warning", where, "Package 'mcp@1.23.3' is vulnerable to 'CVE-2026-59950'"),
+    ]
+    external = {
+        "osv-scanner": ExternalStatus(
+            ran=True, counts={"critical": 0, "warning": 4, "note": 0}, items=items
+        ),
+    }
+    out = _render(repo_root / CLEAN, external=external)
+    assert "mcp 1.23.3 has 3 known flaws" in out
+    assert "CVE-2026-52869" in out and "CVE-2026-59950" in out
+    assert out.count("CVE-2026-52870") == 1
+
+
+def test_alias_spam_is_stripped_from_sarif_messages():
+    from tridelphi.checklist import items_from_sarif
+
+    sarif = {
+        "runs": [
+            {
+                "results": [
+                    {
+                        "level": "warning",
+                        "message": {
+                            "text": "Package 'x@1' is vulnerable to 'CVE-1' "
+                            "(also known as 'PYSEC-1', 'GHSA-aaaa-bbbb')"
+                        },
+                    }
+                ]
+            }
+        ]
+    }
+    (_sev, _where, message), = items_from_sarif(sarif)
+    assert "also known as" not in message
+    assert message.endswith("'CVE-1'")
+
+
+def test_markdown_checklist_is_inbox_ready(repo_root):
+    """The PR comment is what the email renders: verdict in the heading, a
+    status table, and the minor items folded — not a monospace dump."""
+    from tridelphi.api import analyze
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / CLEAN)
+    external = {
+        "zizmor": ExternalStatus(
+            ran=True,
+            counts={"critical": 0, "warning": 1, "note": 0},
+            items=[("warning", "a.yml:3", "uses a mutable action tag")],
+        ),
+    }
+    md = render_checklist_markdown(
+        result,
+        repo_label="demo",
+        files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned,
+        fail_on="critical",
+        external=external,
+    )
+    assert md.startswith("### 🔺 TriDelPhi — ✅")
+    assert "| Check | Result |" in md
+    assert "<details>" in md and "</details>" in md
+    assert "a.yml:3" in md
+    assert "tridelphi fix" in md  # the reply-to-fix invitation
+    assert "```" not in md, "no monospace dumps"
+
+
+def test_markdown_checklist_keeps_criticals_in_the_open(repo_root):
+    from tridelphi.api import analyze
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / MALICIOUS)
+    md = render_checklist_markdown(
+        result,
+        repo_label="demo",
+        files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned,
+        fail_on="critical",
+        external=None,
+    )
+    assert "🚫" in md and "to fix before this is safe" in md
+    assert "**Fix these first:**" in md
+    # the critical must NOT be inside the details fold
+    fold_at = md.find("<details>")
+    crit_at = md.find("**Fix these first:**")
+    assert fold_at == -1 or crit_at < fold_at
 
 
 def test_no_legend_when_everything_passes(repo_root):
@@ -149,11 +263,12 @@ def test_items_from_sarif_sanitizes_untrusted_text():
     }
     items = items_from_sarif(sarif)
     assert len(items) == 2  # the malformed string result is skipped
-    severity, text = items[0]
+    severity, where, message = items[0]
     assert severity == "warning"
-    assert text.startswith("a.yml:7 — evil")
-    assert "\x1b" not in text and "\n" not in text
-    assert len(text) <= 100 + len("a.yml:7 — ")
+    assert where == "a.yml:7"
+    assert message.startswith("evil")
+    assert "\x1b" not in message and "\n" not in message
+    assert len(message) <= 100
 
 
 def test_no_double_separator_when_nothing_to_fix(repo_root):

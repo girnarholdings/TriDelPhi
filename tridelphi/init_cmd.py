@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-__all__ = ["WORKFLOW", "run_init"]
+__all__ = ["FIX_WORKFLOW", "WORKFLOW", "run_init"]
 
 # The workflow is itself Rule-of-Two clean: it runs on pull_request (where fork
 # tokens are read-only), interpolates no github.event data into a shell, and the
@@ -74,11 +74,12 @@ jobs:
         # carries the full detail to the Security tab.
         run: |
           code=0
-          tridelphi . --format checklist --sarif-file tridelphi.sarif > report.txt 2>&1 || code=$?
+          tridelphi . --format checklist --sarif-file tridelphi.sarif \
+            --checklist-md-file report.md > report.txt 2>&1 || code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           {
-            echo 'text<<TRIDELPHI_EOF'
-            cat report.txt
+            echo 'md<<TRIDELPHI_EOF'
+            cat report.md 2>/dev/null || cat report.txt
             echo TRIDELPHI_EOF
           } >> "$GITHUB_OUTPUT"
 
@@ -92,17 +93,15 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          REPORT: ${{ steps.scan.outputs.text }}
+          REPORT_MD: ${{ steps.scan.outputs.md }}
         with:
           script: |
-            const report = process.env.REPORT || 'TriDelPhi produced no output.';
+            // The comment is what the notification email renders — real
+            // Markdown, not a monospace dump.
+            const report = process.env.REPORT_MD || 'TriDelPhi produced no output.';
             const body = [
               '<!-- tridelphi -->',
-              '### 🔺 TriDelPhi — Agents Rule of Two',
-              '',
-              '```',
               report.slice(0, 60000),
-              '```',
               '',
               '_Static scan of your GitHub Actions. ' +
               '[What this means](https://girnarholdings.github.io/TriDelPhi/)._',
@@ -143,23 +142,151 @@ jobs:
           exit 1
 """
 
+# Reply-to-fix: a maintainer replies `tridelphi fix` on a pull request and this
+# workflow applies the automatic fixes to the PR branch — each one verified by
+# a re-scan or rolled back, exactly like `tridelphi fix --apply` locally.
+#
+# Built to pass the scanner that ships it. The Rule of Two audit of this file:
+#   U   the comment body is read ONLY inside `if:` expressions, which GitHub
+#       evaluates before any shell exists; no event text ever reaches a shell,
+#       an env file, or a prompt. The PR number is numeric and env-quoted.
+#   gate  only OWNER / MEMBER / COLLABORATOR comment authors can trigger it —
+#       the author_association gate TriDelPhi itself recommends (and honors).
+#   scope fork pull requests are skipped before checkout: the bot only ever
+#       scans and pushes branches of this repository, i.e. code written by
+#       someone who already has write access. And because `issue_comment`
+#       workflows always run the file from the DEFAULT branch, a PR cannot
+#       modify the bot that will act on it.
+#   fix   what gets applied is `tridelphi fix --apply`: the three mechanical
+#       fixers only, every edit re-scanned and kept only if the finding
+#       provably cleared — never a destructive action.
+FIX_WORKFLOW = """\
+# Added by `tridelphi init`. Reply `tridelphi fix` on a pull request and the
+# bot applies TriDelPhi's automatic fixes to the PR branch — verified or
+# rolled back. See the header of this file's twin, tridelphi.yml.
+name: TriDelPhi fix
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: tridelphi-fix-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    name: Apply verified fixes
+    # The three conditions of the trust boundary: it is a PR, the comment asks
+    # for the fix, and the commenter is someone this repo already trusts.
+    if: >-
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, 'tridelphi fix') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        with:
+          egress-policy: audit
+
+      # Default-branch checkout; the credential stays so the verified commit
+      # can be pushed at the end — pushing is this workflow's entire purpose.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install TriDelPhi
+        run: pipx install tridelphi
+
+      - name: Switch to the pull request branch (same-repo only)
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          cross=$(gh pr view "$PR_NUMBER" --json isCrossRepository -q .isCrossRepository)
+          if [ "$cross" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Fork pull request — the fix bot only pushes to this repo's own branches." >&2
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          gh pr checkout "$PR_NUMBER"
+
+      - name: Apply the automatic fixes (each verified or rolled back)
+        if: steps.pr.outputs.skip == 'false'
+        id: apply
+        run: |
+          tridelphi fix --apply > fix-log.txt 2>&1 || true
+          cat fix-log.txt
+          {
+            echo 'log<<TRIDELPHI_EOF'
+            cat fix-log.txt
+            echo TRIDELPHI_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push what verified
+        if: steps.pr.outputs.skip == 'false'
+        id: push
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No files changed — nothing was auto-fixable, or nothing verified."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "tridelphi: apply verified automatic fixes"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report back
+        if: steps.pr.outputs.skip == 'false'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          FIX_LOG: ${{ steps.apply.outputs.log }}
+          CHANGED: ${{ steps.push.outputs.changed }}
+        with:
+          script: |
+            const changed = process.env.CHANGED === 'true';
+            const log = (process.env.FIX_LOG || '').slice(0, 50000);
+            const headline = changed
+              ? '🔺 **TriDelPhi applied its verified fixes** — each change below was re-scanned before it was kept.'
+              : '🔺 **TriDelPhi had nothing it could fix automatically** — the remaining items need a human decision (`tridelphi guard` locally walks you through them).';
+            const body = [headline, '', '```', log, '```'].join('\\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body,
+            });
+"""
+
 _NEXT_STEPS = """\
 Done. TriDelPhi now guards this repo: every pull request is scanned, a
 plain-English comment explains what it found, and a critical FAILS the build —
 with the fix plan in the run's Summary tab.
 
 Next:
-  1. Commit and push this file:
-       git add .github/workflows/tridelphi.yml
-       git commit -m "Add TriDelPhi security scan"
+  1. Commit and push both files:
+       git add .github/workflows/tridelphi.yml .github/workflows/tridelphi-fix.yml
+       git commit -m "Add TriDelPhi security scan + fix bot"
        git push
   2. Open a pull request — you'll get a comment within a minute.
-  3. If it ever goes red, run `tridelphi guard` here in your terminal: it shows
-     each problem with its exact solution and asks before fixing anything.
-  4. (Optional) Turn on GitHub code scanning to see findings in the Security tab:
+  3. If it flags something minor, just reply `tridelphi fix` on the pull
+     request: the bot applies the automatic fixes to the branch, re-scanning
+     each one before it's kept. (Maintainer comments only; forks excluded.)
+  4. For anything bigger, run `tridelphi guard` in your terminal: it shows each
+     problem with its exact solution and asks before fixing anything.
+  5. (Optional) Turn on GitHub code scanning to see findings in the Security tab:
        Settings -> Code security -> Code scanning -> set up.
 
-Nothing else to configure. It reads only files on disk and makes no network calls.
+Nothing else to configure. The scan reads only files on disk.
 """
 
 
@@ -172,19 +299,24 @@ def run_init(target: str = ".", *, force: bool = False, out=None, err=None) -> i
         return 2
 
     workflow_dir = root / ".github" / "workflows"
-    workflow_path = workflow_dir / "tridelphi.yml"
+    targets = (
+        (workflow_dir / "tridelphi.yml", WORKFLOW),
+        (workflow_dir / "tridelphi-fix.yml", FIX_WORKFLOW),
+    )
 
-    if workflow_path.exists() and not force:
+    existing = [path for path, _content in targets if path.exists()]
+    if existing and not force:
         print(
-            f"tridelphi: {workflow_path} already exists. Re-run with --force to "
+            f"tridelphi: {existing[0]} already exists. Re-run with --force to "
             "overwrite, or edit it by hand.",
             file=err,
         )
         return 1
 
     workflow_dir.mkdir(parents=True, exist_ok=True)
-    workflow_path.write_text(WORKFLOW, encoding="utf-8", newline="\n")
-    print(f"wrote {workflow_path}", file=out)
+    for path, content in targets:
+        path.write_text(content, encoding="utf-8", newline="\n")
+        print(f"wrote {path}", file=out)
     print(file=out)
     print(_NEXT_STEPS, file=out)
     return 0
