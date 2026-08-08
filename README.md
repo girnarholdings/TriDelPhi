@@ -425,6 +425,7 @@ tridelphi fix --markdown                       # the same plan, ready to paste i
 tridelphi guard                                # fix interactively: yes/no per finding
 tridelphi fix --apply                          # apply the automatic fixes, no prompts
 tridelphi expose                               # what your shipped code + config actually leaks
+tridelphi privatize --smoke-cmd "npm start"    # obfuscate built JS, verified or reverted
 tridelphi . --format sarif --sarif-file s.json # for GitHub code scanning
 tridelphi . --format html  --html-file r.html  # a self-contained report page
 tridelphi --explain agent-config-ingress       # what a rule means and why
@@ -523,14 +524,44 @@ feature makes people *less* safe:
 - **A browser can never keep a secret.** A key shipped in client JS is public the
   moment the page loads — so `expose` tells you to *rotate it and move it
   server-side*, never to hide it. (Obfuscation cannot hide a secret; see
-  `tridelphi privatize`, coming next, which is labelled plainly as "raises the
-  effort of copying your logic — not security.")
+  `tridelphi privatize` below, which is labelled plainly as "raises the effort of
+  copying your logic — not security.")
 
 The native detectors are pure file reads — offline, deterministic, no subprocess.
 The code-pattern rung is semgrep run against a **bundled local ruleset**
 (`--config <dir> --metrics off`, never the registry), so the whole audit keeps
 the same "runs on your machine, nothing uploaded" promise as the core scan.
 Output is the same plain-language checklist, SARIF, and paste-ready Markdown.
+
+### 🕶️ The honest obfuscator — `tridelphi privatize`
+
+Once `expose` is clean, `privatize` is the *optional* next step: it runs the
+pinned [`javascript-obfuscator`](https://github.com/javascript-obfuscator/javascript-obfuscator)
+(BSD-2) over your **built** JavaScript to raise the effort of reading it. It is
+built to be honest about the two things the research makes non-negotiable:
+
+- **It is not security, and it cannot hide a secret.** Before it touches a byte it
+  re-runs the category-A secret check on your build and **refuses** if a live-key
+  shaped string is present — obfuscation would hide that key from *you*, not from
+  an attacker who can still read it in the browser. Rotate it and move it
+  server-side first.
+- **Obfuscators can silently miscompile** (peer-reviewed OOPSLA 2026 *OBsmith*
+  found confirmed correctness bugs in this very tool). So `privatize` caps the
+  transform to a safe preset, forces source maps off, skips vendor code, and keeps
+  the result **only if your own smoke check passes** against it — otherwise it
+  reverts to your exact original bytes. That verification is real, but it is not a
+  guarantee.
+
+```console
+scripts/install-privatize.sh                    # once: pinned + integrity-verified install
+tridelphi privatize --privatize-out dist \
+  --smoke-cmd "node dist/main.js"               # obfuscate, verify, swap — or revert
+```
+
+It **refuses `--yes`** and is unreachable from `fix --apply` / `guard -y`: a
+command that mutates files and runs your build always needs an explicit human
+"yes". Without a `--smoke-cmd` it is a dry-run — it writes an obfuscated copy
+beside your output and never swaps your live build.
 
 ### 🔁 The ratchet
 

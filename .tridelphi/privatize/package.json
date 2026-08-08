@@ -1,0 +1,5 @@
+{
+  "name": "tridelphi-privatize",
+  "private": true,
+  "dependencies": { "javascript-obfuscator": "5.5.0" }
+}

@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "repository root, or a command: `init` adds the scan workflow, `fix` "
             "prints a remediation plan, `guard` fixes interactively, `expose` audits "
-            "shipped-asset/DB/data exposure (default: .)"
+            "shipped-asset/DB/data exposure, `privatize` obfuscates built JS (default: .)"
         ),
     )
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
@@ -73,6 +73,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-y", "--yes", action="store_true",
         help="with `guard`: apply automatic fixes without prompting (never disables workflows)",
+    )
+    parser.add_argument(
+        "--build-cmd", metavar="CMD",
+        help="with `privatize`: a command that must still pass on the obfuscated build",
+    )
+    parser.add_argument(
+        "--smoke-cmd", metavar="CMD",
+        help="with `privatize`: a boot/smoke check; without it, privatize only writes "
+             "a copy and never swaps your live output",
+    )
+    parser.add_argument(
+        "--privatize-out", metavar="DIR",
+        help="with `privatize`: the built-output directory to obfuscate (default: dist/build/out)",
     )
     parser.add_argument(
         "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default="text",
@@ -204,6 +217,18 @@ def main(argv: list[str] | None = None) -> int:
             checklist_md_file=args.checklist_md_file,
             fail_on=args.fail_on,
             tool_version=__version__,
+        )
+    if args.path == "privatize":
+        # The honest obfuscator: opt-in, consent-gated, verified-or-reverted,
+        # and never reachable from --yes / fix --apply / guard -y.
+        from .privatize import run_privatize
+
+        return run_privatize(
+            args.command or ".",
+            build_cmd=args.build_cmd,
+            smoke_cmd=args.smoke_cmd,
+            privatize_out=args.privatize_out,
+            assume_yes=args.yes,
         )
     if args.path == "fix":
         if args.apply:
