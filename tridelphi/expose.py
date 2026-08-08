@@ -1,0 +1,585 @@
+"""The exposure audit — what your shipped product actually leaks.
+
+`tridelphi expose` answers the fear behind "someone can see my code": it audits
+the **committed code and config** for the things that are genuinely exposed —
+published source maps (a `.map` hands over your whole repo), secrets shipped in
+browser bundles, self-hosted databases wired up with no password and a public
+port, passwords hashed with md5, tokens parked in localStorage.
+
+It is a *static* audit. It reads files on disk; it cannot reach a running
+database or server. A clean result here is not a penetration test, and a flagged
+config may already be firewalled — the report says so. Everything runs on your
+machine: the native detectors are pure file reads, and the code-pattern rung is
+semgrep with a **local, bundled** ruleset (`--config <dir> --metrics off`),
+never the registry.
+
+Design: native detectors own the high-confidence, gating findings (public DB +
+default password; source-map source disclosure; a live-key-shaped secret in a
+shipped bundle). Softer, heuristic code patterns go to semgrep as warnings. All
+of it is funneled through the same SARIF containment gate as every wrapped tool.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .ladder import SEMGREP_EXPOSURE, ExternalRun, run_tool
+from .orchestrate import merge_runs
+
+__all__ = ["ExposeFinding", "ExposureResult", "analyze_exposure"]
+
+# Categories, in report order. Each has a plain question and a one-line "what
+# these items are" gloss; the guided fix is per finding.
+CATEGORIES: tuple[tuple[str, str, str], ...] = (
+    ("A", "Is your shipped code handing over its own source?",
+     "Source maps and secrets that ride along in the browser bundle you deploy."),
+    ("B", "Are passwords stored the safe way?",
+     "How your code appears to hash passwords before storing them."),
+    ("C", "Is user data left sitting in the clear?",
+     "Tokens and personal data kept somewhere a script or a leak can read."),
+    ("D", "Is a self-hosted database left open?",
+     "Database services in your compose/config with no password or a public port."),
+    ("E", "Is your shipped JavaScript minified?",
+     "Whether you already get minification's baseline protection."),
+)
+CATEGORY_ORDER = {letter: i for i, (letter, _q, _g) in enumerate(CATEGORIES)}
+
+# Directories never worth walking.
+_SKIP_DIRS = frozenset({
+    ".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache", ".tox", ".idea", ".vscode",
+})
+# Where a web app's shipped output tends to live.
+_ASSET_DIRS = ("dist", "build", "out", "public", ".next")
+_COMPOSE_RE = re.compile(r"(docker-)?compose.*\.ya?ml$", re.IGNORECASE)
+_DB_CONF_NAMES = frozenset({"redis.conf", "mongod.conf", "postgresql.conf", "my.cnf"})
+
+# One shipped bundle can be large; cap what we read so a hostile/huge file can
+# neither hang the audit nor blow memory. Mirrors ladder.py's MAX_OUTPUT_BYTES
+# discipline for external tools.
+_MAX_READ_BYTES = 8 * 1024 * 1024
+
+# High-confidence secret shapes. Provider-prefixed keys are near-zero false
+# positive, so they gate (critical); a JWT can legitimately be public, so it is
+# only a warning.
+_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
+    ("an AWS access key", re.compile(r"AKIA[0-9A-Z]{16}"), "critical"),
+    ("a Google API key", re.compile(r"AIza[0-9A-Za-z_\-]{35}"), "critical"),
+    ("a Stripe live key", re.compile(r"sk_live_[0-9A-Za-z]{24,}"), "critical"),
+    ("a GitHub token", re.compile(r"gh[pousr]_[0-9A-Za-z]{36,}"), "critical"),
+    ("a GitHub fine-grained token", re.compile(r"github_pat_[0-9A-Za-z_]{60,}"), "critical"),
+    ("a Slack token", re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}"), "critical"),
+    ("a private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"), "critical"),
+    ("a JSON web token (JWT)", re.compile(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}"), "warning"),
+)
+
+# Default/weak database passwords seen in the wild and in tutorials.
+_WEAK_DB_PASSWORDS = frozenset({
+    "", "postgres", "password", "root", "admin", "mysql", "mongo", "redis",
+    "changeme", "secret", "test", "123456", "example",
+})
+_DB_IMAGE_HINTS = ("postgres", "mysql", "mariadb", "mongo", "redis")
+_DB_URL_RE = re.compile(
+    r"(?i)\b(postgres|postgresql|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp)://"
+    r"[^:@/\s\"']+:([^@/\s\"']+)@"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ExposeFinding:
+    category: str          # "A".."E"
+    rule: str              # slug, e.g. "source-map-disclosure"
+    severity: str          # critical / warning / note
+    where: str             # repo-relative "path" or "path:line"
+    message: str           # plain-English, self-contained
+    fix: str               # what to actually do
+
+
+@dataclass
+class ExposureResult:
+    findings: list[ExposeFinding] = field(default_factory=list)
+    sarif: dict[str, Any] | None = None
+    semgrep_ran: bool = False
+    semgrep_note: str | None = None
+
+    def gating(self) -> list[ExposeFinding]:
+        return [f for f in self.findings if f.severity == "critical"]
+
+
+# ---------------------------------------------------------------------------
+# discovery — expose's own surface, independent of the workflow scan
+# ---------------------------------------------------------------------------
+
+
+def _walk(root: Path) -> Iterable[Path]:
+    """Every file under root, sorted, skipping vendored/VCS dirs. Defensive:
+    an unreadable directory is skipped, never fatal."""
+    stack = [root]
+    out: list[Path] = []
+    while stack:
+        current = stack.pop()
+        try:
+            entries = sorted(current.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_symlink():
+                continue
+            if entry.is_dir():
+                if entry.name not in _SKIP_DIRS:
+                    stack.append(entry)
+            elif entry.is_file():
+                out.append(entry)
+    return sorted(out)
+
+
+@dataclass
+class _Surface:
+    compose: list[Path] = field(default_factory=list)
+    env: list[Path] = field(default_factory=list)
+    db_conf: list[Path] = field(default_factory=list)
+    bundles: list[Path] = field(default_factory=list)   # *.js/*.mjs in asset dirs
+    maps: list[Path] = field(default_factory=list)       # *.map in asset dirs
+    data_files: list[Path] = field(default_factory=list)  # committed csv/sql/seed
+    has_bundler: bool = False
+
+
+def _in_asset_dir(rel: Path) -> bool:
+    return any(part in _ASSET_DIRS for part in rel.parts[:-1])
+
+
+def _discover(root: Path) -> _Surface:
+    s = _Surface()
+    bundler_markers = ("vite.config", "next.config", "webpack.config", "rollup.config")
+    for path in _walk(root):
+        rel = path.relative_to(root)
+        name = path.name.lower()
+        if _COMPOSE_RE.search(name):
+            s.compose.append(path)
+        elif name == ".env" or (name.startswith(".env.") and not name.endswith(
+            (".example", ".sample", ".template", ".dist"))):
+            s.env.append(path)
+        elif name in _DB_CONF_NAMES:
+            s.db_conf.append(path)
+        elif _in_asset_dir(rel) and path.suffix == ".map":
+            s.maps.append(path)
+        elif _in_asset_dir(rel) and path.suffix in (".js", ".mjs", ".cjs"):
+            s.bundles.append(path)
+        elif path.suffix in (".csv", ".sql", ".ndjson") or (
+            path.suffix == ".json" and name.startswith("seed")):
+            s.data_files.append(path)
+        if name == "package.json" or any(name.startswith(m) for m in bundler_markers):
+            s.has_bundler = True
+    return s
+
+
+def _read_text(path: Path, cap: int = _MAX_READ_BYTES) -> str | None:
+    try:
+        if path.stat().st_size > cap:
+            with path.open("rb") as fh:
+                return fh.read(cap).decode("utf-8", errors="replace")
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# category A — shipped source maps + client secrets
+# ---------------------------------------------------------------------------
+
+_FIX_A_MAP = ("turn your bundler's source maps off (Vite `build.sourcemap: false`, "
+              "CRA/Next `GENERATE_SOURCEMAP=false`) or use `hidden-source-map`, and "
+              "stop deploying `.map` files.")
+_FIX_A_SECRET = ("rotate this key now (assume it is compromised — it shipped to every "
+                 "visitor) and read it from a server-side endpoint; a browser can never "
+                 "keep a secret.")
+
+
+def _detect_maps_and_secrets(root: Path, surface: _Surface) -> list[ExposeFinding]:
+    out: list[ExposeFinding] = []
+    for path in surface.maps:
+        where = str(path.relative_to(root))
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        try:
+            doc = json.loads(raw)
+        except ValueError:
+            out.append(ExposeFinding("A", "source-map-shipped", "warning", where,
+                "A source map is deployed alongside your bundle. Even without full "
+                "source, it maps minified code back to your structure.", _FIX_A_MAP))
+            continue
+        sources = doc.get("sourcesContent") if isinstance(doc, dict) else None
+        if isinstance(sources, list) and any(isinstance(s, str) and s.strip() for s in sources):
+            n = sum(1 for s in sources if isinstance(s, str) and s.strip())
+            out.append(ExposeFinding("A", "source-map-disclosure", "critical", where,
+                f"Full source disclosure: this shipped source map embeds {n} original "
+                "source file(s) verbatim (comments and all). Anyone who loads your site "
+                "can reconstruct your repository.", _FIX_A_MAP))
+        else:
+            out.append(ExposeFinding("A", "source-map-shipped", "warning", where,
+                "A source map is deployed alongside your bundle; it maps minified code "
+                "back to your original structure.", _FIX_A_MAP))
+
+    for path in surface.bundles:
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        where = str(path.relative_to(root))
+        for label, pattern, severity in _SECRET_PATTERNS:
+            m = pattern.search(raw)
+            if m:
+                masked = m.group(0)[:4] + "…"
+                line = raw.count("\n", 0, m.start()) + 1
+                out.append(ExposeFinding("A", "client-secret", severity,
+                    f"{where}:{line}",
+                    f"What looks like {label} ({masked}) is shipped inside your browser "
+                    "bundle. Anything in browser code is readable by anyone who loads the "
+                    "page — obfuscation cannot hide it.", _FIX_A_SECRET))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# category D — self-hosted DB / service misconfig
+# ---------------------------------------------------------------------------
+
+_FIX_D = ("bind the DB port to `127.0.0.1:` (or drop `ports:` and use the compose "
+          "network), and set a strong password from a secret — never a default.")
+
+
+def _compose_line(node: Any, key: str) -> int | None:
+    """Best-effort 1-based line for `key` in a ruamel round-trip mapping."""
+    try:
+        return node.lc.key(key)[0] + 1  # type: ignore[union-attr]
+    except (AttributeError, KeyError, TypeError, IndexError):
+        return None
+
+
+def _port_is_public(entry: Any) -> bool:
+    """A compose ports entry that publishes to the host (not 127.0.0.1)."""
+    text = ""
+    if isinstance(entry, str):
+        text = entry
+    elif isinstance(entry, dict):
+        host_ip = str(entry.get("host_ip", ""))
+        if host_ip:
+            return host_ip not in ("127.0.0.1", "::1", "localhost")
+        return entry.get("published") is not None
+    if not text:
+        return False
+    if text.startswith(("127.0.0.1:", "localhost:", "::1:")):
+        return False
+    # "5432:5432", "0.0.0.0:5432:5432", "5432" all publish to the host.
+    return ":" in text or text.strip().isdigit()
+
+
+def _detect_db_misconfig(root: Path, surface: _Surface) -> list[ExposeFinding]:
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
+
+    out: list[ExposeFinding] = []
+    yaml = YAML(typ="rt")
+
+    for path in surface.compose:
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        where_file = str(path.relative_to(root))
+        try:
+            doc = yaml.load(raw)
+        except (YAMLError, ValueError, TypeError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        services = doc.get("services")
+        if not isinstance(services, dict):
+            continue
+        for name, svc in services.items():
+            if not isinstance(svc, dict):
+                continue
+            image = str(svc.get("image", "")) + " " + str(name)
+            if not any(hint in image.lower() for hint in _DB_IMAGE_HINTS):
+                continue
+            line = _compose_line(services, name)
+            where = f"{where_file}:{line}" if line else where_file
+
+            ports = svc.get("ports")
+            public = isinstance(ports, list) and any(_port_is_public(p) for p in ports)
+
+            # environment may be a mapping (KEY: value) or a list ("KEY=value").
+            pairs: list[tuple[str, str]] = []
+            env = svc.get("environment")
+            if isinstance(env, dict):
+                pairs = [(str(k), str(v)) for k, v in env.items()]
+            elif isinstance(env, list):
+                pairs = [(s.partition("=")[0], s.partition("=")[2])
+                         for s in (str(item) for item in env)]
+            weak_pw = False
+            no_auth = False
+            for key, val in pairs:
+                ku = key.upper()
+                vv = val.strip().strip("\"'").lower()
+                if "PASSWORD" in ku and vv in _WEAK_DB_PASSWORDS:
+                    weak_pw = True
+                if ku in ("ALLOW_EMPTY_PASSWORD", "ALLOW_ANONYMOUS_LOGIN") and vv in ("yes", "true", "1"):
+                    no_auth = True
+
+            db = next((h for h in _DB_IMAGE_HINTS if h in image.lower()), "database")
+            if public and (weak_pw or no_auth):
+                out.append(ExposeFinding("D", "db-public-open", "critical", where,
+                    f"The `{name}` {db} service publishes its port to the host and has "
+                    "no real password (default/empty/auth disabled). If that host is "
+                    "reachable, anyone can connect and read everything.", _FIX_D))
+            elif public:
+                out.append(ExposeFinding("D", "db-public-bind", "warning", where,
+                    f"The `{name}` {db} service publishes its port to the host. If this "
+                    "isn't firewalled, it's reachable from outside — bind it to "
+                    "127.0.0.1 or drop `ports:`.", _FIX_D))
+            elif weak_pw or no_auth:
+                out.append(ExposeFinding("D", "db-weak-password", "warning", where,
+                    f"The `{name}` {db} service uses a default/empty password or has auth "
+                    "disabled. Set a strong password from a secret.", _FIX_D))
+
+    for path in surface.env:
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        where_file = str(path.relative_to(root))
+        for i, ln in enumerate(raw.splitlines(), 1):
+            m = _DB_URL_RE.search(ln)
+            if m:
+                out.append(ExposeFinding("D", "db-url-credential", "warning",
+                    f"{where_file}:{i}",
+                    "A database URL with an inline username:password is committed here. "
+                    "Rotate the credential and keep it out of committed files.", _FIX_D))
+                break
+    return out
+
+
+# ---------------------------------------------------------------------------
+# category E — minification status (informational)
+# ---------------------------------------------------------------------------
+
+
+def _looks_minified(text: str) -> bool:
+    head = text[:200_000]
+    if not head.strip():
+        return False
+    lines = head.splitlines() or [head]
+    longest = max((len(ln) for ln in lines), default=0)
+    ws = sum(c.isspace() for c in head) / max(len(head), 1)
+    return longest > 500 or (longest > 200 and ws < 0.15)
+
+
+def _detect_minification(root: Path, surface: _Surface) -> list[ExposeFinding]:
+    if not surface.bundles:
+        return []
+    # Look at the largest few bundles for a representative verdict.
+    ranked = sorted(surface.bundles, key=lambda p: p.stat().st_size if p.exists() else 0, reverse=True)
+    checked = 0
+    minified = 0
+    for path in ranked[:5]:
+        raw = _read_text(path, cap=1_000_000)
+        if raw is None:
+            continue
+        checked += 1
+        if _looks_minified(raw):
+            minified += 1
+    if not checked:
+        return []
+    if minified >= checked:
+        return [ExposeFinding("E", "minified", "note", "shipped JavaScript",
+            "Your shipped JavaScript is already minified — you already get "
+            "minification's modest protection (comments and names are gone). An "
+            "obfuscator would add little on top.",
+            "nothing to do here; `tridelphi privatize` is optional and adds little.")]
+    return [ExposeFinding("E", "not-minified", "note", "shipped JavaScript",
+        "Your shipped JavaScript does not look minified. Turning on your bundler's "
+        "built-in minifier is the first, free step — it strips comments and names "
+        "irreversibly.",
+        "enable your bundler's minifier (terser/esbuild); it's usually one setting.")]
+
+
+# ---------------------------------------------------------------------------
+# category C (native slice) — committed data files with sensitive columns
+# ---------------------------------------------------------------------------
+
+_SENSITIVE_COLUMN = re.compile(
+    r"(?i)\b(password|passwd|pwd|ssn|social_security|credit_card|card_number|cvv)\b")
+_FIX_C_DATA = ("don't commit real user data; if this is a fixture, use fake values, "
+               "and never store passwords/PII in plaintext.")
+
+
+def _detect_committed_pii(root: Path, surface: _Surface) -> list[ExposeFinding]:
+    out: list[ExposeFinding] = []
+    for path in surface.data_files:
+        raw = _read_text(path, cap=1_000_000)
+        if raw is None:
+            continue
+        head = raw[:8192]
+        m = _SENSITIVE_COLUMN.search(head)
+        if m:
+            where = str(path.relative_to(root))
+            out.append(ExposeFinding("C", "committed-sensitive-data", "warning", where,
+                f"A committed data file has a `{m.group(1).lower()}` column/field. If this "
+                "is real user data, it is exposed to anyone with repo access and likely "
+                "stored in plaintext.", _FIX_C_DATA))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# category B + C (code) — semgrep with the local ruleset
+# ---------------------------------------------------------------------------
+
+# Map our rule metadata / rule-id substring to a category + plain fix.
+_SEMGREP_RULE_MAP = {
+    "weak-password-hash": ("B", "hash passwords with argon2id or bcrypt (cost >= 12), never md5/sha1/sha256."),
+    "token-in-web-storage": ("C", "keep session tokens in an HttpOnly, Secure cookie, not localStorage."),
+    "hardcoded-db-credential": ("C", "read DB credentials from a server-side env var or secret; rotate this one."),
+}
+
+
+def _semgrep_category(rule_id: str) -> tuple[str, str]:
+    for key, (cat, fix) in _SEMGREP_RULE_MAP.items():
+        if key in rule_id:
+            return cat, fix
+    return "B", "review this pattern; the message names the file and line."
+
+
+def _findings_from_semgrep(document: dict[str, Any]) -> list[ExposeFinding]:
+    out: list[ExposeFinding] = []
+    for run in document.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        for result in run.get("results") or []:
+            if not isinstance(result, dict):
+                continue
+            rule_id = str(result.get("ruleId", ""))
+            cat, fix = _semgrep_category(rule_id)
+            level = result.get("level")
+            severity = _LEVEL_TO_SEV.get(level if isinstance(level, str) else "", "warning")
+            msg = result.get("message")
+            text = msg.get("text", "") if isinstance(msg, dict) else ""
+            where = _first_location(result)
+            out.append(ExposeFinding(cat, rule_id.split(".")[-1] or "pattern", severity,
+                                     where, _clean(text), fix))
+    return out
+
+
+_LEVEL_TO_SEV = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
+
+
+def _first_location(result: dict[str, Any]) -> str:
+    locs = result.get("locations")
+    if isinstance(locs, list) and locs and isinstance(locs[0], dict):
+        phys = locs[0].get("physicalLocation") or {}
+        if isinstance(phys, dict):
+            art = phys.get("artifactLocation") or {}
+            region = phys.get("region") or {}
+            uri = art.get("uri", "") if isinstance(art, dict) else ""
+            line = region.get("startLine") if isinstance(region, dict) else None
+            if isinstance(uri, str) and uri:
+                return f"{uri}:{line}" if isinstance(line, int) else uri
+    return ""
+
+
+def _clean(text: str) -> str:
+    return " ".join(str(text).split())[:300] or "(no description given)"
+
+
+# ---------------------------------------------------------------------------
+# SARIF assembly for the native findings
+# ---------------------------------------------------------------------------
+
+_SEV_TO_LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
+_HELP_URI = "https://girnarholdings.github.io/TriDelPhi/"
+
+
+def _native_sarif(findings: list[ExposeFinding], tool_version: str) -> dict[str, Any]:
+    rules: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+    for f in sorted(findings, key=lambda x: (x.where, x.rule, x.message)):
+        rule_id = f"tridelphi-expose/{f.rule}"
+        if rule_id not in seen:
+            seen.add(rule_id)
+            rules.append({
+                "id": rule_id,
+                "name": f.rule.replace("-", ""),
+                "shortDescription": {"text": f"Exposure audit: {f.rule}"},
+                "helpUri": _HELP_URI,
+            })
+        path, _sep, line = f.where.partition(":")
+        region = {"startLine": int(line)} if line.isdigit() else {"startLine": 1}
+        results.append({
+            "ruleId": rule_id,
+            "level": _SEV_TO_LEVEL.get(f.severity, "warning"),
+            "message": {"text": f.message},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": path or "README.md"},
+                    "region": region,
+                }
+            }],
+        })
+    return {
+        "version": "2.1.0",
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "tridelphi-expose",
+                "version": tool_version,
+                "informationUri": _HELP_URI,
+                "rules": rules,
+            }},
+            "results": results,
+        }],
+    }
+
+
+# ---------------------------------------------------------------------------
+# entry point
+# ---------------------------------------------------------------------------
+
+
+def analyze_exposure(root: str | Path, *, tool_version: str = "0", run_semgrep: bool = True) -> ExposureResult:
+    """Audit ``root`` for shipped-asset, DB-config, and data-hygiene exposure.
+
+    Native detectors are pure file reads (no subprocess, no network). The
+    code-pattern rung runs semgrep with the bundled local ruleset when semgrep
+    is on PATH and ``run_semgrep`` is set; if it is absent, the audit still
+    produces every native finding and notes that the code rung was skipped.
+    """
+    root = Path(root)
+    surface = _discover(root)
+
+    findings: list[ExposeFinding] = []
+    findings += _detect_maps_and_secrets(root, surface)
+    findings += _detect_db_misconfig(root, surface)
+    findings += _detect_committed_pii(root, surface)
+    findings += _detect_minification(root, surface)
+
+    semgrep_ran = False
+    semgrep_note: str | None = None
+    document = _native_sarif(findings, tool_version)
+
+    if run_semgrep:
+        ext: ExternalRun = run_tool(SEMGREP_EXPOSURE, str(root))
+        if ext.sarif is not None:
+            semgrep_ran = True
+            findings += _findings_from_semgrep(ext.sarif)
+            document = merge_runs(document, ext.sarif)
+        elif ext.diagnostic is not None:
+            semgrep_note = ext.diagnostic.message
+
+    findings.sort(key=lambda f: (CATEGORY_ORDER.get(f.category, 9),
+                                 {"critical": 0, "warning": 1, "note": 2}.get(f.severity, 3),
+                                 f.where, f.rule))
+    return ExposureResult(
+        findings=findings, sarif=document, semgrep_ran=semgrep_ran, semgrep_note=semgrep_note,
+    )

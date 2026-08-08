@@ -170,6 +170,24 @@ SEMGREP = ToolSpec(
 LADDER: tuple[ToolSpec, ...] = (GITLEAKS, OSV_SCANNER, ZIZMOR, SCORECARD, SEMGREP)
 MAX_LEVEL = 6
 
+# The exposure audit reuses the semgrep binary with a LOCAL, bundled ruleset —
+# never the registry — so unlike L5 it is genuinely offline (network=False).
+# It is deliberately kept OUT of LADDER: `--level N` must never run it, and it
+# is not a hardening rung. `tridelphi expose` invokes it directly via run_tool.
+SEMGREP_EXPOSURE_RULES = Path(__file__).resolve().parent / "data" / "semgrep-exposure"
+SEMGREP_EXPOSURE = ToolSpec(
+    name="semgrep",
+    level=0,
+    rung="expose · data hygiene",
+    what="curated local rules for weak hashing, plaintext PII and hardcoded DB creds",
+    homepage="https://github.com/semgrep/semgrep",
+    license="LGPL-2.1",
+    install_hint="pipx install semgrep",
+    network=False,  # local --config, --metrics off: no registry, no upload
+    ok_exit_codes=frozenset({0, 1}),
+    timeout=600,
+)
+
 
 class ExternalRun:
     """Outcome of one wrapped tool. Exactly one of ``sarif``/``diagnostic`` set."""
@@ -280,6 +298,18 @@ def run_tool(
             cmd = [
                 binary, "scan",
                 "--config", "p/security-audit",
+                "--sarif", "--output", str(report),
+                "--metrics", "off",
+                "--disable-version-check",
+                "--quiet",
+                ".",
+            ]
+        elif spec is SEMGREP_EXPOSURE:
+            # The exposure audit's code-pattern rung: our LOCAL bundled ruleset,
+            # metrics off, no registry — the offline-honest counterpart to L5.
+            cmd = [
+                binary, "scan",
+                "--config", str(SEMGREP_EXPOSURE_RULES),
                 "--sarif", "--output", str(report),
                 "--metrics", "off",
                 "--disable-version-check",

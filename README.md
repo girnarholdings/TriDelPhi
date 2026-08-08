@@ -424,6 +424,7 @@ tridelphi fix                                  # an ordered to-do list, cheapest
 tridelphi fix --markdown                       # the same plan, ready to paste into a PR
 tridelphi guard                                # fix interactively: yes/no per finding
 tridelphi fix --apply                          # apply the automatic fixes, no prompts
+tridelphi expose                               # what your shipped code + config actually leaks
 tridelphi . --format sarif --sarif-file s.json # for GitHub code scanning
 tridelphi . --format html  --html-file r.html  # a self-contained report page
 tridelphi --explain agent-config-ingress       # what a rule means and why
@@ -497,6 +498,39 @@ remediation demands, and it passes the scanner that ships it:
   of the same repository, i.e. code written by someone with write access; and
   because `issue_comment` workflows run the file from the *default* branch, a
   PR cannot modify the bot that acts on it.
+
+### 🔦 The exposure audit — `tridelphi expose`
+
+The Rule-of-Two scan is about your CI. `tridelphi expose` is about your **shipped
+product**: it audits committed code and config for what a vibe-coded app actually
+leaks — and it is deliberately honest about what a *static* tool can and cannot
+prove.
+
+| Check | Finds | Engine |
+|---|---|---|
+| Shipped source maps + client secrets | a `.map` embedding your whole repo (`sourcesContent`), a live-key-shaped string in a `dist/` bundle | native |
+| Password hashing | `md5`/`sha1` used on a password | semgrep (local rules) |
+| User data in the clear | tokens in `localStorage`, PII in committed data files | semgrep + native |
+| Self-hosted DB left open | a Compose DB on a public port with a default/empty password | native |
+| Minification status | whether your bundle is already minified (so you know if more is even worth it) | native |
+
+Two things keep it honest, which matters because the naïve version of this
+feature makes people *less* safe:
+
+- **It's static.** It reads committed code and config; it cannot reach a running
+  database or server. The report says so on every run: a clean result is not a
+  penetration test, and a flagged config may already be firewalled.
+- **A browser can never keep a secret.** A key shipped in client JS is public the
+  moment the page loads — so `expose` tells you to *rotate it and move it
+  server-side*, never to hide it. (Obfuscation cannot hide a secret; see
+  `tridelphi privatize`, coming next, which is labelled plainly as "raises the
+  effort of copying your logic — not security.")
+
+The native detectors are pure file reads — offline, deterministic, no subprocess.
+The code-pattern rung is semgrep run against a **bundled local ruleset**
+(`--config <dir> --metrics off`, never the registry), so the whole audit keeps
+the same "runs on your machine, nothing uploaded" promise as the core scan.
+Output is the same plain-language checklist, SARIF, and paste-ready Markdown.
 
 ### 🔁 The ratchet
 
