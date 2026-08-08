@@ -12,7 +12,7 @@ import pytest
 from conftest import run_cli
 
 from tridelphi.api import analyze
-from tridelphi.init_cmd import WORKFLOW, run_init
+from tridelphi.init_cmd import FIX_WORKFLOW, WORKFLOW, run_init
 
 
 def test_init_writes_the_workflow(tmp_path):
@@ -20,6 +20,26 @@ def test_init_writes_the_workflow(tmp_path):
     wf = tmp_path / ".github/workflows/tridelphi.yml"
     assert wf.is_file()
     assert wf.read_text() == WORKFLOW
+
+
+def test_init_writes_the_fix_bot(tmp_path):
+    assert run_init(str(tmp_path)) == 0
+    wf = tmp_path / ".github/workflows/tridelphi-fix.yml"
+    assert wf.is_file()
+    assert wf.read_text() == FIX_WORKFLOW
+
+
+def test_fix_bot_holds_its_trust_boundary():
+    """The reply-to-fix workflow is the U∩P∩E shape this tool exists to catch,
+    so its own guardrails are load-bearing: the association gate, the fork
+    skip, and comment text never reaching a shell."""
+    assert "author_association" in FIX_WORKFLOW
+    assert "isCrossRepository" in FIX_WORKFLOW, "fork PRs must be skipped"
+    # The comment body may appear only inside the job-level `if:` expression —
+    # never in a run block or env value.
+    for line in FIX_WORKFLOW.split("\n"):
+        if "comment.body" in line:
+            assert "contains(" in line, f"comment body outside the gate: {line!r}"
 
 
 def test_init_is_idempotent(tmp_path):
@@ -30,18 +50,20 @@ def test_init_is_idempotent(tmp_path):
     assert run_init(str(tmp_path), force=True) == 0
 
 
-def test_generated_workflow_is_valid_yaml_and_parses(tmp_path):
+def test_generated_workflows_are_valid_yaml_and_parse(tmp_path):
     run_init(str(tmp_path))
     result = analyze(tmp_path)
     assert not result.diagnostics, (
-        "the generated workflow did not parse: "
+        "a generated workflow did not parse: "
         + "; ".join(f"{d.path}: {d.message}" for d in result.diagnostics)
     )
-    assert result.contexts_scanned == 1
+    assert result.contexts_scanned == 2  # the scan job and the fix-bot job
 
 
-def test_generated_workflow_is_clean_by_our_own_rules(tmp_path):
-    """The onboarding file must not trip the tool it installs."""
+def test_generated_workflows_are_clean_by_our_own_rules(tmp_path):
+    """The onboarding files must not trip the tool they install — including
+    the fix bot, which is comment-triggered with write permission and passes
+    only because it is built the way our own remediation demands."""
     run_init(str(tmp_path))
     result = analyze(tmp_path)
     gating = [f for f in result.findings if f.severity in ("critical", "warning")]

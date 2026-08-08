@@ -20,7 +20,12 @@ from typing import TextIO
 from .model import AnalysisResult
 from .render import SEVERITY_ORDER
 
-__all__ = ["ExternalStatus", "items_from_sarif", "render_checklist"]
+__all__ = [
+    "ExternalStatus",
+    "items_from_sarif",
+    "render_checklist",
+    "render_checklist_markdown",
+]
 
 # name → (ladder level, the plain question the check answers)
 _LADDER_ROWS: tuple[tuple[str, int, str], ...] = (
@@ -101,11 +106,17 @@ def _sanitize(text: str, width: int = _ITEM_WIDTH) -> str:
     return flat if len(flat) <= width else flat[: width - 1] + "…"
 
 
-def items_from_sarif(sarif: dict) -> list[tuple[str, str]]:
-    """(severity, "file:line — message") for each result, sanitized and sorted
+# Alias spam like "(also known as 'PYSEC-…', 'GHSA-…')" doubles the line
+# length and tells a lay reader nothing the primary id doesn't.
+_ALIASES = re.compile(r"\s*\(also known as [^)]*\)")
+_OSV_MESSAGE = re.compile(r"Package '([^'@]+)@([^']+)' is vulnerable to '([^']+)'")
+
+
+def items_from_sarif(sarif: dict) -> list[tuple[str, str, str]]:
+    """(severity, "file:line", message) for each result, sanitized and sorted
     worst-first. Malformed results are skipped, never fatal — this is display,
     and the document came from a subprocess we do not control."""
-    items: list[tuple[str, str]] = []
+    items: list[tuple[str, str, str]] = []
     for run in sarif.get("runs") or []:
         if not isinstance(run, dict):
             continue
@@ -129,10 +140,95 @@ def items_from_sarif(sarif: dict) -> list[tuple[str, str]]:
                         where = _sanitize(uri, 60)
                         if isinstance(line, int):
                             where += f":{line}"
-            body = _sanitize(text) or "(no description given)"
-            items.append((severity, f"{where} — {body}" if where else body))
+            body = _sanitize(_ALIASES.sub("", text)) or "(no description given)"
+            items.append((severity, where, body))
     items.sort(key=lambda it: SEVERITY_ORDER.get(it[0], 3))
     return items
+
+
+def _compact_wheres(wheres: list[str]) -> str:
+    """`a.yml:25, a.yml:41, b.yml:3` -> `a.yml lines 25, 41 · b.yml line 3`."""
+    by_file: dict[str, list[str]] = {}
+    file_order: list[str] = []
+    for where in wheres:
+        file, _sep, line = where.partition(":")
+        if file not in by_file:
+            by_file[file] = []
+            file_order.append(file)
+        if line:
+            by_file[file].append(line)
+    parts = []
+    for file in file_order:
+        lines = by_file[file]
+        if not lines:
+            parts.append(file)
+        elif len(lines) == 1:
+            parts.append(f"{file} line {lines[0]}")
+        else:
+            parts.append(f"{file} lines {', '.join(lines)}")
+    return " · ".join(parts)
+
+
+def _grouped(items: list[tuple[str, str, str]], *, hide_where: bool = False) -> list[str]:
+    """Collapse the raw item list into lines a person wants to read.
+
+    Raw tool output repeats itself: the same CVE listed twice, the same
+    workflow-lint message on eight checkouts, alias ids stuffed in brackets.
+    Three rules turn the dump into prose:
+
+    1. exact duplicates disappear;
+    2. per-package CVE lists collapse to "pkg ver has N known flaws (ids)";
+    3. one message across many locations becomes the message once, followed
+       by a compacted location list.
+
+    ``hide_where`` drops locations entirely — used for repo-level rungs
+    (scorecard) whose synthetic README.md anchor exists only for the SARIF
+    upload contract and would read as noise here.
+    """
+    if hide_where:
+        items = [(sev, "", msg) for sev, _w, msg in items]
+    seen: set[tuple[str, str]] = set()
+    osv: dict[tuple[str, str, str], list[str]] = {}
+    by_message: dict[str, list[str]] = {}
+    order: list[tuple[str, object]] = []  # ("osv", key) | ("msg", message)
+
+    for _severity, where, message in items:
+        if (where, message) in seen:
+            continue
+        seen.add((where, message))
+        m = _OSV_MESSAGE.search(message)
+        if m:
+            key = (where, m.group(1), m.group(2))
+            if key not in osv:
+                osv[key] = []
+                order.append(("osv", key))
+            if m.group(3) not in osv[key]:
+                osv[key].append(m.group(3))
+            continue
+        if message not in by_message:
+            by_message[message] = []
+            order.append(("msg", message))
+        if where and where not in by_message[message]:
+            by_message[message].append(where)
+
+    lines: list[str] = []
+    for kind, key in order:
+        if kind == "osv":
+            where, pkg, version = key  # type: ignore[misc]
+            ids = osv[(where, pkg, version)]
+            n = len(ids)
+            flaw = "known flaw" if n == 1 else "known flaws"
+            lines.append(f"{pkg} {version} has {n} {flaw} ({', '.join(ids)}) — {where}")
+        else:
+            message = key  # type: ignore[assignment]
+            wheres = by_message[message]
+            if not wheres:
+                lines.append(message)
+            elif len(wheres) == 1:
+                lines.append(f"{wheres[0]} — {message}")
+            else:
+                lines.append(f"{message} — at {_compact_wheres(wheres)}")
+    return lines
 
 
 def _plain_why(capabilities: set[str]) -> str:
@@ -297,13 +393,17 @@ def render_checklist(
 
         for name, question, st in advisory_rungs:
             gloss = _RUNG_GLOSS.get(name, "the tool's message names the exact spot.")
-            shown = [it for it in st.items if it[0] != "note"][:_MAX_ITEMS]
+            grouped = _grouped(
+                [it for it in st.items if it[0] != "note"],
+                hide_where=(name == "scorecard"),
+            )
+            shown = grouped[:_MAX_ITEMS]
             n = st.counts["warning"]
             print(f"  ⚠️  {question.rstrip('?')} — {n} worth a look", file=stream)
             print(f"      {gloss}", file=stream)
-            for _sev, text in shown:
+            for text in shown:
                 print(f"      · {text}", file=stream)
-            hidden = n - len(shown)
+            hidden = len(grouped) - len(shown)
             if hidden > 0:
                 print(
                     f"      · …and {hidden} more — the saved report (SARIF / "
@@ -329,3 +429,147 @@ def render_checklist(
     if result.diagnostics:
         n = len(result.diagnostics)
         print(f"\n  Note: {n} file{'s' if n != 1 else ''} couldn't be read and were skipped.", file=stream)
+
+
+def render_checklist_markdown(
+    result: AnalysisResult,
+    *,
+    repo_label: str,
+    files_scanned: int,
+    jobs_scanned: int,
+    fail_on: str,
+    external: dict[str, ExternalStatus] | None = None,
+) -> str:
+    """The checklist as GitHub-flavored Markdown — the PR comment, and
+    therefore the notification email.
+
+    The email a maintainer receives *is* this comment, so it is structured to
+    be skimmed in an inbox: verdict in the heading, a status table, criticals
+    (if any) in the open with the plain fix, and the minor items folded into a
+    <details> block so "you're fine" never arrives looking like a data dump.
+    Same findings as every other format; nothing is hidden — only folded.
+    """
+    external = external or {}
+    threshold = SEVERITY_ORDER.get(fail_on, 0) if fail_on != "none" else 99
+
+    core_findings = [f for f in result.findings if f.rule_id != "tridelphi/parse-error"]
+    core_crit = [f for f in core_findings if f.severity == "critical"]
+    core_warn = [f for f in core_findings if f.severity == "warning"]
+
+    def status_cell(counts: dict[str, int]) -> str:
+        if counts["critical"]:
+            n = counts["critical"]
+            return f"🚫 **{n} to fix**"
+        if counts["warning"]:
+            return f"⚠️ {counts['warning']} worth a look"
+        return "✅ all clear"
+
+    external_crit = sum(
+        st.counts["critical"] for st in external.values() if st.ran
+    )
+    total_to_fix = len(core_crit) + external_crit
+
+    out: list[str] = []
+    if total_to_fix:
+        item = "thing" if total_to_fix == 1 else "things"
+        out.append(f"### 🔺 TriDelPhi — 🚫 {total_to_fix} {item} to fix before this is safe")
+    else:
+        out.append("### 🔺 TriDelPhi — ✅ You're good, nothing urgent")
+    out.append(
+        f"_{repo_label} · {jobs_scanned} job{'s' if jobs_scanned != 1 else ''} across "
+        f"{files_scanned} workflow{'s' if files_scanned != 1 else ''} · ran on the runner, "
+        "nothing uploaded or shared_"
+    )
+    out.append("")
+    out.append("| Check | Result |")
+    out.append("|---|---|")
+    core_counts = {"critical": len(core_crit), "warning": len(core_warn), "note": 0}
+    out.append(
+        f"| Can a stranger trick a robot into leaking your keys? | {status_cell(core_counts)} |"
+    )
+    for name, level, question in _LADDER_ROWS:
+        st = external.get(name)
+        if st is None or not st.ran:
+            out.append(f"| {question} | ⬜ not run — add `--level {level}` |")
+        else:
+            out.append(f"| {question} | {status_cell(st.counts)} |")
+    out.append("")
+
+    # Criticals stay in the open — never folded.
+    actionable = sorted(
+        [f for f in core_findings if SEVERITY_ORDER[f.severity] <= threshold],
+        key=lambda f: (SEVERITY_ORDER[f.severity], f.sort_key),
+    )
+    if actionable:
+        out.append("**Fix these first:**")
+        for finding in actionable:
+            caps = {h.capability for h in finding.hits if h.observed}
+            where = f"`{finding.primary_position.file}` job `{finding.context.job_id}`"
+            fix = ""
+            if finding.remediation is not None:
+                fix = _PLAIN_FIX.get(finding.remediation.strip, "remove one of the three powers")
+            out.append(f"- 🚫 {where} — {_plain_why(caps).rstrip('.')}. **Do this:** {fix}.")
+        out.append("")
+
+    # Everything advisory folds away, with the legend inside.
+    advisory_core = [f for f in core_warn if SEVERITY_ORDER[f.severity] > threshold]
+    advisory_rungs = [
+        (name, question, st)
+        for name, _lvl, question in _LADDER_ROWS
+        if (st := external.get(name)) is not None
+        and st.ran
+        and st.counts["warning"]
+        and not st.counts["critical"]
+    ]
+    advisory_total = len(advisory_core) + sum(
+        st.counts["warning"] for _n, _q, st in advisory_rungs
+    )
+    if advisory_core or advisory_rungs:
+        out.append("<details>")
+        out.append(
+            f"<summary><b>The {advisory_total} minor items, in plain English</b> — "
+            "nothing urgent, tap to read</summary>"
+        )
+        out.append("")
+        out.append(
+            '**What "worth a look" means:** not an open door — a stranger cannot use '
+            "any of these to get in today. They are good-practice gaps, like a front "
+            "door that locks but has no deadbolt yet. Tidy them when convenient."
+        )
+        out.append("")
+        for finding in advisory_core:
+            caps = {h.capability for h in finding.hits if h.observed}
+            where = f"`{finding.primary_position.file}` job `{finding.context.job_id}`"
+            fix = ""
+            if finding.remediation is not None:
+                fix = _PLAIN_FIX.get(finding.remediation.strip, "remove one of the three powers")
+                fix = f" **Do this:** {fix}."
+            out.append(f"- ⚠️ {where} — {_plain_why(caps).rstrip('.')}.{fix}")
+        for name, question, st in advisory_rungs:
+            gloss = _RUNG_GLOSS.get(name, "the tool's message names the exact spot.")
+            grouped = _grouped(
+                [it for it in st.items if it[0] != "note"],
+                hide_where=(name == "scorecard"),
+            )
+            out.append(f"**{question.rstrip('?')} — {st.counts['warning']}**  ")
+            out.append(f"_{gloss}_")
+            for text in grouped[:_MAX_ITEMS]:
+                out.append(f"- {text}")
+            hidden = len(grouped) - min(len(grouped), _MAX_ITEMS)
+            if hidden > 0:
+                out.append(f"- …and {hidden} more in the Security tab.")
+            out.append("")
+        out.append("</details>")
+        out.append("")
+
+    if total_to_fix == 0 and advisory_total:
+        out.append(
+            "_Reply `tridelphi fix` to this pull request and the bot will apply the "
+            "automatic fixes it can verify._"
+        )
+    elif total_to_fix:
+        out.append(
+            "_Run `tridelphi guard` locally for interactive fixes, or reply "
+            "`tridelphi fix` here to apply the automatic ones._"
+        )
+    return "\n".join(out) + "\n"

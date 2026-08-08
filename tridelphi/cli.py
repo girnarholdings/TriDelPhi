@@ -25,7 +25,7 @@ from . import __version__
 from .api import AnalysisError, analyze
 from .baseline import DEFAULT_BASELINE, load_baseline, partition, write_baseline
 from .checklist import ExternalStatus as ChecklistStatus
-from .checklist import items_from_sarif, render_checklist
+from .checklist import items_from_sarif, render_checklist, render_checklist_markdown
 from .coverage import render_coverage
 from .html_report import render_html
 from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
@@ -82,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--sarif-file", metavar="PATH", help="also write SARIF here")
     parser.add_argument("--html-file", metavar="PATH", help="also write an HTML report here")
+    parser.add_argument(
+        "--checklist-md-file", metavar="PATH",
+        help=(
+            "also write the checklist as GitHub Markdown here (status table + "
+            "folded details) — what the PR bot posts, and what the email shows"
+        ),
+    )
     parser.add_argument("--min-severity", choices=_SEVERITIES, default="critical")
     parser.add_argument(
         "--fail-on", choices=(*_SEVERITIES, "none"), default="critical",
@@ -423,6 +430,19 @@ def main(argv: list[str] | None = None) -> int:
             f"{counts['warning']} warning",
         )
 
+    if args.checklist_md_file:
+        Path(args.checklist_md_file).write_text(
+            render_checklist_markdown(
+                result,
+                repo_label=repo_label,
+                files_scanned=result.files_scanned,
+                jobs_scanned=result.contexts_scanned,
+                fail_on=args.fail_on,
+                external=external_status,
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
     if args.sarif_file:
         Path(args.sarif_file).write_text(dumps(build_sarif()), encoding="utf-8", newline="\n")
     # L6: the attest half runs inline when the scan reaches rung 6 and there is
