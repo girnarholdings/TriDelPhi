@@ -6,13 +6,14 @@ an onboarding file that our own tool flags would be indefensible.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
 from conftest import run_cli
 
 from tridelphi.api import analyze
-from tridelphi.init_cmd import FIX_WORKFLOW, WORKFLOW, run_init
+from tridelphi.init_cmd import FIX_WORKFLOW, WORKFLOW, render_action_workflow, run_init
 
 
 def test_init_writes_the_workflow(tmp_path):
@@ -91,3 +92,58 @@ def test_composite_action_exists_and_is_yaml():
     doc = YAML().load(action.read_text())
     assert doc["runs"]["using"] == "composite"
     assert "tridelphi" in doc["name"].lower()
+
+
+# ---------------------------------------------------------------------------
+# the wizard / Setup Studio path — composite-action workflow with chosen inputs
+# ---------------------------------------------------------------------------
+
+
+def _yaml(text: str):
+    from ruamel.yaml import YAML
+
+    return YAML().load(text)
+
+
+def test_render_action_workflow_carries_choices():
+    wf = render_action_workflow(level=5, fail_on="warning", comment=False, expose=True)
+    step = _yaml(wf)["jobs"]["harden"]["steps"][1]
+    assert step["uses"] == "girnarholdings/TriDelPhi@v3"
+    assert step["with"]["level"] == "5"
+    assert step["with"]["fail-on"] == "warning"
+    assert step["with"]["comment"] == "false"
+    assert step["with"]["expose"] == "true"
+
+
+def test_render_action_workflow_omits_expose_by_default():
+    step = _yaml(render_action_workflow())["jobs"]["harden"]["steps"][1]
+    assert "expose" not in step["with"]
+    assert step["with"]["level"] == "3"
+
+
+def test_wizard_writes_the_action_workflow_and_fix_bot(tmp_path):
+    # level 7 · expose yes · fail-on warning · comment no · fix bot yes
+    answers = io.StringIO("7\ny\nwarning\nn\ny\n")
+    code = run_init(str(tmp_path), wizard=True, input_stream=answers, out=io.StringIO())
+    assert code == 0
+    wf = (tmp_path / ".github/workflows/tridelphi.yml").read_text()
+    step = _yaml(wf)["jobs"]["harden"]["steps"][1]
+    assert step["with"]["level"] == "7" and step["with"]["expose"] == "true"
+    assert step["with"]["fail-on"] == "warning" and step["with"]["comment"] == "false"
+    assert (tmp_path / ".github/workflows/tridelphi-fix.yml").is_file()
+
+
+def test_wizard_can_skip_the_fix_bot(tmp_path):
+    answers = io.StringIO("3\nn\ncritical\ny\nn\n")  # fix bot = n
+    run_init(str(tmp_path), wizard=True, input_stream=answers, out=io.StringIO())
+    assert (tmp_path / ".github/workflows/tridelphi.yml").is_file()
+    assert not (tmp_path / ".github/workflows/tridelphi-fix.yml").exists()
+
+
+def test_wizard_takes_defaults_on_closed_stdin(tmp_path):
+    # EOF immediately → all defaults (level 3, no expose, fail critical, comment, fix bot)
+    code = run_init(str(tmp_path), wizard=True, input_stream=io.StringIO(""), out=io.StringIO())
+    assert code == 0
+    step = _yaml((tmp_path / ".github/workflows/tridelphi.yml").read_text())["jobs"]["harden"]["steps"][1]
+    assert step["with"]["level"] == "3" and "expose" not in step["with"]
+    assert (tmp_path / ".github/workflows/tridelphi-fix.yml").is_file()

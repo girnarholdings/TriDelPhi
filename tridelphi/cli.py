@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true", help="with init: overwrite an existing workflow")
     parser.add_argument(
+        "--wizard", action="store_true",
+        help="with init: click-through setup — choose level, expose, threshold, and write "
+             "a one-line composite-action workflow",
+    )
+    parser.add_argument(
         "--markdown", action="store_true",
         help="with `fix`: render the plan as Markdown to paste into a PR or ticket",
     )
@@ -203,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.path == "init":
         from .init_cmd import run_init
 
-        return run_init(args.command or ".", force=args.force)
+        return run_init(args.command or ".", force=args.force, wizard=args.wizard)
     if args.path == "expose":
         # The exposure audit: shipped source maps + client secrets, DB config,
         # data hygiene. A sibling of the scan, not a ladder rung.
