@@ -266,3 +266,134 @@ def test_semgrep_weak_hash_and_localstorage_live(tmp_path):
     cats = _cats(result)
     assert any(f.rule and "hash" in f.rule for f in cats.get("B", [])), "weak hash → B"
     assert any("storage" in f.rule or "token" in f.rule for f in cats.get("C", [])), "localStorage → C"
+
+
+@pytest.mark.skipif(shutil.which("semgrep") is None, reason="semgrep not installed")
+def test_semgrep_jwt_and_tls_disabled_live(tmp_path):
+    root = _repo(tmp_path, {
+        "auth.py": "import jwt\ndef v(t): return jwt.decode(t, key, algorithms=['none'])\n",
+        "net.py": "import requests\ndef g(u): return requests.get(u, verify=False)\n",
+    })
+    result = analyze_exposure(root, tool_version="0.1.0", run_semgrep=True)
+    assert result.semgrep_ran
+    c_rules = [f.rule for f in _cats(result).get("C", [])]
+    assert any("jwt" in r for r in c_rules), "JWT verify disabled → C"
+    assert any("tls" in r for r in c_rules), "TLS verify disabled → C"
+
+
+# ---------------------------------------------------------------------------
+# extended secret shapes (category A) + Firebase precision
+# ---------------------------------------------------------------------------
+
+
+def test_openai_key_in_bundle_is_critical_and_masked(tmp_path):
+    key = "sk-proj-" + "a" * 48
+    root = _repo(tmp_path, {"dist/app.js": f'const c="{key}";'})
+    result = _native(root)
+    crit = [f for f in result.findings if f.category == "A" and f.severity == "critical"]
+    assert crit, "an OpenAI key shipped in a bundle must be critical"
+    assert all(key not in f.message for f in crit), "the key body must be masked"
+
+
+def test_anthropic_key_not_double_reported_as_openai(tmp_path):
+    root = _repo(tmp_path, {"dist/app.js": 'const c="sk-ant-' + "a" * 40 + '";'})
+    result = _native(root)
+    crit = [f for f in result.findings if f.rule == "client-secret" and f.severity == "critical"]
+    assert len(crit) == 1, "the Anthropic key must produce exactly one finding, not also an OpenAI one"
+    assert "Anthropic" in crit[0].message
+
+
+def test_firebase_web_key_is_a_note_not_critical(tmp_path):
+    body = 'const firebaseConfig={apiKey:"AIza' + "b" * 35 + '",authDomain:"x.firebaseapp.com"};'
+    root = _repo(tmp_path, {"dist/app.js": body})
+    result = _native(root)
+    assert not result.gating(), "a Firebase web apiKey is public by design — must not gate"
+    notes = [f for f in result.findings if f.rule == "firebase-public-key"]
+    assert notes and notes[0].severity == "note"
+    assert "Security Rules" in notes[0].fix
+
+
+# ---------------------------------------------------------------------------
+# category F — committed credentials / cloud config
+# ---------------------------------------------------------------------------
+
+
+def test_committed_private_key_pem_is_critical(tmp_path):
+    root = _repo(tmp_path, {
+        "certs/server.pem": "-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----\n",
+    })
+    result = _native(root)
+    crit = [f for f in result.findings if f.category == "F" and f.severity == "critical"]
+    assert crit and crit[0].rule == "committed-private-key"
+
+
+def test_public_certificate_pem_is_clean(tmp_path):
+    # A cert with no private key must NOT flag — content, not extension, decides.
+    root = _repo(tmp_path, {
+        "certs/pub.pem": "-----BEGIN CERTIFICATE-----\nMIIzzz\n-----END CERTIFICATE-----\n",
+    })
+    result = _native(root)
+    assert not [f for f in result.findings if f.category == "F"]
+
+
+def test_gcp_service_account_json_is_critical(tmp_path):
+    sa = json.dumps({
+        "type": "service_account",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+    })
+    root = _repo(tmp_path, {"serviceAccountKey.json": sa})
+    result = _native(root)
+    assert [f for f in result.findings if f.category == "F" and f.severity == "critical"]
+
+
+def test_committed_tfstate_is_a_warning(tmp_path):
+    root = _repo(tmp_path, {"infra/terraform.tfstate": '{"version":4,"resources":[]}'})
+    result = _native(root)
+    f = [x for x in result.findings if x.category == "F"]
+    assert f and f[0].rule == "committed-tfstate" and f[0].severity == "warning"
+
+
+def test_openai_key_committed_in_env_is_critical(tmp_path):
+    root = _repo(tmp_path, {".env": "OPENAI_API_KEY=sk-proj-" + "c" * 48 + "\n"})
+    result = _native(root)
+    crit = [f for f in result.findings if f.category == "F" and f.rule == "committed-env-secret"]
+    assert crit and crit[0].severity == "critical"
+
+
+def test_env_example_with_key_shape_is_ignored(tmp_path):
+    root = _repo(tmp_path, {".env.example": "OPENAI_API_KEY=sk-proj-" + "d" * 48 + "\n"})
+    result = _native(root)
+    assert not result.findings, "template env files must never be scanned"
+
+
+# ---------------------------------------------------------------------------
+# category D — more self-hosted engines
+# ---------------------------------------------------------------------------
+
+_ES_PUBLIC_NOAUTH = """\
+services:
+  es:
+    image: elasticsearch:8.13.0
+    ports: ["9200:9200"]
+    environment:
+      - xpack.security.enabled=false
+"""
+
+
+def test_elasticsearch_public_with_security_disabled_is_critical(tmp_path):
+    root = _repo(tmp_path, {"docker-compose.yml": _ES_PUBLIC_NOAUTH})
+    result = _native(root)
+    crit = [f for f in result.findings if f.category == "D" and f.severity == "critical"]
+    assert crit, "a public Elasticsearch with security disabled must be critical"
+
+
+def test_new_credential_walk_stays_deterministic(tmp_path):
+    root = _repo(tmp_path, {
+        "certs/server.pem": "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n",
+        "infra/main.tfstate": '{"resources":[]}',
+        ".env": "OPENAI_API_KEY=sk-proj-" + "e" * 48 + "\n",
+        "dist/app.js": 'const k="sk-ant-' + "z" * 40 + '";',
+    })
+    a = json.dumps(_native(root).sarif, sort_keys=True)
+    b = json.dumps(_native(root).sarif, sort_keys=True)
+    assert a == b, "two audits of the same tree must be byte-identical"
