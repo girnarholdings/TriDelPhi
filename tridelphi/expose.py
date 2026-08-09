@@ -48,6 +48,8 @@ CATEGORIES: tuple[tuple[str, str, str], ...] = (
      "Whether you already get minification's baseline protection."),
     ("F", "Are your keys or cloud config committed to the repo?",
      "Private keys, cloud/service-account credentials or terraform state checked into git."),
+    ("G", "Are your cloud data rules or storage buckets left open?",
+     "Firebase Security Rules that let anyone in, or a bucket set world-readable/writable."),
 )
 CATEGORY_ORDER = {letter: i for i, (letter, _q, _g) in enumerate(CATEGORIES)}
 
@@ -88,7 +90,18 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("a Google OAuth client secret", re.compile(r"GOCSPX-[0-9A-Za-z_\-]{20,}"), "critical"),
     ("a Stripe live key", re.compile(r"[sr]k_live_[0-9A-Za-z]{24,}"), "critical"),
     ("an Anthropic API key", re.compile(r"sk-ant-[0-9A-Za-z_\-]{20,}"), "critical"),
-    ("an OpenAI API key", re.compile(r"sk-(?!ant-)[0-9A-Za-z_\-]{40,}"), "critical"),
+    ("an OpenRouter API key", re.compile(r"sk-or-v1-[0-9a-f]{48,}"), "critical"),
+    # OpenAI's `sk-` is the most general — it must not swallow Anthropic/OpenRouter,
+    # which are matched above, hence the `(?!ant-|or-)` guard.
+    ("an OpenAI API key", re.compile(r"sk-(?!ant-|or-)[0-9A-Za-z_\-]{40,}"), "critical"),
+    ("a Groq API key", re.compile(r"gsk_[0-9A-Za-z]{40,}"), "critical"),
+    ("a HuggingFace token", re.compile(r"hf_[0-9A-Za-z]{34,}"), "critical"),
+    ("a Replicate token", re.compile(r"r8_[0-9A-Za-z]{37,}"), "critical"),
+    ("a PlanetScale password", re.compile(r"pscale_pw_[0-9A-Za-z._\-]{40,}"), "critical"),
+    ("a PlanetScale token", re.compile(r"pscale_tkn_[0-9A-Za-z._\-]{40,}"), "critical"),
+    ("a Supabase access token", re.compile(r"sbp_[0-9a-f]{40}"), "critical"),
+    ("a Docker personal access token", re.compile(r"dckr_pat_[0-9A-Za-z_\-]{20,}"), "critical"),
+    ("a Figma access token", re.compile(r"figd_[0-9A-Za-z_\-]{20,}"), "critical"),
     ("a GitHub token", re.compile(r"gh[pousr]_[0-9A-Za-z]{36,}"), "critical"),
     ("a GitHub fine-grained token", re.compile(r"github_pat_[0-9A-Za-z_]{60,}"), "critical"),
     ("a GitLab access token", re.compile(r"glpat-[0-9A-Za-z_\-]{20,}"), "critical"),
@@ -116,6 +129,18 @@ _AWS_SECRET_RE = re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[0-9A-Za-z/+]{2
 # A registry auth token in .npmrc/.pypirc/.netrc.
 _REGISTRY_TOKEN_RE = re.compile(r"(?i)(_authToken|_password|password|\bpassword\b)\s*[=:]")
 
+# Env-var prefixes that build tools INLINE into the client bundle — a secret behind
+# one of these ships to every visitor, which is exactly the trap it looks safe.
+_PUBLIC_ENV_PREFIXES = (
+    "NEXT_PUBLIC_", "VITE_", "REACT_APP_", "PUBLIC_", "EXPO_PUBLIC_",
+    "GATSBY_", "VUE_APP_", "NUXT_PUBLIC_",
+)
+_SECRETY_NAME = re.compile(r"(?i)(secret|private|service_role|\btoken\b|password|api[_-]?key)")
+
+
+def _public_env_prefix(key: str) -> str | None:
+    return next((p for p in _PUBLIC_ENV_PREFIXES if key.upper().startswith(p)), None)
+
 
 def _first_secret(text: str) -> tuple[str, str, str] | None:
     """First ``_SECRET_PATTERNS`` hit in ``text`` as (label, masked, severity)."""
@@ -124,6 +149,25 @@ def _first_secret(text: str) -> tuple[str, str, str] | None:
         if m:
             return label, m.group(0)[:4] + "…", severity
     return None
+
+
+def _supabase_role(jwt_token: str) -> str | None:
+    """The Supabase `role` claim of a JWT (`service_role` / `anon`), or None.
+
+    Defensive: a malformed or non-Supabase token yields None, so callers fall
+    back to treating it as a generic JWT. Pure decode — no network."""
+    import base64
+
+    parts = jwt_token.split(".")
+    if len(parts) < 2:
+        return None
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)  # pad base64url
+    try:
+        data = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8", "replace"))
+    except (ValueError, TypeError):
+        return None
+    role = data.get("role") if isinstance(data, dict) else None
+    return role if role in ("service_role", "anon") else None
 
 # Default/weak database passwords seen in the wild and in tutorials.
 _WEAK_DB_PASSWORDS = frozenset({
@@ -198,6 +242,7 @@ class _Surface:
     maps: list[Path] = field(default_factory=list)       # *.map in asset dirs
     data_files: list[Path] = field(default_factory=list)  # committed csv/sql/seed
     cred_files: list[Path] = field(default_factory=list)  # committed credential/cloud-config files
+    cloud_rules: list[Path] = field(default_factory=list)  # *.rules, *.tf (open-access config)
     has_bundler: bool = False
 
 
@@ -242,6 +287,8 @@ def _discover(root: Path) -> _Surface:
             s.data_files.append(path)
         if _is_cred_file(rel, name):
             s.cred_files.append(path)
+        if name.endswith((".rules", ".tf", ".tf.json")):
+            s.cloud_rules.append(path)
         if name == "package.json" or any(name.startswith(m) for m in bundler_markers):
             s.has_bundler = True
     return s
@@ -317,11 +364,72 @@ def _detect_maps_and_secrets(root: Path, surface: _Surface) -> list[ExposeFindin
                     "no need to hide this key; make sure your Firestore/Storage Security "
                     "Rules actually restrict who can read and write your data."))
                 continue
+            # A Supabase key is a JWT: the `service_role` key bypasses Row Level
+            # Security and must never ship; the `anon` key is public by design.
+            if label.endswith("(JWT)") and (role := _supabase_role(m.group(0))):
+                if role == "service_role":
+                    out.append(ExposeFinding("A", "supabase-service-role", "critical",
+                        f"{where}:{line}",
+                        f"A Supabase service_role key ({masked}) is shipped in your bundle. "
+                        "It bypasses Row Level Security — anyone who reads it has full, "
+                        "unrestricted access to your database.",
+                        "rotate this key immediately and never expose service_role to the "
+                        "browser; the client should use the anon key plus RLS policies."))
+                else:
+                    out.append(ExposeFinding("A", "supabase-anon-key", "note",
+                        f"{where}:{line}",
+                        f"This is a Supabase anon key ({masked}). Like a Firebase web key it "
+                        "is meant to ship in the browser; it grants nothing on its own.",
+                        "no need to hide it; your protection is Row Level Security — make "
+                        "sure RLS is enabled on every table with real policies."))
+                continue
             out.append(ExposeFinding("A", "client-secret", severity,
                 f"{where}:{line}",
                 f"What looks like {label} ({masked}) is shipped inside your browser "
                 "bundle. Anything in browser code is readable by anyone who loads the "
                 "page — obfuscation cannot hide it.", _FIX_A_SECRET))
+    return out
+
+
+_FIX_PUBLIC_ENV = ("give it a non-public name (drop the NEXT_PUBLIC_/VITE_/… prefix) and read "
+                   "it only on the server; anything with that prefix is compiled into the "
+                   "browser bundle. Rotate it if it was a real secret.")
+
+
+def _detect_public_env(root: Path, surface: _Surface) -> list[ExposeFinding]:
+    """A secret behind a framework 'public' env prefix — it ships to the browser.
+
+    Distinct from the committed-secret case (category F): here the *prefix* is the
+    danger, so the message and fix are about the prefix, not about committing."""
+    out: list[ExposeFinding] = []
+    for path in surface.env:
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        where_file = str(path.relative_to(root))
+        for i, ln in enumerate(raw.splitlines(), 1):
+            stripped = ln.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _sep, value = stripped.partition("=")
+            key, value = key.strip(), value.strip().strip("\"'")
+            prefix = _public_env_prefix(key)
+            if prefix is None or not value:
+                continue
+            hit = _first_secret(value)
+            if hit and hit[2] == "critical":
+                _label, masked, _sev = hit
+                out.append(ExposeFinding("A", "public-env-secret", "critical",
+                    f"{where_file}:{i}",
+                    f"`{key}` holds what looks like a real key ({masked}). The `{prefix}` "
+                    "prefix makes your build tool inline it into the browser bundle, so it "
+                    "ships to every visitor.", _FIX_PUBLIC_ENV))
+            elif _SECRETY_NAME.search(key) and len(value) >= 8:
+                out.append(ExposeFinding("A", "public-env-suspicious", "warning",
+                    f"{where_file}:{i}",
+                    f"`{key}` is named like a secret but carries the `{prefix}` prefix, which "
+                    "ships its value to the browser. If it is sensitive, it is exposed.",
+                    _FIX_PUBLIC_ENV))
     return out
 
 
@@ -576,6 +684,11 @@ def _detect_committed_credentials(root: Path, surface: _Surface) -> list[ExposeF
             continue
         where_file = str(path.relative_to(root))
         for i, ln in enumerate(raw.splitlines(), 1):
+            # A public-prefixed line (NEXT_PUBLIC_/VITE_/…) is owned by category A
+            # (`_detect_public_env`), whose message about the prefix is more precise.
+            key = ln.split("=", 1)[0].strip()
+            if _public_env_prefix(key):
+                continue
             hit = _first_secret(ln)
             if hit and hit[2] == "critical":
                 label, masked, _sev = hit
@@ -584,6 +697,46 @@ def _detect_committed_credentials(root: Path, surface: _Surface) -> list[ExposeF
                     f"What looks like {label} ({masked}) is committed in this env file. "
                     "Anyone with repo access — and your whole git history — has it.", _FIX_CRED))
                 break
+    return out
+
+
+# ---------------------------------------------------------------------------
+# category G — open cloud data rules & public storage buckets
+# ---------------------------------------------------------------------------
+
+# A Firebase/Firestore/Storage rule that grants access with `if true` — wide open.
+_OPEN_FIREBASE_RULE = re.compile(r"(?is)\ballow\b[^;{}]*:\s*if\s+true\b")
+# A world-open storage grant in IaC (public-read-write ACL, or an allUsers binding).
+_PUBLIC_BUCKET_ACL = re.compile(r'(?i)("?public-read-write"?|\ballUsers\b|\ballAuthenticatedUsers\b)')
+
+_FIX_G_RULES = ("replace `if true` with real conditions — e.g. `if request.auth != null` plus "
+                "per-document ownership checks; an open rule exposes your whole database.")
+_FIX_G_BUCKET = ("remove the world-readable/writable grant; scope access to specific principals "
+                 "and use signed URLs for anything that must be shared.")
+
+
+def _detect_open_cloud_rules(root: Path, surface: _Surface) -> list[ExposeFinding]:
+    """Open Firebase Security Rules (`allow …: if true`) and world-open bucket ACLs.
+
+    This completes the Firebase story: the public-key note tells you to lock down
+    Security Rules — here we flag when they are wide open."""
+    out: list[ExposeFinding] = []
+    for path in surface.cloud_rules:
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        where = str(path.relative_to(root))
+        name = path.name.lower()
+        if name.endswith(".rules"):
+            if _OPEN_FIREBASE_RULE.search(raw):
+                out.append(ExposeFinding("G", "open-firebase-rules", "critical", where,
+                    "A Security Rule here grants access with `if true` — anyone, "
+                    "authenticated or not, can read and write your database.", _FIX_G_RULES))
+        elif _PUBLIC_BUCKET_ACL.search(raw):  # *.tf / *.tf.json
+            out.append(ExposeFinding("G", "public-bucket", "warning", where,
+                "This infrastructure config grants public (world) access to a storage "
+                "bucket. If that isn't intentional, anyone on the internet can reach it.",
+                _FIX_G_BUCKET))
     return out
 
 
@@ -717,9 +870,11 @@ def analyze_exposure(root: str | Path, *, tool_version: str = "0", run_semgrep: 
 
     findings: list[ExposeFinding] = []
     findings += _detect_maps_and_secrets(root, surface)
+    findings += _detect_public_env(root, surface)
     findings += _detect_db_misconfig(root, surface)
     findings += _detect_committed_pii(root, surface)
     findings += _detect_committed_credentials(root, surface)
+    findings += _detect_open_cloud_rules(root, surface)
     findings += _detect_minification(root, surface)
 
     semgrep_ran = False
