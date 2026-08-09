@@ -397,3 +397,96 @@ def test_new_credential_walk_stays_deterministic(tmp_path):
     a = json.dumps(_native(root).sarif, sort_keys=True)
     b = json.dumps(_native(root).sarif, sort_keys=True)
     assert a == b, "two audits of the same tree must be byte-identical"
+
+
+# ---------------------------------------------------------------------------
+# framework "public env" leaks (category A) + managed-cloud keys
+# ---------------------------------------------------------------------------
+
+
+def test_next_public_secret_ships_to_browser_is_critical(tmp_path):
+    root = _repo(tmp_path, {".env": "NEXT_PUBLIC_STRIPE_SECRET=sk_live_" + "a" * 24 + "\n"})
+    result = _native(root)
+    hits = [f for f in result.findings if f.rule == "public-env-secret"]
+    assert hits and hits[0].severity == "critical"
+    assert "NEXT_PUBLIC_" in hits[0].message, "the message must name the prefix mechanism"
+    assert "sk_live_" + "a" * 24 not in hits[0].message, "the value must be masked"
+    # Not also double-reported by the committed-secret (category F) path.
+    assert not [f for f in result.findings if f.rule == "committed-env-secret"]
+
+
+def test_public_env_suspicious_name_is_a_warning(tmp_path):
+    root = _repo(tmp_path, {".env": "VITE_API_SECRET=super-secret-value-123\n"})
+    result = _native(root)
+    hits = [f for f in result.findings if f.rule == "public-env-suspicious"]
+    assert hits and hits[0].severity == "warning"
+
+
+def _supabase_jwt(role: str) -> str:
+    import base64
+
+    def seg(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+
+    return f"{seg({'alg': 'HS256'})}.{seg({'role': role, 'iss': 'supabase'})}.{'s' * 20}"
+
+
+def test_supabase_service_role_in_bundle_is_critical(tmp_path):
+    root = _repo(tmp_path, {"dist/app.js": f'const c="{_supabase_jwt("service_role")}";'})
+    result = _native(root)
+    crit = [f for f in result.findings if f.rule == "supabase-service-role"]
+    assert crit and crit[0].severity == "critical"
+    assert "Row Level Security" in crit[0].message
+
+
+def test_supabase_anon_key_is_a_note(tmp_path):
+    root = _repo(tmp_path, {"dist/app.js": f'const c="{_supabase_jwt("anon")}";'})
+    result = _native(root)
+    assert not result.gating(), "the anon key is public by design — must not gate"
+    notes = [f for f in result.findings if f.rule == "supabase-anon-key"]
+    assert notes and notes[0].severity == "note"
+
+
+def test_openrouter_key_not_double_reported_as_openai(tmp_path):
+    root = _repo(tmp_path, {"dist/app.js": 'const k="sk-or-v1-' + "a" * 64 + '";'})
+    result = _native(root)
+    crit = [f for f in result.findings if f.rule == "client-secret" and f.severity == "critical"]
+    assert len(crit) == 1 and "OpenRouter" in crit[0].message
+
+
+def test_malformed_jwt_never_crashes(tmp_path):
+    root = _repo(tmp_path, {"dist/app.js": 'const k="eyJhbGc.not-valid-base64!!!.sig";'})
+    result = _native(root)  # must not raise
+    assert isinstance(result.findings, list)
+
+
+# ---------------------------------------------------------------------------
+# category G — open cloud data rules & public buckets
+# ---------------------------------------------------------------------------
+
+
+def test_open_firebase_rules_are_critical(tmp_path):
+    root = _repo(tmp_path, {
+        "firestore.rules": "service cloud.firestore {\n"
+                           "  match /databases/{db}/documents {\n"
+                           "    match /{document=**} { allow read, write: if true; }\n"
+                           "  }\n}\n",
+    })
+    result = _native(root)
+    crit = [f for f in result.findings if f.category == "G" and f.severity == "critical"]
+    assert crit and crit[0].rule == "open-firebase-rules"
+
+
+def test_locked_firebase_rules_are_clean(tmp_path):
+    root = _repo(tmp_path, {
+        "firestore.rules": "match /{document=**} { allow read, write: if request.auth != null; }\n",
+    })
+    result = _native(root)
+    assert not [f for f in result.findings if f.category == "G"]
+
+
+def test_public_bucket_acl_in_terraform_is_a_warning(tmp_path):
+    root = _repo(tmp_path, {"main.tf": 'resource "aws_s3_bucket_acl" "b" {\n  acl = "public-read-write"\n}\n'})
+    result = _native(root)
+    hits = [f for f in result.findings if f.category == "G" and f.rule == "public-bucket"]
+    assert hits and hits[0].severity == "warning"

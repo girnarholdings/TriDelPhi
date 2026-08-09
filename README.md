@@ -509,11 +509,12 @@ prove.
 
 | Check | Finds | Engine |
 |---|---|---|
-| Shipped source maps + client secrets | a `.map` embedding your whole repo (`sourcesContent`); a live-key-shaped string in a `dist/` bundle — AWS, Google, Stripe, GitHub/GitLab, npm, and **AI keys** (OpenAI, Anthropic) — while a Firebase web key is correctly treated as public, not a leak | native |
+| Shipped source maps + client secrets | a `.map` embedding your whole repo (`sourcesContent`); a live-key-shaped string in a `dist/` bundle — AWS, Google, Stripe, GitHub/GitLab, npm, **AI keys** (OpenAI, Anthropic, OpenRouter, Groq, HuggingFace, Replicate) — plus a secret behind a **framework `NEXT_PUBLIC_`/`VITE_` prefix** that ships to the browser. A Firebase web key and a Supabase **anon** key are correctly treated as public; a Supabase **service_role** key is critical | native |
 | Password hashing | `md5`/`sha1` used on a password | semgrep (local rules) |
 | User data in the clear | tokens in `localStorage`, PII in committed data files, JWT/TLS verification switched off | semgrep + native |
 | Self-hosted DB/service left open | a public port with a default/empty password or auth disabled — Postgres, MySQL, Mongo, Redis, Elasticsearch/OpenSearch, RabbitMQ, MinIO, Neo4j, CouchDB, … | native |
 | Committed keys & cloud config | a private key, cloud service-account JSON, AWS credentials, terraform state, or a real API key in a committed `.env` | native |
+| Open cloud data rules / buckets | Firebase Security Rules that `allow … : if true`, or a terraform bucket set world-readable/writable | native |
 | Minification status | whether your bundle is already minified (so you know if more is even worth it) | native |
 
 Two things keep it honest, which matters because the naïve version of this
