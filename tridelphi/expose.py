@@ -46,6 +46,8 @@ CATEGORIES: tuple[tuple[str, str, str], ...] = (
      "Database services in your compose/config with no password or a public port."),
     ("E", "Is your shipped JavaScript minified?",
      "Whether you already get minification's baseline protection."),
+    ("F", "Are your keys or cloud config committed to the repo?",
+     "Private keys, cloud/service-account credentials or terraform state checked into git."),
 )
 CATEGORY_ORDER = {letter: i for i, (letter, _q, _g) in enumerate(CATEGORIES)}
 
@@ -59,6 +61,17 @@ _ASSET_DIRS = ("dist", "build", "out", "public", ".next")
 _COMPOSE_RE = re.compile(r"(docker-)?compose.*\.ya?ml$", re.IGNORECASE)
 _DB_CONF_NAMES = frozenset({"redis.conf", "mongod.conf", "postgresql.conf", "my.cnf"})
 
+# Committed credential / cloud-config files (category F). Discovered by name/ext,
+# then confirmed by content in _detect_committed_credentials — a public cert or a
+# `.key` config file that holds no secret produces no finding.
+_CRED_EXTS = (".pem", ".key", ".tfstate")
+_CRED_NAMES = frozenset({
+    "id_rsa", "id_ed25519", "id_dsa", "id_ecdsa",
+    ".npmrc", ".pypirc", ".netrc",
+    "credentials.json", "application_default_credentials.json",
+})
+_CRED_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
+
 # One shipped bundle can be large; cap what we read so a hostile/huge file can
 # neither hang the audit nor blow memory. Mirrors ladder.py's MAX_OUTPUT_BYTES
 # discipline for external tools.
@@ -66,24 +79,62 @@ _MAX_READ_BYTES = 8 * 1024 * 1024
 
 # High-confidence secret shapes. Provider-prefixed keys are near-zero false
 # positive, so they gate (critical); a JWT can legitimately be public, so it is
-# only a warning.
+# only a warning. Order note: the Anthropic `sk-ant-` pattern precedes the more
+# general OpenAI `sk-` one, and OpenAI carries a `(?!ant-)` guard, so an
+# Anthropic key is never also reported as an OpenAI key.
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("an AWS access key", re.compile(r"AKIA[0-9A-Z]{16}"), "critical"),
     ("a Google API key", re.compile(r"AIza[0-9A-Za-z_\-]{35}"), "critical"),
-    ("a Stripe live key", re.compile(r"sk_live_[0-9A-Za-z]{24,}"), "critical"),
+    ("a Google OAuth client secret", re.compile(r"GOCSPX-[0-9A-Za-z_\-]{20,}"), "critical"),
+    ("a Stripe live key", re.compile(r"[sr]k_live_[0-9A-Za-z]{24,}"), "critical"),
+    ("an Anthropic API key", re.compile(r"sk-ant-[0-9A-Za-z_\-]{20,}"), "critical"),
+    ("an OpenAI API key", re.compile(r"sk-(?!ant-)[0-9A-Za-z_\-]{40,}"), "critical"),
     ("a GitHub token", re.compile(r"gh[pousr]_[0-9A-Za-z]{36,}"), "critical"),
     ("a GitHub fine-grained token", re.compile(r"github_pat_[0-9A-Za-z_]{60,}"), "critical"),
+    ("a GitLab access token", re.compile(r"glpat-[0-9A-Za-z_\-]{20,}"), "critical"),
+    ("an npm access token", re.compile(r"npm_[0-9A-Za-z]{36}"), "critical"),
+    ("a SendGrid API key", re.compile(r"SG\.[0-9A-Za-z_\-]{16,}\.[0-9A-Za-z_\-]{16,}"), "critical"),
+    ("a Shopify access token", re.compile(r"shp(?:at|ca|pa|ss)_[0-9a-fA-F]{32}"), "critical"),
+    ("a DigitalOcean token", re.compile(r"dop_v1_[0-9a-f]{64}"), "critical"),
+    ("a Square access token", re.compile(r"sq0(?:atp|csp)-[0-9A-Za-z_\-]{22,}"), "critical"),
     ("a Slack token", re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}"), "critical"),
-    ("a private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"), "critical"),
+    ("a Slack incoming webhook", re.compile(r"https://hooks\.slack\.com/services/T[0-9A-Za-z_/]{20,}"), "critical"),
+    ("a private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"), "critical"),
     ("a JSON web token (JWT)", re.compile(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}"), "warning"),
 )
+
+# A Firebase web app config is AIza-shaped but PUBLIC by design (it identifies
+# the project; it does not grant access). When an AIza key sits next to these
+# markers we downgrade it to a note instead of crying "leaked Google key".
+_FIREBASE_CONTEXT = re.compile(
+    r"(?i)(firebaseConfig|authDomain|firebaseapp\.com|databaseURL|firebasestorage|messagingSenderId)")
+
+# The private-key banner, reused by the committed-credential detector.
+_PRIVATE_KEY_RE = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")
+# An AWS secret access key assignment in a credentials/config file.
+_AWS_SECRET_RE = re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[0-9A-Za-z/+]{20,}")
+# A registry auth token in .npmrc/.pypirc/.netrc.
+_REGISTRY_TOKEN_RE = re.compile(r"(?i)(_authToken|_password|password|\bpassword\b)\s*[=:]")
+
+
+def _first_secret(text: str) -> tuple[str, str, str] | None:
+    """First ``_SECRET_PATTERNS`` hit in ``text`` as (label, masked, severity)."""
+    for label, pattern, severity in _SECRET_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return label, m.group(0)[:4] + "…", severity
+    return None
 
 # Default/weak database passwords seen in the wild and in tutorials.
 _WEAK_DB_PASSWORDS = frozenset({
     "", "postgres", "password", "root", "admin", "mysql", "mongo", "redis",
-    "changeme", "secret", "test", "123456", "example",
+    "changeme", "secret", "test", "123456", "example", "guest", "minioadmin",
+    "neo4j", "elastic", "rabbitmq",
 })
-_DB_IMAGE_HINTS = ("postgres", "mysql", "mariadb", "mongo", "redis")
+_DB_IMAGE_HINTS = (
+    "postgres", "mysql", "mariadb", "mongo", "redis", "elasticsearch", "opensearch",
+    "rabbitmq", "minio", "couchdb", "neo4j", "clickhouse", "cassandra", "memcached",
+)
 _DB_URL_RE = re.compile(
     r"(?i)\b(postgres|postgresql|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp)://"
     r"[^:@/\s\"']+:([^@/\s\"']+)@"
@@ -146,11 +197,27 @@ class _Surface:
     bundles: list[Path] = field(default_factory=list)   # *.js/*.mjs in asset dirs
     maps: list[Path] = field(default_factory=list)       # *.map in asset dirs
     data_files: list[Path] = field(default_factory=list)  # committed csv/sql/seed
+    cred_files: list[Path] = field(default_factory=list)  # committed credential/cloud-config files
     has_bundler: bool = False
 
 
 def _in_asset_dir(rel: Path) -> bool:
     return any(part in _ASSET_DIRS for part in rel.parts[:-1])
+
+
+def _is_cred_file(rel: Path, name: str) -> bool:
+    """A file that, by name, might hold committed credentials. Template/example
+    variants are skipped; content is confirmed later by the detector."""
+    if any(name.endswith(suf) for suf in _CRED_TEMPLATE_SUFFIXES):
+        return False
+    if name.endswith(".tfstate.backup") or name.endswith(_CRED_EXTS):
+        return True
+    if name in _CRED_NAMES:
+        return True
+    if name == "credentials" and rel.parent.name == ".aws":
+        return True
+    return name.endswith(".json") and any(
+        h in name for h in ("serviceaccount", "service-account", "adminsdk"))
 
 
 def _discover(root: Path) -> _Surface:
@@ -173,6 +240,8 @@ def _discover(root: Path) -> _Surface:
         elif path.suffix in (".csv", ".sql", ".ndjson") or (
             path.suffix == ".json" and name.startswith("seed")):
             s.data_files.append(path)
+        if _is_cred_file(rel, name):
+            s.cred_files.append(path)
         if name == "package.json" or any(name.startswith(m) for m in bundler_markers):
             s.has_bundler = True
     return s
@@ -231,16 +300,28 @@ def _detect_maps_and_secrets(root: Path, surface: _Surface) -> list[ExposeFindin
         if raw is None:
             continue
         where = str(path.relative_to(root))
+        firebase = bool(_FIREBASE_CONTEXT.search(raw))
         for label, pattern, severity in _SECRET_PATTERNS:
             m = pattern.search(raw)
-            if m:
-                masked = m.group(0)[:4] + "…"
-                line = raw.count("\n", 0, m.start()) + 1
-                out.append(ExposeFinding("A", "client-secret", severity,
+            if not m:
+                continue
+            masked = m.group(0)[:4] + "…"
+            line = raw.count("\n", 0, m.start()) + 1
+            # A Firebase web apiKey is AIza-shaped but public by design — not a leak.
+            if label == "a Google API key" and firebase:
+                out.append(ExposeFinding("A", "firebase-public-key", "note",
                     f"{where}:{line}",
-                    f"What looks like {label} ({masked}) is shipped inside your browser "
-                    "bundle. Anything in browser code is readable by anyone who loads the "
-                    "page — obfuscation cannot hide it.", _FIX_A_SECRET))
+                    f"This is a Firebase web API key ({masked}). Unlike a normal secret it "
+                    "is meant to ship in the browser — it names your project, it does not "
+                    "grant access. Your real protection is server-side Security Rules.",
+                    "no need to hide this key; make sure your Firestore/Storage Security "
+                    "Rules actually restrict who can read and write your data."))
+                continue
+            out.append(ExposeFinding("A", "client-secret", severity,
+                f"{where}:{line}",
+                f"What looks like {label} ({masked}) is shipped inside your browser "
+                "bundle. Anything in browser code is readable by anyone who loads the "
+                "page — obfuscation cannot hide it.", _FIX_A_SECRET))
     return out
 
 
@@ -328,6 +409,13 @@ def _detect_db_misconfig(root: Path, surface: _Surface) -> list[ExposeFinding]:
                     weak_pw = True
                 if ku in ("ALLOW_EMPTY_PASSWORD", "ALLOW_ANONYMOUS_LOGIN") and vv in ("yes", "true", "1"):
                     no_auth = True
+                # Engine-specific "auth turned off" switches.
+                if ku == "NEO4J_AUTH" and vv == "none":
+                    no_auth = True
+                if "SECURITY.ENABLED" in ku and vv in ("false", "0", "no"):
+                    no_auth = True  # elasticsearch xpack.security.enabled=false
+                if ku in ("DISABLE_SECURITY_PLUGIN", "PLUGINS.SECURITY.DISABLED") and vv in ("true", "1", "yes"):
+                    no_auth = True  # opensearch
 
             db = next((h for h in _DB_IMAGE_HINTS if h in image.lower()), "database")
             if public and (weak_pw or no_auth):
@@ -433,6 +521,73 @@ def _detect_committed_pii(root: Path, surface: _Surface) -> list[ExposeFinding]:
 
 
 # ---------------------------------------------------------------------------
+# category F — committed credential / cloud-config files
+# ---------------------------------------------------------------------------
+
+_FIX_CRED = ("remove it from the repo, rotate the credential (assume it is compromised — "
+             "it is in your git history) and load it from a secret at runtime instead.")
+
+
+def _detect_committed_credentials(root: Path, surface: _Surface) -> list[ExposeFinding]:
+    """Confirm, by content, which discovered credential-shaped files actually hold
+    a secret. A public certificate or a keyless `.key` config file produces nothing.
+    Overlaps L1 gitleaks in CI on purpose — this rung is offline and needs no tool."""
+    out: list[ExposeFinding] = []
+    for path in surface.cred_files:
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        where = str(path.relative_to(root))
+        name = path.name.lower()
+
+        if _PRIVATE_KEY_RE.search(raw):
+            out.append(ExposeFinding("F", "committed-private-key", "critical", where,
+                "A private key is committed here. Anyone with repo access — now or "
+                "anywhere in your git history — has it.", _FIX_CRED))
+        elif '"service_account"' in raw and "private_key" in raw:
+            out.append(ExposeFinding("F", "committed-service-account", "critical", where,
+                "A cloud service-account key file is committed here; it grants "
+                "programmatic access to your cloud project.", _FIX_CRED))
+        elif _AWS_SECRET_RE.search(raw):
+            out.append(ExposeFinding("F", "committed-aws-credential", "critical", where,
+                "An AWS secret access key is committed in this credentials file.", _FIX_CRED))
+        elif (hit := _first_secret(raw)) and hit[2] == "critical":
+            label, masked, _sev = hit
+            out.append(ExposeFinding("F", "committed-secret-file", "critical", where,
+                f"What looks like {label} ({masked}) is committed in this file.", _FIX_CRED))
+        elif name.endswith((".tfstate", ".tfstate.backup")):
+            out.append(ExposeFinding("F", "committed-tfstate", "warning", where,
+                "Terraform state is committed here. State records every resource attribute "
+                "in plaintext, which routinely includes generated passwords and keys.",
+                "keep state in a remote backend (S3/GCS/Terraform Cloud), not in git; "
+                "rotate anything sensitive it already captured."))
+        elif name in (".npmrc", ".pypirc", ".netrc") and _REGISTRY_TOKEN_RE.search(raw):
+            out.append(ExposeFinding("F", "committed-registry-token", "warning", where,
+                "This committed file looks like it holds a registry auth token or password; "
+                "anyone with repo access can publish or pull as you.",
+                "move the token to an untracked file or an env var, and rotate it."))
+
+    # A committed (non-template) .env that carries a real, provider-shaped key — the
+    # classic vibe-coder mistake (`OPENAI_API_KEY=sk-…` checked in). The DB-URL case
+    # is category D; this is the raw-secret case.
+    for path in surface.env:
+        raw = _read_text(path)
+        if raw is None:
+            continue
+        where_file = str(path.relative_to(root))
+        for i, ln in enumerate(raw.splitlines(), 1):
+            hit = _first_secret(ln)
+            if hit and hit[2] == "critical":
+                label, masked, _sev = hit
+                out.append(ExposeFinding("F", "committed-env-secret", "critical",
+                    f"{where_file}:{i}",
+                    f"What looks like {label} ({masked}) is committed in this env file. "
+                    "Anyone with repo access — and your whole git history — has it.", _FIX_CRED))
+                break
+    return out
+
+
+# ---------------------------------------------------------------------------
 # category B + C (code) — semgrep with the local ruleset
 # ---------------------------------------------------------------------------
 
@@ -441,6 +596,8 @@ _SEMGREP_RULE_MAP = {
     "weak-password-hash": ("B", "hash passwords with argon2id or bcrypt (cost >= 12), never md5/sha1/sha256."),
     "token-in-web-storage": ("C", "keep session tokens in an HttpOnly, Secure cookie, not localStorage."),
     "hardcoded-db-credential": ("C", "read DB credentials from a server-side env var or secret; rotate this one."),
+    "jwt-verify-disabled": ("C", "never disable JWT signature verification or allow the 'none' algorithm; pin the expected algorithm and verify."),
+    "tls-verify-disabled": ("C", "keep TLS certificate verification on; fix the certificate chain instead of disabling checks."),
 }
 
 
@@ -562,6 +719,7 @@ def analyze_exposure(root: str | Path, *, tool_version: str = "0", run_semgrep: 
     findings += _detect_maps_and_secrets(root, surface)
     findings += _detect_db_misconfig(root, surface)
     findings += _detect_committed_pii(root, surface)
+    findings += _detect_committed_credentials(root, surface)
     findings += _detect_minification(root, surface)
 
     semgrep_ran = False

@@ -85,3 +85,50 @@ rules:
         - "*compose*.yaml"
         - "*.md"
     pattern-regex: (?i)\b(postgres|postgresql|mysql|mariadb|mongodb(\+srv)?|redis|amqp)://[^:@/\s"']+:[^@/\s"']+@
+
+  - id: tridelphi-jwt-verify-disabled-python
+    languages: [python]
+    severity: WARNING
+    message: >-
+      JWT signature verification is turned off here (verify_signature False or the
+      'none' algorithm). Any attacker can then forge a token and log in as anyone.
+      Pin the expected algorithm and verify the signature.
+    metadata:
+      category: security
+      tridelphi: jwt-verify-disabled
+    pattern-either:
+      - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...}, ...)'
+      - pattern: jwt.decode(..., verify=False, ...)
+      - pattern: jwt.decode(..., algorithms=["none"], ...)
+      - pattern: jwt.decode(..., algorithms=["None"], ...)
+
+  - id: tridelphi-jwt-none-algorithm-js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      This accepts the JWT 'none' algorithm, which means an unsigned, forgeable
+      token is treated as valid. Verify with a fixed algorithm (e.g. RS256/HS256).
+    metadata:
+      category: security
+      tridelphi: jwt-verify-disabled
+    pattern-regex: (?i)algorithms\s*:\s*\[\s*['"]none['"]
+
+  - id: tridelphi-tls-verify-disabled-python
+    languages: [python]
+    severity: WARNING
+    message: >-
+      TLS certificate verification is disabled here, so a network attacker can
+      man-in-the-middle this connection and read or alter the traffic. Keep
+      verification on and fix the certificate chain instead.
+    metadata:
+      category: security
+      tridelphi: tls-verify-disabled
+    pattern-either:
+      - pattern: requests.get(..., verify=False, ...)
+      - pattern: requests.post(..., verify=False, ...)
+      - pattern: requests.put(..., verify=False, ...)
+      - pattern: requests.delete(..., verify=False, ...)
+      - pattern: requests.patch(..., verify=False, ...)
+      - pattern: requests.head(..., verify=False, ...)
+      - pattern: requests.request(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
