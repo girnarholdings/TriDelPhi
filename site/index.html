@@ -436,6 +436,7 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
       <a class="navlink" href="#rule">The rule</a>
       <a class="navlink" href="#allinone">All-in-one</a>
       <a class="navlink" href="#checks">The 7 checks</a>
+      <a class="navlink" href="#ship">What you ship</a>
       <a class="navlink" href="#start">Turn it on</a>
       <a class="navlink" href="https://github.com/girnarholdings/TriDelPhi">GitHub</a>
       <button class="themebtn" id="theme" title="Switch light / dark" aria-label="Switch light or dark theme">◐</button>
@@ -872,6 +873,63 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
             <p class="do"><span class="tag">If it flags this</span>A key in the browser is public the moment the page loads — so the honest fix is always <b>rotate it and move it server-side</b>, never hide it. The audit names the exact file and line. <b>It's a static read</b>, so it can't reach a running server: a clean result isn't a full pentest, and a flagged config may already be firewalled.</p>
           </div>
           <p class="tech"><b>Under the hood:</b> <span class="mono">tridelphi expose</span> — native file reads plus a bundled-local semgrep ruleset, offline like the rest. Its companion <span class="mono">tridelphi privatize</span> can obfuscate your built JavaScript to raise the effort of copying it — but that is <b>not security</b>, it can't hide a secret, and because obfuscators can rarely miscompile, it keeps the result only if your own smoke check still passes, else it reverts to your exact files.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================================================= WHAT YOU SHIP -->
+  <section id="ship">
+    <div class="sec-head">
+      <span class="eyebrow">Beyond your CI · new in v3.1.0</span>
+      <h2>Now it checks what you actually ship, too.</h2>
+      <p class="lede">The checks above protect your build robots. But when you <span class="hl">vibe-code
+        an app fast</span>, it's easy to hand the whole world your source, an API key, or a wide-open
+        database without realising. Two more commands look at the product you deploy — and they stay
+        honest about what a tool that only <i>reads your files</i> can promise.</p>
+    </div>
+
+    <div class="checks">
+      <div class="check">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <div>
+          <span class="lv">Audit · <span class="mono">tridelphi expose</span></span>
+          <h3>Did your app ship its own secrets and source?</h3>
+          <p class="plain">It reads your committed code and config and tells you, in plain English, what
+            a shipped app is leaking — so you find it before a stranger does.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">It catches</span>A "source map" that quietly ships your whole
+              codebase to every visitor; a live API key baked into the browser bundle — including
+              <b>AI keys</b> (OpenAI, Anthropic, …) and secrets hidden behind a <span class="mono">NEXT_PUBLIC_</span>
+              prefix; a database container open to the whole internet with the password still
+              <span class="mono">postgres</span>; a Firebase rule that lets <i>anyone</i> read and write your data.</p>
+            <p class="do"><span class="tag">The honest part</span>A key in the browser is public the moment
+              the page loads, so the fix is always <b>rotate it and move it server-side</b> — never hide it.
+              It's a <b>static read</b>: a clean result isn't a full pentest, and a Firebase or Supabase
+              <i>anon</i> key that's <i>meant</i> to be public is correctly left alone.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> <span class="mono">tridelphi expose</span> — native file reads plus a bundled-local semgrep ruleset. Offline and deterministic, like the rest; run it in CI with <span class="mono">expose: 'true'</span> (advisory — it never fails your build).</p>
+        </div>
+      </div>
+
+      <div class="check">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5s3-1.5 9-1.5S21 5 21 5v5c0 5-4 8.5-9 10-5-1.5-9-5-9-10V5Z"/><path d="M8.5 11a3.5 3.5 0 0 1 7 0c0 2.2-3.5 2.2-3.5 4.2" opacity=".85"/><circle cx="12" cy="18" r=".6" fill="currentColor"/></svg></div>
+        <div>
+          <span class="lv">Harden · <span class="mono">tridelphi privatize</span></span>
+          <h3>Make your shipped code harder to copy — honestly.</h3>
+          <p class="plain">Once <span class="mono">expose</span> is clean, this optionally scrambles your
+            built JavaScript to raise the effort of reading and copying it. It's the honest version of
+            "protect my code": bounded, verified, and clearly labelled.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>Your readable <span class="mono">greet(name)</span>
+              becomes mangled identifiers and a string array — the logic still runs, but it's tedious to
+              follow. It won't touch a byte unless you say <b>yes</b> to the prompt.</p>
+            <p class="do"><span class="tag">The honest part</span>It is <b>not security</b> and it can't hide a
+              secret — so it <b>refuses</b> if your build ships one. Because obfuscators can rarely miscompile,
+              it keeps the result <b>only if your own smoke check still passes</b>; otherwise it reverts to your
+              exact original files.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> the pinned, integrity-checked <span class="mono">javascript-obfuscator</span> (BSD-2), capped to a safe preset with source maps off — consent-gated, verify-or-revert, and never reachable from an automated flag.</p>
         </div>
       </div>
     </div>
