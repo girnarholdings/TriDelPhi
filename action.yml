@@ -43,6 +43,15 @@ inputs:
   comment:
     description: Post a sticky PR comment with the report (true | false).
     default: "true"
+  expose:
+    description: >-
+      Also audit your shipped product with `tridelphi expose` — source maps,
+      client secrets in bundles, weak password hashing, plaintext PII, and
+      self-hosted DB misconfig. Advisory only: it uploads to code scanning but
+      never fails the build, because a static audit can't reach a running
+      server and a flagged config may already be firewalled. It sees only built
+      output present in the checkout, so build first (or it finds nothing).
+    default: "false"
   sarif-file:
     description: Where to write SARIF for code-scanning upload.
     default: tridelphi.sarif
@@ -113,6 +122,32 @@ runs:
       uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
       with:
         sarif_file: ${{ inputs.sarif-file }}
+        category: tridelphi
+
+    # Optional exposure audit of the *shipped product* (built JS, DB/config).
+    # Opt-in and advisory: it never fails the build (--fail-on none), and it can
+    # only see build output that is present in the checkout — so it is worth
+    # enabling only after a build step has produced e.g. ./dist.
+    - name: Audit shipped output
+      if: ${{ inputs.expose == 'true' }}
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+      # Never fail this step; the audit is advisory and its SARIF still uploads.
+      run: |
+        set +e
+        tridelphi expose "$SCAN_PATH" \
+          --format checklist \
+          --sarif-file tridelphi-expose.sarif \
+          --fail-on none
+        exit 0
+
+    - name: Upload exposure audit to code scanning
+      if: ${{ inputs.expose == 'true' && always() }}
+      uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+      with:
+        sarif_file: tridelphi-expose.sarif
+        category: tridelphi-expose
 
     # L6: publish the evidence statement as a signed build attestation, so a
     # consumer can verify what scanned this commit. Runs only at level 6, only

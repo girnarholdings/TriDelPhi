@@ -88,6 +88,23 @@ jobs:
         if: always()
         with:
           sarif_file: tridelphi.sarif
+          category: tridelphi
+
+      # Optional: also audit your *shipped* product — built JS, DB/config — for
+      # what it leaks (source maps, client secrets, weak hashing, open database).
+      # It is advisory (--fail-on none) and sees only build output present in the
+      # checkout, so build first or it finds nothing. Uncomment to enable:
+      #
+      #   - name: Build
+      #     run: npm ci && npm run build          # produces ./dist
+      #   - name: Audit shipped output
+      #     run: tridelphi expose ./dist --sarif-file expose.sarif --fail-on none
+      #   - name: Upload exposure audit
+      #     uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+      #     if: always()
+      #     with:
+      #       sarif_file: expose.sarif
+      #       category: tridelphi-expose
 
       - name: Comment on the pull request
         if: github.event_name == 'pull_request'

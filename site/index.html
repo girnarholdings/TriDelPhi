@@ -857,6 +857,23 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <p class="tech"><b>Under the hood:</b> a trust-lock — detects a signer or commit change in a dependency you consume, the takeover class that pinning alone cannot see.</p>
         </div>
       </div>
+
+      <div class="check">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <div>
+          <span class="lv">Also · your shipped app</span>
+          <h3>Did you accidentally ship your secrets and source?</h3>
+          <p class="plain">The checks above are about your build robots. This one is about the app you
+            actually ship. When you vibe-code something fast, it's easy to hand the whole world your
+            source code, an API key, or a wide-open database without realising — this reads your
+            committed code and config and tells you, in plain English, what's exposed.</p>
+          <div class="more">
+            <p class="eg"><span class="tag">Real example</span>A "source map" that quietly ships your entire codebase to every visitor; an AWS key baked into the browser bundle; a database container published to the whole internet with the password still set to <span class="mono">postgres</span>.</p>
+            <p class="do"><span class="tag">If it flags this</span>A key in the browser is public the moment the page loads — so the honest fix is always <b>rotate it and move it server-side</b>, never hide it. The audit names the exact file and line. <b>It's a static read</b>, so it can't reach a running server: a clean result isn't a full pentest, and a flagged config may already be firewalled.</p>
+          </div>
+          <p class="tech"><b>Under the hood:</b> <span class="mono">tridelphi expose</span> — native file reads plus a bundled-local semgrep ruleset, offline like the rest. Its companion <span class="mono">tridelphi privatize</span> can obfuscate your built JavaScript to raise the effort of copying it — but that is <b>not security</b>, it can't hide a secret, and because obfuscators can rarely miscompile, it keeps the result only if your own smoke check still passes, else it reverts to your exact files.</p>
+        </div>
+      </div>
     </div>
   </section>
 
