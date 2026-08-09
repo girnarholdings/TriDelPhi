@@ -27,7 +27,7 @@ $ tridelphi .
 ```
 
 ```
-tridelphi 0.1.0 · Agents Rule of Two · 6 workflows, 20 jobs, 0.2s, offline
+tridelphi 0.2.0 · Agents Rule of Two · 6 workflows, 20 jobs, 0.2s, offline
 
 START HERE ────────────────────────────────────────────────────────────
 CRITICAL .github/workflows/assist.yml:19   job "assist"
@@ -63,12 +63,34 @@ one merged report.
 
 ---
 
+### 🔦 New — audit & harden what you *ship*, not just your CI
+
+Two sibling commands extend TriDelPhi past the pipeline to your deployed product —
+built for people who *vibe-code* an app and worry their source, secrets, and
+self-hosted database are exposed:
+
+- **[`tridelphi expose`](#-audit--harden-what-you-ship)** — a static audit of your
+  committed code and config for what a shipped app actually leaks: source maps that
+  hand over your whole repo, ~25 shapes of live API key (AWS, Stripe, GitHub, **and
+  AI keys** — OpenAI/Anthropic/…), secrets behind a `NEXT_PUBLIC_` prefix, weak
+  password hashing, self-hosted databases left open, committed credentials, and
+  wide-open Firebase rules. Offline, deterministic, and honest — a browser can never
+  keep a secret, so it says *rotate and move it server-side*, never "hide it."
+- **[`tridelphi privatize`](#-audit--harden-what-you-ship)** — an opt-in,
+  consent-gated obfuscator that raises the effort of copying your JavaScript. It is
+  **not security**, refuses to run if your build ships a secret, and keeps its result
+  **only if your own smoke check still passes** — otherwise it reverts to your exact
+  bytes.
+
+---
+
 ## 📑 Contents
 
 - [The problem](#-the-problem) · [The rule](#-the-rule-two-is-fine-three-is-an-exploit)
 - [**How a scan works** (architecture)](#-how-a-scan-works) · [The restore-semantics moat](#-the-part-no-other-scanner-does)
 - [The hardening ladder L1–L7](#-the-hardening-ladder--l1l7) · [Output contract (SARIF)](#-output-contract)
-- [Coverage vs ADR](#-coverage-against-a-published-taxonomy) · [Install & use](#-install) · [In CI](#-put-it-in-ci--one-line)
+- [**Audit what you ship** — `expose` + `privatize`](#-audit--harden-what-you-ship) · [Coverage vs ADR](#-coverage-against-a-published-taxonomy)
+- [Install & use](#-install) · [In CI](#-put-it-in-ci--one-line)
 - [Credits](#-credits--standing-on-the-shoulders) · [**Harden it further**](#-harden-it-further)
 
 ---
@@ -500,6 +522,12 @@ remediation demands, and it passes the scanner that ships it:
   because `issue_comment` workflows run the file from the *default* branch, a
   PR cannot modify the bot that acts on it.
 
+## 🔎 Audit & harden what you ship
+
+The Rule-of-Two scan and the ladder are about your **CI**. These two sibling
+commands are about the **product you deploy** — a second dimension of the same
+honesty-first promise, offline and static by design.
+
 ### 🔦 The exposure audit — `tridelphi expose`
 
 The Rule-of-Two scan is about your CI. `tridelphi expose` is about your **shipped
@@ -565,7 +593,7 @@ command that mutates files and runs your build always needs an explicit human
 "yes". Without a `--smoke-cmd` it is a dry-run — it writes an obfuscated copy
 beside your output and never swaps your live build.
 
-### 🔁 The ratchet
+## 🔁 The ratchet
 
 You cannot fix everything today. Freeze what exists, block only what is new
 (`baseline.py`):
