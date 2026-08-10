@@ -207,6 +207,48 @@ def test_markdown_checklist_is_inbox_ready(repo_root):
     assert "```" not in md, "no monospace dumps"
 
 
+def _md_with_advisory(repo_root):
+    from tridelphi.api import analyze
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / CLEAN)
+    external = {
+        "zizmor": ExternalStatus(
+            ran=True, counts={"critical": 0, "warning": 3, "note": 0},
+            items=[("warning", f"a.yml:{i}", "uses a mutable action tag") for i in range(3)],
+        ),
+        "osv-scanner": ExternalStatus(
+            ran=True, counts={"critical": 0, "warning": 2, "note": 0},
+            items=[("warning", "reqs.txt:1", "CVE-2026-0001 in foo 1.0")],
+        ),
+    }
+    return render_checklist_markdown(
+        result, repo_label="demo", files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned, fail_on="critical", external=external,
+    )
+
+
+def test_minor_items_summary_shows_outside_the_fold_for_email(repo_root):
+    """The email collapses <details> to its summary, so a breakdown of the minor
+    items must appear *before* the fold — not only the bare count."""
+    md = _md_with_advisory(repo_root)
+    summary_at = md.find("Worth a look (5), nothing urgent:")
+    fold_at = md.find("<details>")
+    assert summary_at != -1, "the email-visible summary line is missing"
+    assert fold_at != -1 and summary_at < fold_at, "the summary must be outside the fold"
+    # it names what the items are, not just how many
+    assert "workflow-hardening gaps" in md
+    assert "vulnerable dependencies" in md
+
+
+def test_one_click_fix_checkbox_is_present_and_marked(repo_root):
+    md = _md_with_advisory(repo_root)
+    assert "<!--tridelphi-fix-->" in md, "the fix bot's checkbox marker must be present"
+    assert "- [ ] <!--tridelphi-fix-->" in md, "an unchecked task-list checkbox"
+    assert "Fix these for me" in md
+    assert "tridelphi fix" in md  # the typed fallback still offered
+
+
 def test_markdown_checklist_keeps_criticals_in_the_open(repo_root):
     from tridelphi.api import analyze
     from tridelphi.checklist import render_checklist_markdown

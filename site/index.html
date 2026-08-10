@@ -218,6 +218,32 @@ p{margin:0}
   background:var(--grn);color:#06110b;font-weight:700;text-decoration:none;font-size:15px;white-space:nowrap}
 .gui-cta a.go:hover{filter:brightness(1.06)}
 
+/* feature carousel — everything TriDelPhi secures, one card at a time */
+.carousel{max-width:780px;margin:30px auto 0}
+.c-stage{position:relative;height:250px;border:1px solid var(--line);border-radius:18px;
+  background:var(--bg2);box-shadow:var(--shadow);overflow:hidden}
+@media(max-width:560px){.c-stage{height:300px}}
+.fcard{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:12px;
+  padding:32px 36px;opacity:0;transform:translateX(26px);transition:opacity .5s ease,transform .5s ease;
+  pointer-events:none;border-left:4px solid var(--ac,var(--grn))}
+.fcard.active{opacity:1;transform:none;pointer-events:auto}
+.fcard .tag{align-self:flex-start;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;padding:4px 10px;border-radius:999px;border:1px solid var(--ac,var(--grn));
+  color:var(--ac,var(--grn));background:transparent}
+.fcard .ico{font-size:30px;line-height:1}
+.fcard h3{font-size:clamp(20px,3vw,27px)}
+.fcard p{color:var(--mute);max-width:58ch;margin:0}
+.c-nav{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:16px}
+.c-dots{display:flex;gap:7px}
+.c-dots button{width:8px;height:8px;border-radius:50%;border:none;padding:0;cursor:pointer;
+  background:var(--line2);transition:.22s}
+.c-dots button[aria-current="true"]{background:var(--grn);width:22px;border-radius:5px}
+.c-arrow{width:38px;height:38px;border-radius:50%;border:1px solid var(--line2);background:var(--bg3);
+  color:var(--ink);font-size:19px;cursor:pointer;line-height:1;display:inline-flex;align-items:center;justify-content:center}
+.c-arrow:hover{border-color:var(--grn);color:var(--grn-ink)}
+.c-onboard{text-align:center;margin:22px auto 0;max-width:640px;color:var(--mute);font-size:15px}
+.c-onboard a{font-weight:600}
+
 /* no-brainer / offline trust banner */
 .nobrainer{margin:26px auto 0;max-width:900px;border:1px solid var(--line);
   border-radius:16px;background:var(--bg2);padding:8px;display:grid;
@@ -440,6 +466,7 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
     </div>
     <nav>
       <a class="navlink" href="#what">What it does</a>
+      <a class="navlink" href="#secures">What it secures</a>
       <a class="navlink" href="#rule">The rule</a>
       <a class="navlink" href="#allinone">All-in-one</a>
       <a class="navlink" href="#checks">The 7 checks</a>
@@ -598,6 +625,76 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
         <p>Here's the catch: <span class="hl">a total stranger</span> can leave a comment or suggest a change to your project. If a robot that holds your keys reads that stranger's words and follows them — your keys walk out the door. That's the whole danger, and it's more common than you'd think.</p>
       </div>
     </div>
+  </section>
+
+  <!-- ======================================================= WHAT IT SECURES (CAROUSEL) -->
+  <section id="secures">
+    <div class="sec-head">
+      <span class="eyebrow">Everything it secures</span>
+      <h2>One tool, every layer of your project.</h2>
+      <p class="lede">From the CI job an attacker's comment could hijack, to the secrets your app
+        ships to the browser — here's what TriDelPhi watches, one at a time. And turning it on is a
+        single click.</p>
+    </div>
+
+    <div class="carousel" id="carousel">
+      <div class="c-stage" id="c-stage" aria-live="polite">
+        <article class="fcard active" style="--ac:var(--u)">
+          <span class="ico">🔺</span><span class="tag">The core</span>
+          <h3>A stranger's comment becoming remote code execution</h3>
+          <p>The one CI job that reads untrusted text, holds your keys, and can reach the internet — the “Rule of Two” violation no other scanner names.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--p)">
+          <span class="ico">🔑</span><span class="tag">Level 1 · secrets</span>
+          <h3>API keys and passwords left in your files</h3>
+          <p>Credentials committed in the open, anywhere in your history — caught before anyone else finds them.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--e)">
+          <span class="ico">📦</span><span class="tag">Level 2 · dependencies</span>
+          <h3>Known-broken building blocks you depend on</h3>
+          <p>Packages with a published, already-fixed flaw — so you upgrade before it bites.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--grn)">
+          <span class="ico">⚙️</span><span class="tag">Level 3 · workflows</span>
+          <h3>Automation set up in unsafe ways</h3>
+          <p>Unpinned actions, template injection, over-broad token scopes — the workflow hardening pros tighten.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--p)">
+          <span class="ico">🛡️</span><span class="tag">Level 4 · posture</span>
+          <h3>Repo settings that could be safer</h3>
+          <p>Branch protection, read-only tokens, safe defaults — a quick health check for your project.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--e)">
+          <span class="ico">🐞</span><span class="tag">Level 5 · code</span>
+          <h3>Risky patterns in your own app code</h3>
+          <p>Injection, unsafe APIs — the classic bugs that turn into break-ins, pointed at the exact line.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--u)">
+          <span class="ico">🔏</span><span class="tag">Level 7 · trust</span>
+          <h3>A trusted tool swapped behind your back</h3>
+          <p>A dependency quietly handed to a new owner or re-pointed — the supply-chain takeover pinning alone can't see.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--grn)">
+          <span class="ico">🔦</span><span class="tag">expose · your shipped app</span>
+          <h3>Secrets and source your app leaks</h3>
+          <p>AI keys baked into the bundle, a database open to the world, or your whole source shipped in a <span class="mono">.map</span> — read from your committed code, honestly.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--p)">
+          <span class="ico">🕶️</span><span class="tag">privatize · optional</span>
+          <h3>Make your shipped code harder to copy</h3>
+          <p>An honest obfuscator for your built JavaScript — not security, refuses if you ship a secret, and reverts if it can't verify your app still runs.</p>
+        </article>
+      </div>
+      <div class="c-nav">
+        <button class="c-arrow" id="c-prev" type="button" aria-label="Previous feature">‹</button>
+        <div class="c-dots" id="c-dots" role="tablist" aria-label="Features"></div>
+        <button class="c-arrow" id="c-next" type="button" aria-label="Next feature">›</button>
+      </div>
+    </div>
+
+    <p class="c-onboard">🎛️ Easy onboarding — pick exactly what runs in the
+      <a href="setup.html">Setup Studio</a> and commit in one click, or run
+      <span class="mono">pipx install tridelphi &amp;&amp; tridelphi init --wizard</span>.</p>
   </section>
 
   <!-- ======================================================= RULE OF TWO -->
@@ -1244,6 +1341,46 @@ $ tridelphi init
     });
   });
   paintTri();
+})();
+</script>
+<script>
+/* feature carousel: everything TriDelPhi secures, one card at a time */
+(function () {
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var car = document.getElementById("carousel");
+  var stage = document.getElementById("c-stage");
+  if (!car || !stage) return;
+  var cards = [].slice.call(stage.querySelectorAll(".fcard"));
+  var dotsWrap = document.getElementById("c-dots");
+  var i = 0, timer = null, DUR = 4200;
+
+  cards.forEach(function (_, n) {
+    var d = document.createElement("button");
+    d.type = "button";
+    d.setAttribute("aria-label", "Show feature " + (n + 1) + " of " + cards.length);
+    d.addEventListener("click", function () { go(n, true); });
+    dotsWrap.appendChild(d);
+  });
+  var dots = [].slice.call(dotsWrap.children);
+
+  function render() {
+    cards.forEach(function (c, n) { c.classList.toggle("active", n === i); });
+    dots.forEach(function (d, n) { d.setAttribute("aria-current", n === i ? "true" : "false"); });
+  }
+  function go(n, manual) { i = (n + cards.length) % cards.length; render(); if (manual) restart(); }
+  function pause() { if (timer) { clearInterval(timer); timer = null; } }
+  function restart() { pause(); if (!reduce) timer = setInterval(function () { go(i + 1); }, DUR); }
+
+  document.getElementById("c-prev").addEventListener("click", function () { go(i - 1, true); });
+  document.getElementById("c-next").addEventListener("click", function () { go(i + 1, true); });
+  car.addEventListener("mouseenter", pause);
+  car.addEventListener("mouseleave", restart);
+  car.addEventListener("focusin", pause);
+  car.addEventListener("focusout", restart);
+
+  render();
+  restart();
 })();
 </script>
 </body>

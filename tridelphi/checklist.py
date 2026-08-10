@@ -431,6 +431,17 @@ def render_checklist(
         print(f"\n  Note: {n} file{'s' if n != 1 else ''} couldn't be read and were skipped.", file=stream)
 
 
+# Short nouns for the email-visible summary of the folded minor items.
+_RUNG_SHORT = {
+    "gitleaks": "committed secrets",
+    "osv-scanner": "vulnerable dependencies",
+    "zizmor": "workflow-hardening gaps",
+    "scorecard": "repo-setting defaults",
+    "semgrep": "risky code patterns",
+    "trust": "trust-lock changes",
+}
+
+
 def render_checklist_markdown(
     result: AnalysisResult,
     *,
@@ -525,10 +536,24 @@ def render_checklist_markdown(
         st.counts["warning"] for _n, _q, st in advisory_rungs
     )
     if advisory_core or advisory_rungs:
+        # A one-line breakdown OUTSIDE the fold, so the notification email — which
+        # collapses <details> to just its <summary> — still shows *what* the minor
+        # items are, not only the count. The full detail stays in the fold below.
+        summary_parts: list[str] = []
+        if advisory_core:
+            word = "warning" if len(advisory_core) == 1 else "warnings"
+            summary_parts.append(f"{len(advisory_core)} workflow capability {word}")
+        for name, _question, st in advisory_rungs:
+            summary_parts.append(f"{st.counts['warning']} {_RUNG_SHORT.get(name, 'items')}")
+        out.append(
+            f"**⚠️ Worth a look ({advisory_total}), nothing urgent:** "
+            + " · ".join(summary_parts) + "."
+        )
+        out.append("")
         out.append("<details>")
         out.append(
             f"<summary><b>The {advisory_total} minor items, in plain English</b> — "
-            "nothing urgent, tap to read</summary>"
+            "tap to read the exact spots and fixes</summary>"
         )
         out.append("")
         out.append(
@@ -562,14 +587,22 @@ def render_checklist_markdown(
         out.append("</details>")
         out.append("")
 
-    if total_to_fix == 0 and advisory_total:
+    if advisory_total or total_to_fix:
+        # One-click fix: the maintainer just ticks this box. GitHub only lets
+        # people with write access toggle a task list, and the fix bot re-verifies
+        # that write access before it runs — so no drive-by stranger can trigger it.
+        # The HTML-comment marker (`<!--tridelphi-fix-->`) is how the bot recognises
+        # its own checkbox; ticking flips `[ ]` to `[x]`, which the bot's `if:` sees.
         out.append(
-            "_Reply `tridelphi fix` to this pull request and the bot will apply the "
-            "automatic fixes it can verify._"
+            "- [ ] <!--tridelphi-fix--> ✅ **Fix these for me** — tick this box and "
+            "TriDelPhi applies the automatic fixes it can verify, re-checking each "
+            "change. _(Only maintainers can tick it — GitHub restricts this to write "
+            "access.)_"
         )
-    elif total_to_fix:
-        out.append(
-            "_Run `tridelphi guard` locally for interactive fixes, or reply "
-            "`tridelphi fix` here to apply the automatic ones._"
-        )
+        out.append("")
+        tail = "Prefer typing? Just reply `tridelphi fix` on this pull request."
+        if total_to_fix:
+            tail += (" Anything left needs a human eye — run `tridelphi guard` locally "
+                     "and it walks you through each one.")
+        out.append(f"_{tail}_")
     return "\n".join(out) + "\n"
