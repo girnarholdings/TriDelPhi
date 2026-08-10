@@ -185,7 +185,7 @@ name: TriDelPhi fix
 
 on:
   issue_comment:
-    types: [created]
+    types: [created, edited]
 
 permissions:
   contents: write
@@ -198,31 +198,64 @@ concurrency:
 jobs:
   fix:
     name: Apply verified fixes
-    # The three conditions of the trust boundary: it is a PR, the comment asks
-    # for the fix, and the commenter is someone this repo already trusts.
+    # Trust boundary. Two ways in, both restricted to people this repo trusts:
+    #   · a comment that says `tridelphi fix`, gated on author_association; OR
+    #   · the "Fix these for me" checkbox in TriDelPhi's own comment — GitHub only
+    #     lets users with write access toggle a task list, and the Authorize step
+    #     below re-verifies that write access before anything runs. Both branches
+    #     use positive `contains` only (never `!contains`/`!=`), so this stays the
+    #     strong author_association gate our own detector recognises.
     if: >-
-      github.event.issue.pull_request != null &&
-      contains(github.event.comment.body, 'tridelphi fix') &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      github.event.issue.pull_request != null && (
+        (contains(github.event.comment.body, 'tridelphi fix') &&
+         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+        ||
+        (contains(github.event.comment.body, '<!--tridelphi-fix-->') &&
+         contains(github.event.comment.body, '[x]'))
+      )
     runs-on: ubuntu-latest
     steps:
-      - uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+      # Re-verify authorization before doing anything. The comment path is already
+      # gated on author_association above; the checkbox path is gated by GitHub
+      # (write access to toggle), which we confirm here — and we never act on the
+      # bot's own edits (its periodic re-render of the comment).
+      - name: Authorize the requester
+        id: auth
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const p = context.payload;
+            if (p.sender && p.sender.type === 'Bot') { core.setOutput('ok', 'false'); return; }
+            if (p.action === 'created') { core.setOutput('ok', 'true'); return; }
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner, repo: context.repo.repo, username: p.sender.login,
+            });
+            const ok = ['admin', 'maintain', 'write'].includes(data.permission);
+            core.setOutput('ok', ok ? 'true' : 'false');
+            if (!ok) core.notice(`${p.sender.login} lacks write access; ignoring.`);
+
+      - if: steps.auth.outputs.ok == 'true'
+        uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
         with:
           egress-policy: audit
 
       # Default-branch checkout; the credential stays so the verified commit
       # can be pushed at the end — pushing is this workflow's entire purpose.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - if: steps.auth.outputs.ok == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - if: steps.auth.outputs.ok == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
       - name: Install TriDelPhi
+        if: steps.auth.outputs.ok == 'true'
         run: pipx install tridelphi
 
       - name: Switch to the pull request branch (same-repo only)
         id: pr
+        if: steps.auth.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.issue.number }}
