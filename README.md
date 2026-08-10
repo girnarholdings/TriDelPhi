@@ -632,6 +632,12 @@ secrets, weak hashing, open database) and upload it as a separate code-scanning
 category. It's **advisory** — it never fails the build — and it only sees built
 output present in the checkout, so run your build step first or it finds nothing.
 
+On pull requests the action speaks with **one voice**: the sticky plain-language
+comment plus the gate. SARIF uploads happen on pushes, keeping the Security tab
+current from your default branch without `github-advanced-security[bot]` echoing
+the same findings back as inline review comments. Set `pr-annotations: 'true'`
+if you want those inline code-scanning annotations on PRs anyway.
+
 ### 🎛️ One-click setup — click, choose, commit
 
 Don't want to write YAML? The **[Setup Studio](https://girnarholdings.github.io/TriDelPhi/setup.html)**
