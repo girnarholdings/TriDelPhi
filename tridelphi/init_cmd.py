@@ -83,9 +83,13 @@ jobs:
             echo TRIDELPHI_EOF
           } >> "$GITHUB_OUTPUT"
 
+      # Uploads on push only, on purpose: uploading on a pull request makes
+      # github-advanced-security[bot] echo these same findings back as inline
+      # review comments, duplicating the sticky comment below. One voice on the
+      # PR; the Security tab tracks the default branch.
       - name: Upload to code scanning
         uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: tridelphi.sarif
           category: tridelphi
@@ -101,7 +105,7 @@ jobs:
       #     run: tridelphi expose ./dist --sarif-file expose.sarif --fail-on none
       #   - name: Upload exposure audit
       #     uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
-      #     if: always()
+      #     if: always() && github.event_name != 'pull_request'
       #     with:
       #       sarif_file: expose.sarif
       #       category: tridelphi-expose

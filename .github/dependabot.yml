@@ -1,0 +1,30 @@
+# Automated dependency updates. Every bump arrives as a pull request, which
+# means TriDelPhi scans it, comments on it, and gates it like any other change
+# — the update tool and the thing that audits updates are the same pipeline.
+#
+# Deliberately NOT covered here: scripts/*-requirements.txt. Those are
+# hash-pinned dependency closures for the wrapped scanners, regenerated
+# wholesale from a clean venv (see the header of each file) so that
+# `pip install --require-hashes` stays the trust boundary. A line-item bump
+# inside a closure is how you get an unresolvable or unreviewed mix.
+version: 2
+updates:
+  # The SHA-pinned actions in .github/workflows and action.yml. Dependabot
+  # updates the pin and the version comment together, keeping the trust-lock
+  # (L7) story reviewable: every bump is a diff naming old and new version.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # The Python package itself (pyproject.toml, including dev extras).
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+
+  # The webhook bot worker.
+  - package-ecosystem: npm
+    directory: /bot
+    schedule:
+      interval: weekly

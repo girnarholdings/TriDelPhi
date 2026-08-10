@@ -17,14 +17,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Default deny at the workflow level; the one job that needs write scopes
+# declares them itself. A job added later starts with nothing.
 permissions:
   contents: read
-  security-events: write
-  pull-requests: write
-  # Level 7 signs the scan-evidence statement on push (skipped on PRs, which
-  # never get OIDC). Signing needs the workflow's OIDC identity:
-  id-token: write
-  attestations: write
 
 concurrency:
   group: tridelphi-${{ github.ref }}
@@ -34,6 +30,14 @@ jobs:
   guard:
     name: Agents Rule of Two
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+      # Level 7 signs the scan-evidence statement on push (skipped on PRs,
+      # which never get OIDC). Signing needs the workflow's OIDC identity:
+      id-token: write
+      attestations: write
     steps:
       # Egress telemetry for this job itself (step-security/harden-runner,
       # Apache-2.0). Audit mode only observes; the ladder's osv rung needs

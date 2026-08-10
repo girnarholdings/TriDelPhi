@@ -312,6 +312,13 @@ jsonschema==4.25.1 \
 markdown-it-py==4.2.0 \
     --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a \
     --hash=sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49
+# Known advisories, upstream-blocked: CVE-2026-52870 / CVE-2026-52869 (fixed
+# in mcp 1.27.2) and CVE-2026-59950 (fixed in 1.28.1). semgrep 1.172.0 — the
+# latest release — pins `mcp==1.23.3` exactly, so bumping mcp here would break
+# the resolver against semgrep's own metadata. Mitigation: TriDelPhi invokes
+# semgrep only as a batch scan (`--config <bundled dir> --metrics off`); the
+# MCP server these CVEs live in is never started. Revisit on the next semgrep
+# release (the file-header process: regenerate the whole closure).
 mcp==1.23.3 \
     --hash=sha256:32768af4b46a1b4f7df34e2bfdf5c6011e7b63d7f1b0e321d0fdef4cd6082031 \
     --hash=sha256:b3b0da2cc949950ce1259c7bfc1b081905a51916fcd7c8182125b85e70825201

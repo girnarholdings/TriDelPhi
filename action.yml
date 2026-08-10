@@ -52,6 +52,15 @@ inputs:
       server and a flagged config may already be firewalled. It sees only built
       output present in the checkout, so build first (or it finds nothing).
     default: "false"
+  pr-annotations:
+    description: >-
+      Also upload SARIF on pull_request events. Off by default on purpose: a
+      PR upload makes github-advanced-security[bot] re-voice TriDelPhi's own
+      findings as inline review comments, duplicating the sticky comment this
+      action already posts. With the default, pull requests get one voice (the
+      comment + the gate) and code scanning stays the historical record,
+      refreshed by every push to your default branch.
+    default: "false"
   sarif-file:
     description: Where to write SARIF for code-scanning upload.
     default: tridelphi.sarif
@@ -117,8 +126,12 @@ runs:
         cat report.txt
         exit 0
 
+    # Skipped on pull requests unless pr-annotations is on: uploading here makes
+    # code scanning echo the same findings back as inline bot comments, and the
+    # sticky comment below already says it better. Pushes always upload, so the
+    # Security tab tracks the default branch.
     - name: Upload to code scanning
-      if: always()
+      if: ${{ always() && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
       uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
       with:
         sarif_file: ${{ inputs.sarif-file }}
@@ -143,7 +156,7 @@ runs:
         exit 0
 
     - name: Upload exposure audit to code scanning
-      if: ${{ inputs.expose == 'true' && always() }}
+      if: ${{ inputs.expose == 'true' && always() && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
       uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
       with:
         sarif_file: tridelphi-expose.sarif

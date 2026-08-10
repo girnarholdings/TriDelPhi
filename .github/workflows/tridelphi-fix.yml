@@ -19,9 +19,10 @@ on:
   issue_comment:
     types: [created, edited]
 
+# Default deny at the workflow level; only the fix job holds the write
+# scopes it exists for. A job added later starts with nothing.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: tridelphi-fix-${{ github.event.issue.number }}
@@ -30,6 +31,9 @@ concurrency:
 jobs:
   fix:
     name: Apply verified fixes
+    permissions:
+      contents: write
+      pull-requests: write
     # Trust boundary. Two ways in, both restricted to people this repo trusts:
     #   · a comment that says `tridelphi fix`, gated on author_association; OR
     #   · the "Fix these for me" checkbox in TriDelPhi's own comment — GitHub only
@@ -66,10 +70,25 @@ jobs:
             core.setOutput('ok', ok ? 'true' : 'false');
             if (!ok) core.notice(`${p.sender.login} lacks write access; ignoring.`);
 
+      # Egress is BLOCKED, not audited, in this workflow: it is the one place a
+      # write-capable token and third-party code (pip's dependency tree) meet,
+      # so a compromised package must have nowhere to send the credential. The
+      # allowlist is everything the job legitimately needs — GitHub itself
+      # (checkout, gh, push, API) and PyPI (pip install). If a step ever fails
+      # with a blocked connection, the run's harden-runner log names the exact
+      # endpoint to consider adding.
       - if: steps.auth.outputs.ok == 'true'
         uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
 
       # Default-branch checkout; the credential stays so the verified commit
       # can be pushed at the end — pushing is this workflow's entire purpose.
