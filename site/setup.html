@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TriDelPhi Setup Studio — click, choose, one-click install</title>
+<meta name="description" content="Pick what TriDelPhi runs on your repo — the L1–L7 hardening ladder, the shipped-product exposure audit, your fail threshold and PR comments — and get a ready-to-commit GitHub Actions workflow, with a one-click 'create this file on GitHub' link. Fully static, nothing uploaded.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpolygon points='20,5 35,32 5,32' fill='none' stroke='%2334a374' stroke-width='3' stroke-linejoin='round'/%3E%3Ccircle cx='20' cy='5' r='4' fill='%23f2604f'/%3E%3Ccircle cx='35' cy='32' r='4' fill='%2341bcc8'/%3E%3Ccircle cx='5' cy='32' r='4' fill='%23eaa63a'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
+  --line:#2a382e; --line2:#3a4d40;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
+  --u:#e8604a; --p:#e0a63a; --e:#4aa7c8;
+  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f2f4ee; --bg2:#f8faf4; --bg3:#ffffff; --raise:#ffffff;
+    --line:#dde2d6; --line2:#c7d1bd;
+    --ink:#172019; --mute:#586257; --faint:#8a948a;
+    --grn:#1f7a54; --grn-ink:#186145; --grn-soft:rgba(31,122,84,.10);
+    --u:#cc4028; --p:#a5741a; --e:#1a7d9c;
+    --shadow:0 26px 60px -34px rgba(30,40,30,.26);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
+  --line:#2a382e; --line2:#3a4d40;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
+  --u:#e8604a; --p:#e0a63a; --e:#4aa7c8;
+  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+a{color:var(--grn-ink);text-underline-offset:3px}
+h1,h2,h3{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-height:1.12;margin:0}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--grn);font-weight:600}
+:focus-visible{outline:2px solid var(--grn);outline-offset:2px;border-radius:6px}
+
+header{border-bottom:1px solid var(--line);background:var(--bg2)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:16px;padding-bottom:16px}
+.brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:-.01em;color:var(--ink);text-decoration:none;font-size:18px}
+.brand svg{width:26px;height:26px}
+.back{font-size:14px;color:var(--mute);text-decoration:none}
+.back:hover{color:var(--grn-ink)}
+
+.hero{padding:40px 0 8px}
+.hero h1{font-size:clamp(28px,4.4vw,42px)}
+.hero p{color:var(--mute);max-width:64ch;margin-top:12px}
+
+.studio{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:26px;padding:26px 0 40px;align-items:start}
+@media(max-width:860px){.studio{grid-template-columns:1fr}}
+
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--shadow)}
+.panel h2{font-size:19px;margin-bottom:4px}
+.panel .sub{color:var(--faint);font-size:13.5px;margin-bottom:18px}
+.field{margin:18px 0}
+.field > label.q{display:block;font-weight:600;margin-bottom:8px}
+.field .hint{color:var(--faint);font-size:13px;margin-top:6px}
+
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg label{cursor:pointer}
+.seg input{position:absolute;opacity:0;width:0;height:0}
+.seg .pill{display:inline-flex;flex-direction:column;align-items:center;gap:2px;min-width:56px;
+  padding:8px 10px;border:1px solid var(--line2);border-radius:11px;background:var(--bg3);
+  font-size:13px;color:var(--mute);transition:.14s}
+.seg .pill b{font-family:var(--mono);font-size:14px;color:var(--ink)}
+.seg label:hover .pill{border-color:var(--grn)}
+.seg input:checked + .pill{border-color:var(--grn);background:var(--grn-soft);color:var(--ink)}
+.seg input:focus-visible + .pill{outline:2px solid var(--grn);outline-offset:2px}
+
+.toggle{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border:1px solid var(--line);
+  border-radius:12px;background:var(--bg3);margin:10px 0;cursor:pointer}
+.toggle input{margin-top:3px;width:18px;height:18px;accent-color:var(--grn);flex:0 0 auto}
+.toggle .t b{display:block}
+.toggle .t span{color:var(--faint);font-size:13px}
+
+select{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radius:10px;
+  background:var(--bg3);color:var(--ink);font-family:var(--sans);font-size:15px}
+input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radius:10px;
+  background:var(--bg3);color:var(--ink);font-family:var(--mono);font-size:14px}
+
+.out h2{font-size:19px;margin-bottom:4px}
+.filebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-family:var(--mono);font-size:12.5px;color:var(--mute);
+  background:var(--bg3);border:1px solid var(--line);border-bottom:none;
+  border-radius:12px 12px 0 0;padding:9px 13px}
+pre{margin:0;background:#0c110e;border:1px solid var(--line);border-radius:0 0 12px 12px;
+  padding:16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55;color:#dfe7df}
+:root[data-theme="light"] pre, :root:not([data-theme="dark"]) pre{background:#0c110e}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) pre{background:#10160f}}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border-radius:11px;
+  font-weight:600;font-size:14.5px;text-decoration:none;cursor:pointer;border:1px solid var(--line2);
+  background:var(--bg3);color:var(--ink);font-family:var(--sans)}
+.btn.primary{background:var(--grn);border-color:var(--grn);color:#06110b}
+.btn.primary[aria-disabled="true"]{opacity:.5;pointer-events:none}
+.btn:hover{border-color:var(--grn)}
+.btn svg{width:16px;height:16px}
+.copied{color:var(--grn-ink);font-size:13px;font-weight:600;align-self:center;opacity:0;transition:.2s}
+.copied.show{opacity:1}
+
+.oneline{margin-top:22px}
+.oneline .filebar{border-radius:12px 12px 0 0}
+.note{margin-top:22px;border:1px solid var(--line);border-left:3px solid var(--e);
+  border-radius:10px;padding:14px 16px;background:var(--bg3)}
+.note b{color:var(--ink)}
+.note p{color:var(--mute);font-size:13.5px;margin:4px 0 0}
+.note code{font-family:var(--mono);font-size:12.5px;background:var(--bg2);padding:1px 5px;border-radius:5px}
+.honest{color:var(--faint);font-size:13px;margin-top:26px;max-width:70ch}
+.honest b{color:var(--mute)}
+footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;padding:22px 0 40px;margin-top:20px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><polygon points="20,5 35,32 5,32" fill="none" stroke="var(--grn)" stroke-width="3" stroke-linejoin="round"/><circle cx="20" cy="5" r="4" fill="var(--u)"/><circle cx="35" cy="32" r="4" fill="var(--e)"/><circle cx="5" cy="32" r="4" fill="var(--p)"/></svg>
+      TriDelPhi
+    </a>
+    <a class="back" href="./">← back to the overview</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="hero">
+    <span class="eyebrow">Setup Studio</span>
+    <h1>Pick what runs. Get a ready-to-commit workflow.</h1>
+    <p>Choose your hardening level and options below — the workflow updates live. Then copy it, or
+      hit <b>Create this file on GitHub</b> to open the editor pre-filled and commit in one click.
+      This page is fully static: your choices never leave your browser.</p>
+  </section>
+
+  <section class="studio">
+    <!-- ─────────────────────────── CHOICES ─────────────────────────── -->
+    <div class="panel">
+      <h2>Choose what to run</h2>
+      <p class="sub">Each level is cumulative — it adds a scanner on top of the ones below it.</p>
+
+      <div class="field">
+        <label class="q" id="lvl-label">Hardening ladder level</label>
+        <div class="seg" role="radiogroup" aria-labelledby="lvl-label" id="levels"></div>
+        <p class="hint" id="lvl-hint"></p>
+      </div>
+
+      <div class="field">
+        <label class="q">Extras</label>
+        <label class="toggle"><input type="checkbox" id="expose">
+          <span class="t"><b>Audit what I ship — <code style="font-family:var(--mono)">expose</code></b>
+          <span>Also scan committed code/config for leaked secrets, an open database, or shipped source. Advisory — it uploads to the Security tab and never fails the build.</span></span></label>
+        <label class="toggle"><input type="checkbox" id="comment" checked>
+          <span class="t"><b>Post a plain-language PR comment</b>
+          <span>A sticky, jargon-free summary on each pull request.</span></span></label>
+      </div>
+
+      <div class="field">
+        <label class="q" for="failon">Fail the build when it finds…</label>
+        <select id="failon">
+          <option value="critical" selected>a critical (recommended)</option>
+          <option value="warning">a warning or worse (strict)</option>
+          <option value="none">never — report only</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="q" for="repo">Your repository <span style="color:var(--faint);font-weight:400">(for the one-click link)</span></label>
+        <input type="text" id="repo" placeholder="owner/name — e.g. octocat/hello-world" autocomplete="off" spellcheck="false">
+        <p class="hint">Only used to build the “Create this file on GitHub” link, in your browser.</p>
+      </div>
+    </div>
+
+    <!-- ─────────────────────────── OUTPUT ─────────────────────────── -->
+    <div class="panel out">
+      <h2>Your workflow</h2>
+      <p class="sub">Commit this as <code style="font-family:var(--mono)">.github/workflows/tridelphi.yml</code>.</p>
+
+      <div class="filebar"><span>.github/workflows/tridelphi.yml</span><span id="lvl-tag"></span></div>
+      <pre id="yaml" tabindex="0"></pre>
+
+      <div class="btns">
+        <a class="btn primary" id="createBtn" aria-disabled="true" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Create this file on GitHub
+        </a>
+        <button class="btn" id="copyBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          Copy
+        </button>
+        <span class="copied" id="copied">Copied ✓</span>
+      </div>
+
+      <div class="oneline">
+        <div class="filebar"><span>already have a workflow? just add this step</span></div>
+        <pre id="oneline" tabindex="0"></pre>
+      </div>
+
+      <div class="note">
+        <b>Prefer the terminal?</b>
+        <p>Run <code>pipx install tridelphi &amp;&amp; tridelphi init --wizard</code> for the same
+          click-through, plus the optional reply-to-fix bot (comment <code>tridelphi fix</code> on a PR
+          and it applies verified fixes).</p>
+      </div>
+
+      <div class="note" style="border-left-color:var(--p)">
+        <b>Harden your shipped JavaScript — <code>tridelphi privatize</code></b>
+        <p>Obfuscation mutates files and runs your build, so it’s a <i>local</i> command, not a CI step:
+          <code>tridelphi privatize --smoke-cmd "npm start"</code>. It is <b>not security</b>, refuses if
+          your build ships a secret, and keeps its result only if your smoke check still passes — else it
+          reverts to your exact bytes.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="honest"><b>Honest by design.</b> TriDelPhi runs on the GitHub runner and uploads only a
+    SARIF report to your own Security tab — nothing is sent anywhere else. The exposure audit is a
+    <i>static</i> read: a clean result isn’t a penetration test, and a browser can never keep a secret,
+    so it always says rotate and move it server-side, never “hide it.”</p>
+</div>
+
+<footer>
+  <div class="wrap">TriDelPhi · <a href="./">overview</a> · <a href="https://github.com/girnarholdings/TriDelPhi">GitHub</a> · Apache-2.0 · offline by default</div>
+</footer>
+
+<script>
+(function () {
+  var CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4";
+  var LEVELS = [
+    ["0", "core", "Rule-of-Two capability scan only"],
+    ["1", "+secrets", "adds gitleaks — keys committed in the open"],
+    ["2", "+deps", "adds osv-scanner — known-vulnerable dependencies"],
+    ["3", "+lint", "adds zizmor — workflow hardening (recommended default)"],
+    ["4", "+posture", "adds OSSF Scorecard — repo safety habits"],
+    ["5", "+SAST", "adds semgrep — risky patterns in your app code"],
+    ["6", "+attest", "adds a signed evidence receipt + policy gate"],
+    ["7", "+trust", "adds the trust-lock — catches a swapped dependency"]
+  ];
+  var elLevels = document.getElementById("levels");
+  var elHint = document.getElementById("lvl-hint");
+  var elTag = document.getElementById("lvl-tag");
+  var elExpose = document.getElementById("expose");
+  var elComment = document.getElementById("comment");
+  var elFail = document.getElementById("failon");
+  var elRepo = document.getElementById("repo");
+  var elYaml = document.getElementById("yaml");
+  var elOne = document.getElementById("oneline");
+  var elCreate = document.getElementById("createBtn");
+  var elCopy = document.getElementById("copyBtn");
+  var elCopied = document.getElementById("copied");
+
+  LEVELS.forEach(function (lv, i) {
+    var lab = document.createElement("label");
+    lab.innerHTML = '<input type="radio" name="level" value="' + lv[0] + '"' +
+      (lv[0] === "3" ? " checked" : "") + '><span class="pill"><b>L' + lv[0] + '</b>' + lv[1] + '</span>';
+    elLevels.appendChild(lab);
+  });
+
+  function level() {
+    var r = document.querySelector('input[name="level"]:checked');
+    return r ? r.value : "3";
+  }
+
+  function buildYaml() {
+    var lines = [
+      "# Added by the TriDelPhi Setup Studio / `tridelphi init --wizard`. One line runs",
+      "# the whole chosen ladder and merges every result into one code-scanning upload.",
+      "# Docs: https://girnarholdings.github.io/TriDelPhi/",
+      "name: TriDelPhi",
+      "",
+      "on:",
+      "  pull_request:",
+      "  push:",
+      "    branches: [main, master]",
+      "  workflow_dispatch:",
+      "",
+      "permissions:",
+      "  contents: read",
+      "  security-events: write",
+      "  pull-requests: write",
+      "",
+      "concurrency:",
+      "  group: tridelphi-${{ github.ref }}",
+      "  cancel-in-progress: true",
+      "",
+      "jobs:",
+      "  harden:",
+      "    name: TriDelPhi",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: " + CHECKOUT,
+      "      - uses: girnarholdings/TriDelPhi@v3",
+      "        with:",
+      "          level: '" + level() + "'",
+      "          fail-on: " + elFail.value,
+      "          comment: '" + (elComment.checked ? "true" : "false") + "'"
+    ];
+    if (elExpose.checked) lines.push("          expose: 'true'");
+    return lines.join("\n") + "\n";
+  }
+
+  function buildOneline() {
+    var lines = [
+      "- uses: girnarholdings/TriDelPhi@v3",
+      "  with:",
+      "    level: '" + level() + "'",
+      "    fail-on: " + elFail.value,
+      "    comment: '" + (elComment.checked ? "true" : "false") + "'"
+    ];
+    if (elExpose.checked) lines.push("    expose: 'true'");
+    return lines.join("\n") + "\n";
+  }
+
+  function render() {
+    var yaml = buildYaml();
+    elYaml.textContent = yaml;
+    elOne.textContent = buildOneline();
+    var lv = LEVELS[parseInt(level(), 10)];
+    elHint.textContent = "L" + lv[0] + " · " + lv[2];
+    elTag.textContent = "level " + lv[0] + (elExpose.checked ? " · +expose" : "");
+
+    var repo = elRepo.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, "");
+    if (/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+      var url = "https://github.com/" + repo + "/new/main?filename=" +
+        encodeURIComponent(".github/workflows/tridelphi.yml") +
+        "&value=" + encodeURIComponent(yaml);
+      elCreate.setAttribute("href", url);
+      elCreate.setAttribute("aria-disabled", "false");
+    } else {
+      elCreate.removeAttribute("href");
+      elCreate.setAttribute("aria-disabled", "true");
+    }
+  }
+
+  elCopy.addEventListener("click", function () {
+    var text = buildYaml();
+    var done = function () { elCopied.classList.add("show"); setTimeout(function () { elCopied.classList.remove("show"); }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, done);
+    } else {
+      elYaml.focus();
+      var r = document.createRange(); r.selectNodeContents(elYaml);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      try { document.execCommand("copy"); } catch (e) {}
+      done();
+    }
+  });
+
+  ["change", "input", "keyup"].forEach(function (ev) {
+    elLevels.addEventListener(ev, render);
+    document.querySelector(".panel").addEventListener(ev, render);
+    elRepo.addEventListener(ev, render);
+  });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -11,6 +11,7 @@
 [![Offline](https://img.shields.io/badge/default%20network%20calls-zero-f2604f)](#-offline-by-design)
 
 **[🌐 Website](https://girnarholdings.github.io/TriDelPhi/)** ·
+**[🎛️ Setup Studio](https://girnarholdings.github.io/TriDelPhi/setup.html)** ·
 **[📖 Rules](docs/RULES.md)** ·
 **[🧭 Decisions](docs/DECISIONS.md)** ·
 **[🔑 L7 design](docs/L7_PROPOSAL.md)** ·
@@ -631,9 +632,25 @@ secrets, weak hashing, open database) and upload it as a separate code-scanning
 category. It's **advisory** — it never fails the build — and it only sees built
 output present in the checkout, so run your build step first or it finds nothing.
 
-Or `tridelphi init` writes a complete workflow for you. Prefer a hosted bot
-across many repos? A Cloudflare Worker webhook front door lives in
-[`bot/`](bot/), testable with `wrangler dev`.
+### 🎛️ One-click setup — click, choose, commit
+
+Don't want to write YAML? The **[Setup Studio](https://girnarholdings.github.io/TriDelPhi/setup.html)**
+is a graphical, click-and-choose page: pick your ladder level, toggle `expose`, set
+the fail threshold and PR comments, and it live-generates the workflow — then
+**“Create this file on GitHub”** opens the editor pre-filled so you commit in one
+click. It's fully static; your choices never leave your browser.
+
+The same click-through in the terminal:
+
+```console
+tridelphi init            # writes the transparent, pinned workflow
+tridelphi init --wizard   # asks what to run, writes a one-line action workflow
+```
+
+**Marketplace.** The composite action is Marketplace-ready; the exact publish
+steps and listing copy are in [`docs/MARKETPLACE.md`](docs/MARKETPLACE.md).
+Prefer a hosted bot across many repos? A Cloudflare Worker webhook front door
+lives in [`bot/`](bot/), testable with `wrangler dev`.
 
 ### 🚦 Exit codes
 

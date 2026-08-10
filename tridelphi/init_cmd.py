@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-__all__ = ["FIX_WORKFLOW", "WORKFLOW", "run_init"]
+__all__ = ["FIX_WORKFLOW", "WORKFLOW", "render_action_workflow", "run_init"]
 
 # The workflow is itself Rule-of-Two clean: it runs on pull_request (where fork
 # tokens are read-only), interpolates no github.event data into a shell, and the
@@ -307,7 +307,99 @@ Nothing else to configure. The scan reads only files on disk.
 """
 
 
-def run_init(target: str = ".", *, force: bool = False, out=None, err=None) -> int:
+# ---------------------------------------------------------------------------
+# the one-click / wizard path — a composite-action workflow with chosen inputs
+# ---------------------------------------------------------------------------
+
+_CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4"
+
+
+def render_action_workflow(
+    *, level: int = 3, fail_on: str = "critical", comment: bool = True, expose: bool = False,
+) -> str:
+    """The one-line composite-action workflow the Setup Studio and `init --wizard`
+    emit: ``uses: girnarholdings/TriDelPhi@v3`` with the chosen inputs, so the whole
+    selected ladder (plus optional `expose`) runs and merges into one code-scanning
+    upload. Plain ``tridelphi init`` writes the transparent, pipx-based workflow
+    instead; this is the click-and-choose spelling."""
+    lines = [
+        "# Added by the TriDelPhi Setup Studio / `tridelphi init --wizard`. One line runs",
+        "# the whole chosen ladder and merges every result into one code-scanning upload.",
+        "# Docs: https://girnarholdings.github.io/TriDelPhi/",
+        "name: TriDelPhi",
+        "",
+        "on:",
+        "  pull_request:",
+        "  push:",
+        "    branches: [main, master]",
+        "  workflow_dispatch:",
+        "",
+        "permissions:",
+        "  contents: read",
+        "  security-events: write",
+        "  pull-requests: write",
+        "",
+        "concurrency:",
+        "  group: tridelphi-${{ github.ref }}",
+        "  cancel-in-progress: true",
+        "",
+        "jobs:",
+        "  harden:",
+        "    name: TriDelPhi",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        f"      - uses: {_CHECKOUT}",
+        "      - uses: girnarholdings/TriDelPhi@v3",
+        "        with:",
+        f"          level: '{level}'",
+        f"          fail-on: {fail_on}",
+        f"          comment: '{str(comment).lower()}'",
+    ]
+    if expose:
+        lines.append("          expose: 'true'")
+    return "\n".join(lines) + "\n"
+
+
+_WIZARD_INTRO = """\
+TriDelPhi setup — a few questions, then I write your workflow.
+Press Enter to accept the [default] each time.
+"""
+
+
+def _ask(stream, out, prompt: str, default: str) -> str:
+    print(prompt, end="", file=out, flush=True)
+    line = stream.readline()
+    if line == "":  # EOF / closed stdin → take defaults
+        print(file=out)
+        return default
+    return line.strip() or default
+
+
+def _ask_wizard(stream, out) -> dict:
+    print(_WIZARD_INTRO, file=out)
+    raw = _ask(stream, out, "  Ladder level (0 core only · 1 +secrets · 3 +workflow lint · "
+               "5 +code SAST · 7 +trust-lock) [3]: ", "3")
+    try:
+        level = max(0, min(7, int(raw)))
+    except ValueError:
+        level = 3
+    expose = _ask(stream, out, "  Also audit your shipped product (secrets, open DB, leaked "
+                  "source) with `expose`? advisory [y/N]: ", "n").lower().startswith("y")
+    fo = _ask(stream, out, "  Fail the build on which severity? critical / warning / none "
+              "[critical]: ", "critical").lower()
+    fail_on = fo if fo in ("critical", "warning", "none") else "critical"
+    comment = not _ask(stream, out, "  Post a plain-language PR comment with the report? "
+                       "[Y/n]: ", "y").lower().startswith("n")
+    fix_bot = not _ask(stream, out, "  Add the reply-to-fix bot (comment `tridelphi fix` on a "
+                       "PR applies verified fixes)? [Y/n]: ", "y").lower().startswith("n")
+    return {"level": level, "expose": expose, "fail_on": fail_on,
+            "comment": comment, "fix_bot": fix_bot}
+
+
+def run_init(
+    target: str = ".", *, force: bool = False, wizard: bool = False,
+    input_stream=None, out=None, err=None,
+) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
     root = Path(target)
@@ -316,10 +408,19 @@ def run_init(target: str = ".", *, force: bool = False, out=None, err=None) -> i
         return 2
 
     workflow_dir = root / ".github" / "workflows"
-    targets = (
-        (workflow_dir / "tridelphi.yml", WORKFLOW),
-        (workflow_dir / "tridelphi-fix.yml", FIX_WORKFLOW),
-    )
+    if wizard:
+        opts = _ask_wizard(input_stream or sys.stdin, out)
+        fix_bot = opts.pop("fix_bot")
+        targets: tuple[tuple[Path, str], ...] = (
+            (workflow_dir / "tridelphi.yml", render_action_workflow(**opts)),
+        )
+        if fix_bot:
+            targets += ((workflow_dir / "tridelphi-fix.yml", FIX_WORKFLOW),)
+    else:
+        targets = (
+            (workflow_dir / "tridelphi.yml", WORKFLOW),
+            (workflow_dir / "tridelphi-fix.yml", FIX_WORKFLOW),
+        )
 
     existing = [path for path, _content in targets if path.exists()]
     if existing and not force:
