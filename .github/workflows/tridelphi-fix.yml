@@ -148,6 +148,27 @@ jobs:
             echo TRIDELPHI_EOF
           } >> "$GITHUB_OUTPUT"
 
+      # An intentional tool update (Dependabot, or a maintainer) trips the L7
+      # trust-lock by design — the pawl cannot tell a wanted bump from a swap.
+      # Ticking the box IS the human confirmation, so re-record the moved pins
+      # here. `--relock` refuses if an action changed OWNER: that is the repo
+      # transfer / takeover shape, and no click should wave it through.
+      - name: Re-lock tool pins the maintainer just approved
+        if: steps.pr.outputs.skip == 'false'
+        id: relock
+        run: |
+          if tridelphi verify . --relock > "$RUNNER_TEMP/relock.txt" 2>&1; then
+            echo "refused=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "refused=true" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$RUNNER_TEMP/relock.txt"
+          {
+            echo 'log<<TRIDELPHI_EOF'
+            cat "$RUNNER_TEMP/relock.txt"
+            echo TRIDELPHI_EOF
+          } >> "$GITHUB_OUTPUT"
+
       - name: Push what verified
         if: steps.pr.outputs.skip == 'false'
         id: push
@@ -170,14 +191,26 @@ jobs:
         env:
           FIX_LOG: ${{ steps.apply.outputs.log }}
           CHANGED: ${{ steps.push.outputs.changed }}
+          RELOCK_LOG: ${{ steps.relock.outputs.log }}
+          RELOCK_REFUSED: ${{ steps.relock.outputs.refused }}
         with:
           script: |
             const changed = process.env.CHANGED === 'true';
-            const log = (process.env.FIX_LOG || '').slice(0, 50000);
-            const headline = changed
+            const refused = process.env.RELOCK_REFUSED === 'true';
+            const log = (process.env.FIX_LOG || '').slice(0, 25000);
+            const relock = (process.env.RELOCK_LOG || '').slice(0, 25000);
+            // A refused re-lock is the one outcome that must not read as routine:
+            // an action changed hands, which is exactly what the lock is for.
+            const headline = refused
+              ? '🛑 **TriDelPhi stopped: one of your pinned tools changed hands.** A repo transfer and a takeover look identical from here, so nothing was re-locked. Confirm the action is still the one you trust, then record it deliberately with `tridelphi verify --write-trust-lock`.'
+              : changed
               ? '🔺 **TriDelPhi applied its verified fixes** — each change below was re-scanned before it was kept.'
               : '🔺 **TriDelPhi had nothing it could fix automatically** — the remaining items need a human decision (`tridelphi guard` locally walks you through them).';
-            const body = [headline, '', '```', log, '```'].join('\n');
+            const body = [
+              headline, '',
+              ...(relock.trim() ? ['**Tool pins**', '', '```', relock, '```', ''] : []),
+              '```', log, '```',
+            ].join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo,
               issue_number: context.issue.number, body,

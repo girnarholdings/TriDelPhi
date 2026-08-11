@@ -17,11 +17,26 @@ updates:
     schedule:
       interval: weekly
 
-  # The Python package itself (pyproject.toml, including dev extras).
+  # The Python package itself — and ONLY the four dependencies pyproject.toml
+  # actually declares. The `allow` list is load-bearing, not decoration: the pip
+  # ecosystem walks the whole tree and finds scripts/*-requirements.txt, which
+  # are hash-pinned closures for the wrapped scanners. Those are regenerated
+  # wholesale (see each file's header) because semgrep pins its dependencies
+  # exactly; a single-package bump inside one is unresolvable by construction
+  # and produces a pull request that can never go green. Naming what we DO want
+  # is the only way to say that to Dependabot.
+  #
+  # Adding a runtime or dev dependency to pyproject.toml? Add it here too, or it
+  # simply will not be watched.
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    allow:
+      - dependency-name: ruamel.yaml
+      - dependency-name: jsonschema
+      - dependency-name: pytest
+      - dependency-name: ruff
 
   # The webhook bot worker.
   - package-ecosystem: npm

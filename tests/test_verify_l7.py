@@ -229,3 +229,87 @@ def test_level_7_folds_trust_into_the_merged_sarif(tmp_path, repo_root):
     names = [r["tool"]["driver"]["name"] for r in doc["runs"]]
     assert "tridelphi" in names and "tridelphi-verify" in names
     assert result.returncode in (0, 1)
+
+
+# --- --relock: the on-ramp back to green after an intentional bump ----------
+
+
+def _bump_checkout(repo):
+    """Repoint checkout to a new SHA, as a dependency bot would."""
+    _wf(
+        repo,
+        "ci.yml",
+        "on: push\njobs:\n  a:\n    steps:\n"
+        "      - uses: actions/checkout@0000000000000000000000000000000000000000 # v5\n"
+        "      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5\n",
+    )
+
+
+def test_relock_records_an_intentional_bump_and_clears_the_gate(tmp_path):
+    """The whole point: a wanted update must have a way back to green."""
+    repo = _basic_repo(tmp_path)
+    lock = tmp_path / "trust.lock"
+    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    _bump_checkout(repo)
+    assert run_verify(repo, trust_lock=str(lock), offline=True)[0] == 1  # gated
+
+    code, doc = run_verify(repo, trust_lock=str(lock), relock=True, offline=True)
+    assert code == 0 and doc is None
+    # ...and the pawl is armed again on the NEW identity, not disabled.
+    assert run_verify(repo, trust_lock=str(lock), offline=True)[0] == 0
+    assert json.loads(lock.read_text())["actions"]["actions/checkout"]["sha"] == "0" * 40
+
+
+def test_relock_refuses_when_an_action_changed_hands(tmp_path):
+    """A takeover looks exactly like a routine bump. One click must not bless it."""
+    repo = _basic_repo(tmp_path)
+    lock = tmp_path / "trust.lock"
+    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    data = json.loads(lock.read_text())
+    data["actions"]["actions/checkout"]["owner"] = "attacker"
+    lock.write_text(json.dumps(data))
+    before = lock.read_text()
+
+    code, _ = run_verify(repo, trust_lock=str(lock), relock=True, offline=True)
+    assert code == 1, "an owner change must refuse"
+    assert lock.read_text() == before, "a refused re-lock must write nothing at all"
+    # Still gating afterwards — the refusal did not quietly clear the finding.
+    assert run_verify(repo, trust_lock=str(lock), offline=True)[0] == 1
+
+
+def test_relock_refuses_wholesale_not_per_entry(tmp_path):
+    """With a takeover live, the *other* moved pins must not be blessed either."""
+    repo = _basic_repo(tmp_path)
+    lock = tmp_path / "trust.lock"
+    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    data = json.loads(lock.read_text())
+    data["actions"]["actions/setup-python"]["owner"] = "attacker"
+    lock.write_text(json.dumps(data))
+    _bump_checkout(repo)  # a legitimate bump alongside the scary one
+
+    code, _ = run_verify(repo, trust_lock=str(lock), relock=True, offline=True)
+    assert code == 1
+    still = json.loads(lock.read_text())["actions"]["actions/checkout"]["sha"]
+    assert still != "0" * 40, "the innocent bump must not ride along on a refusal"
+
+
+def test_relock_is_a_no_op_when_nothing_moved(tmp_path):
+    repo = _basic_repo(tmp_path)
+    lock = tmp_path / "trust.lock"
+    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    before = lock.read_text()
+    code, _ = run_verify(repo, trust_lock=str(lock), relock=True, offline=True)
+    assert code == 0 and lock.read_text() == before
+
+
+def test_cli_exposes_relock(tmp_path, repo_root):
+    repo = _basic_repo(tmp_path)
+    lock = tmp_path / "trust.lock"
+    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    _bump_checkout(repo)
+    result = run_cli(
+        ["verify", str(repo), "--trust-lock", str(lock), "--relock", "--offline"],
+        cwd=repo_root,
+    )
+    assert result.returncode == 0
+    assert "re-locked" in result.stdout

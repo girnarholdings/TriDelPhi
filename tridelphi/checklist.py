@@ -587,17 +587,48 @@ def render_checklist_markdown(
         out.append("</details>")
         out.append("")
 
-    if advisory_total or total_to_fix:
+    # A trust-lock regression is a swapped pinned tool. Usually that is an
+    # *intentional* update (a dependency bot, or the maintainer) tripping the
+    # pawl exactly as designed — so alongside the warning, offer the sanctioned
+    # way through: the fix flow re-verifies the new pin and re-locks it. The
+    # dead end this prevents: a red check with no explanation of how a
+    # legitimate update ever goes green.
+    trust_st = external.get("trust")
+    trust_swaps = (
+        trust_st.counts["critical"] if trust_st is not None and trust_st.ran else 0
+    )
+    if trust_swaps:
+        plural = "s" if trust_swaps != 1 else ""
+        out.append(
+            f"🔁 **{trust_swaps} pinned tool{plural} changed in this pull request.** "
+            "If that's the point of this change — your update, or a dependency bot "
+            "like Dependabot — tick the box below and TriDelPhi re-verifies the new "
+            "version and updates the trust lock, so the checks go green. If you "
+            "didn't expect a tool to change, don't merge until you know why."
+        )
+        for text in _grouped(
+            [it for it in trust_st.items if it[0] == "critical"]
+        )[:_MAX_ITEMS]:
+            out.append(f"- {text}")
+        out.append("")
+
+    if advisory_total or total_to_fix or trust_swaps:
         # One-click fix: the maintainer just ticks this box. GitHub only lets
         # people with write access toggle a task list, and the fix bot re-verifies
         # that write access before it runs — so no drive-by stranger can trigger it.
         # The HTML-comment marker (`<!--tridelphi-fix-->`) is how the bot recognises
         # its own checkbox; ticking flips `[ ]` to `[x]`, which the bot's `if:` sees.
+        label = (
+            "TriDelPhi re-verifies the changed pins, updates the trust lock, and "
+            "applies the automatic fixes it can verify"
+            if trust_swaps
+            else "TriDelPhi applies the automatic fixes it can verify, re-checking "
+            "each change"
+        )
         out.append(
-            "- [ ] <!--tridelphi-fix--> ✅ **Fix these for me** — tick this box and "
-            "TriDelPhi applies the automatic fixes it can verify, re-checking each "
-            "change. _(Only maintainers can tick it — GitHub restricts this to write "
-            "access.)_"
+            f"- [ ] <!--tridelphi-fix--> ✅ **Fix these for me** — tick this box and "
+            f"{label}. _(Only maintainers can tick it — GitHub restricts this to "
+            "write access.)_"
         )
         out.append("")
         tail = "Prefer typing? Just reply `tridelphi fix` on this pull request."

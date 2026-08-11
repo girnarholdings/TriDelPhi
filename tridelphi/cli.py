@@ -144,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="with `verify`: record today's action identities and exit",
     )
     parser.add_argument(
+        "--relock", action="store_true",
+        help="with `verify`: re-record pins that moved (an intentional update), but "
+             "refuse if an action changed owner — that needs a human",
+    )
+    parser.add_argument(
         "--offline", action="store_true",
         help="with --level: skip rungs that need the network (osv-scanner)",
     )
@@ -294,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
             args.command or ".",
             trust_lock=args.trust_lock,
             write_lock=args.write_trust_lock,
+            relock=args.relock,
             offline=args.offline,
             fail_on=args.fail_on,
             tool_version=__version__,
