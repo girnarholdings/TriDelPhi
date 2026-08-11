@@ -34,15 +34,23 @@ updates:
   # and produces a pull request that can never go green. Naming what we DO want
   # is the only way to say that to Dependabot.
   #
-  # Adding a runtime or dev dependency to pyproject.toml? Add it here too, or it
-  # simply will not be watched.
+  # `allow` names dependencies, but Dependabot edits every file a named
+  # dependency appears in — so a package that is in BOTH pyproject.toml and a
+  # closure drags the closure along and breaks it. `ruamel.yaml` and
+  # `jsonschema` are exactly that: semgrep constrains them, and bumping them in
+  # the closure fails with ResolutionImpossible (this is what sank #47). They
+  # are therefore not watched here; they move when the closure is regenerated
+  # for a semgrep upgrade, which is the only way they can move coherently.
+  #
+  # Adding a dependency to pyproject.toml? Add it here too — but first check it
+  # does not appear in scripts/*-requirements.txt:
+  #     grep -l '^<name>==' scripts/*-requirements.txt
+  # A hit means leave it out, for the reason above.
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
     allow:
-      - dependency-name: ruamel.yaml
-      - dependency-name: jsonschema
       - dependency-name: pytest
       - dependency-name: ruff
     groups:
