@@ -8,7 +8,10 @@ Two things happen here, in descending order of how much you can rely on them
 today:
 
 * **The trust-lock pawl (always on, fully offline, the headline).** Every
-  third-party ``uses:`` in your workflows is recorded — action, the ref you
+  third-party ``uses:`` you consume is recorded — from workflows *and* from
+  action definitions (``action.yml``, ``.github/actions/*/action.yml``), since
+  a published composite action ships its dependencies to everyone who uses it
+  — action, the ref you
   wrote, and the commit SHA it is pinned to — in ``.tridelphi/trust.lock``.
   On a later run, an action whose pinned SHA *changed under the same ref*, or
   whose owner changed (a repo transfer), fails the gate. This is the pawl that
@@ -75,7 +78,10 @@ class ActionRef:
     repo: str
     subpath: str  # "" or "/path/to/subaction"
     ref: str  # what was written after @ — a SHA if pinned, else a tag/branch
-    workflow: str  # repo-relative path of the workflow file
+    # Repo-relative path of the file the `uses:` was found in. Named `workflow`
+    # for history; it is now any consuming file — a workflow OR an action
+    # definition (action.yml, .github/actions/*/action.yml).
+    workflow: str
     line: int  # 1-indexed line of the `uses:` in that file
 
     @property
@@ -160,24 +166,47 @@ def _folded_uses_value(lines: list[str], key_idx: int) -> str | None:
     return value or None
 
 
-def enumerate_uses(repo_root: str | Path) -> list[ActionRef]:
-    """Every third-party ``uses:`` across the repo's workflows, deterministically.
+def _uses_sources(root: Path) -> list[Path]:
+    """Every file that can consume a third-party action.
 
-    Local (``./``) and docker (``docker://``) uses are excluded: neither has a
-    publisher identity to lock. Results are sorted by (slug, workflow, line) so
-    the output order never depends on the filesystem.
+    Workflows are the obvious half. The other half is **action definitions** —
+    ``action.yml`` at the repo root, and composite actions under
+    ``.github/actions/``. Those consume actions exactly like a workflow does,
+    and a repo that *publishes* one ships its dependencies to every consumer;
+    leaving them unlocked meant the pawl watched this project's own workflows
+    while its published action's dependencies could be swapped unseen.
+    """
+    sources: list[Path] = []
+    workflows = root / ".github" / "workflows"
+    if workflows.is_dir():
+        sources += sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml"))
+    for name in ("action.yml", "action.yaml"):
+        candidate = root / name
+        if candidate.is_file():
+            sources.append(candidate)
+    actions_dir = root / ".github" / "actions"
+    if actions_dir.is_dir():
+        sources += sorted(actions_dir.glob("*/action.yml"))
+        sources += sorted(actions_dir.glob("*/action.yaml"))
+    return sources
+
+
+def enumerate_uses(repo_root: str | Path) -> list[ActionRef]:
+    """Every third-party ``uses:`` this repo consumes, deterministically.
+
+    Covers workflows *and* action definitions (see ``_uses_sources``). Local
+    (``./``) and docker (``docker://``) uses are excluded: neither has a
+    publisher identity to lock. Results are sorted by (slug, file, line) so the
+    output order never depends on the filesystem.
     """
     root = Path(repo_root)
-    workflows_dir = root / ".github" / "workflows"
     refs: list[ActionRef] = []
-    if not workflows_dir.is_dir():
-        return refs
-    for wf in sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml")):
+    for source in _uses_sources(root):
         try:
-            text = wf.read_text(encoding="utf-8", errors="replace")
+            text = source.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        rel = wf.relative_to(root).as_posix()
+        rel = source.relative_to(root).as_posix()
         lines = text.splitlines()
         for i, line in enumerate(lines, start=1):
             value = _uses_value(line)
