@@ -1,0 +1,42 @@
+{
+  // Open this repository in GitHub Codespaces and get a machine with TriDelPhi
+  // and its whole scanner ladder already installed. This exists so that
+  // "run `tridelphi guard` locally" — the line at the bottom of every report —
+  // does not actually require anything local.
+  //
+  //   Code -> Codespaces -> Create codespace on <branch>
+  //   then, in the terminal:  tridelphi guard
+  //
+  // Nothing new is trusted by doing this: GitHub already holds this code and
+  // the credentials, so the codespace adds no party that could not already read
+  // the repository. The scan still runs on that machine and uploads nothing.
+  "name": "TriDelPhi",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+
+  "features": {
+    // The bot's Worker is JavaScript; without this, `npm test` in bot/ fails on
+    // a machine that otherwise looks ready.
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+
+  // Editable install so a change to tridelphi/ is live in the next command, and
+  // the pinned scanners so `guard`, `--level 5` and `verify` behave the way they
+  // do in CI rather than reporting rungs as "not run".
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
+    }
+  },
+
+  // A scan reads files and runs pinned analyzers; it never needs to be root.
+  "remoteUser": "vscode"
+}
