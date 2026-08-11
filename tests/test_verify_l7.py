@@ -313,3 +313,80 @@ def test_cli_exposes_relock(tmp_path, repo_root):
     )
     assert result.returncode == 0
     assert "re-locked" in result.stdout
+
+
+# --- action definitions are consumed too, so they must be locked too ---------
+
+
+def _action_yml(repo, body):
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "action.yml").write_text(body, encoding="utf-8")
+
+
+def test_action_definitions_are_enumerated_not_just_workflows(tmp_path):
+    """A repo that *publishes* a composite action ships its dependencies to
+    every consumer. Scanning only .github/workflows left those dependencies
+    outside the pawl — swappable without tripping anything."""
+    repo = tmp_path / "repo"
+    _action_yml(
+        repo,
+        "name: Demo\nruns:\n  using: composite\n  steps:\n"
+        "    - uses: actions/setup-python@" + "a" * 40 + " # v5\n"
+        "    - uses: github/codeql-action/upload-sarif@" + "b" * 40 + " # v3\n",
+    )
+    refs = enumerate_uses(repo)
+    assert {r.slug for r in refs} == {
+        "actions/setup-python",
+        "github/codeql-action/upload-sarif",
+    }
+    assert all(r.workflow == "action.yml" for r in refs)
+
+
+def test_a_takeover_inside_action_yml_is_caught(tmp_path):
+    """The whole point of closing the gap: an owner change in a published
+    action's own dependency must gate, exactly as it does in a workflow."""
+    repo = tmp_path / "repo"
+    _action_yml(
+        repo,
+        "name: Demo\nruns:\n  using: composite\n  steps:\n"
+        "    - uses: actions/setup-python@" + "a" * 40 + " # v5\n",
+    )
+    lock = tmp_path / "trust.lock"
+    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    assert run_verify(repo, trust_lock=str(lock), offline=True)[0] == 0
+
+    data = json.loads(lock.read_text())
+    data["actions"]["actions/setup-python"]["owner"] = "attacker"
+    lock.write_text(json.dumps(data))
+
+    code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
+    assert code == 1, "a takeover in action.yml must gate"
+    rules = [r["ruleId"] for r in doc["runs"][0]["results"]]
+    assert "tridelphi-verify/signer-owner-changed" in rules
+
+
+def test_composite_actions_under_dot_github_are_scanned(tmp_path):
+    repo = tmp_path / "repo"
+    d = repo / ".github" / "actions" / "helper"
+    d.mkdir(parents=True)
+    (d / "action.yml").write_text(
+        "name: Helper\nruns:\n  using: composite\n  steps:\n"
+        "    - uses: actions/checkout@" + "c" * 40 + " # v4\n",
+        encoding="utf-8",
+    )
+    refs = enumerate_uses(repo)
+    assert [r.slug for r in refs] == ["actions/checkout"]
+    assert refs[0].workflow == ".github/actions/helper/action.yml"
+
+
+def test_a_repo_with_no_workflows_but_an_action_is_still_covered(tmp_path):
+    """The old early-return bailed out when .github/workflows was missing,
+    which silently skipped a pure action repository entirely."""
+    repo = tmp_path / "repo"
+    _action_yml(
+        repo,
+        "name: Demo\nruns:\n  using: composite\n  steps:\n"
+        "    - uses: actions/checkout@" + "d" * 40 + " # v4\n",
+    )
+    assert not (repo / ".github" / "workflows").exists()
+    assert [r.slug for r in enumerate_uses(repo)] == ["actions/checkout"]

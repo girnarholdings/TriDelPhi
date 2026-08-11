@@ -393,7 +393,10 @@ which tools changed and offers the same one-click checkbox, which re-locks and
 re-scans for you.
 
 The **trust-lock** (`verify_cmd.py`) records the resolved owner and pinned SHA of
-every third-party `uses:`. On a later run, an action whose SHA changed *under the
+every third-party `uses:` you consume — in your **workflows** and in any **action
+definition** you publish (`action.yml`, `.github/actions/*/action.yml`), because a
+composite action ships its dependencies to everyone who uses it. On a later run,
+an action whose SHA changed *under the
 same ref* — or whose owner changed (a repo transfer) — is an **error**. This is
 the case SHA-pinning cannot see: pinning defeats tag *mutation*, but a hijacked or
 transferred upstream repo (the **tj-actions class**) looks like a legitimate new
