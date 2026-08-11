@@ -392,6 +392,19 @@ On a pull request you never have to remember the command: TriDelPhi's comment sa
 which tools changed and offers the same one-click checkbox, which re-locks and
 re-scans for you.
 
+> **Pinning an annotated tag — the trap.** `uses: owner/repo@<sha>` must name a
+> **commit**. For an *annotated* tag, `refs/tags/v1.2.3` is the tag **object**, a
+> different SHA from the commit it wraps, and pinning it can fail to resolve at
+> run time. `git ls-remote --tags --refs` hides the difference, because `--refs`
+> strips exactly the peeled entry that reveals it. Always dereference:
+>
+> ```console
+> git ls-remote https://github.com/OWNER/REPO 'refs/tags/vX.Y.Z^{}'   # the commit
+> ```
+>
+> If `^{}` returns nothing the tag is lightweight and the plain ref is already the
+> commit. We shipped a tag-object pin this way once; Dependabot caught it.
+
 The **trust-lock** (`verify_cmd.py`) records the resolved owner and pinned SHA of
 every third-party `uses:` you consume — in your **workflows** and in any **action
 definition** you publish (`action.yml`, `.github/actions/*/action.yml`), because a
