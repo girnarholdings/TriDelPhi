@@ -151,3 +151,94 @@ the Security tab, never fails the build). `privatize` is deliberately not in the
 *Not published to the GitHub Marketplace yet.*
 
 ---
+
+---
+
+# Publishing to PyPI
+
+`pipx install tridelphi` is the install path the README, the website and every
+generated fix-bot workflow tell people to use, so until the package exists on
+PyPI those instructions are aspirational — the downstream fix bot in particular
+cannot install itself. This section closes that gap.
+
+## How it publishes: Trusted Publishing, no token
+
+`.github/workflows/publish.yml` uploads via **PyPI Trusted Publishing (OIDC)**.
+There is no API token in this repository and there should never be one: PyPI is
+configured to trust *this workflow in this repository*, and mints a short-lived
+credential for a single upload. Nothing long-lived exists to leak, and a stolen
+repository secret cannot be replayed because there is no secret.
+
+The workflow also gates the release on TriDelPhi's own scan and trust-lock, and
+verifies the built wheel runs from **outside** the checkout — the only way to
+catch the vendored SARIF schema or the rule tables failing to ship.
+
+## 1. One-time setup on PyPI (a human, ~2 minutes)
+
+This cannot be done from a workflow. While the project does not exist on PyPI
+yet, register it as a **pending publisher**:
+
+1. Sign in to PyPI and open <https://pypi.org/manage/account/publishing/>.
+2. Under "Add a new pending publisher", fill in exactly:
+
+   | Field | Value |
+   |---|---|
+   | PyPI project name | `tridelphi` |
+   | Owner | `girnarholdings` |
+   | Repository name | `TriDelPhi` |
+   | Workflow name | `publish.yml` |
+   | Environment name | `pypi` |
+
+3. Save. The first successful publish creates the project and converts the
+   pending publisher into a normal one.
+
+The name `tridelphi` was unclaimed at the time of writing; if that has changed,
+the project name must be settled before the first upload.
+
+Optional but recommended: in the repository's **Settings → Environments**, add a
+required reviewer to the `pypi` environment. Every publish then waits for a
+human click, which is a cheap brake on an automated release.
+
+## 2. Dry run (safe, uploads nothing)
+
+Actions → **Publish to PyPI** → *Run workflow*. On `workflow_dispatch` the
+publish job is skipped by its own `if:`, so this only builds, runs the gate, and
+validates the distributions. Do this once before the first real release.
+
+## 3. Publish
+
+Publishing a **GitHub Release** triggers the upload. Using the v3.1.0 release
+already described above:
+
+```bash
+# tags first (see section 1 of this document), then:
+gh release create v3.1.0 --title "TriDelPhi v3.1.0" --notes-file <notes>
+```
+
+or click **Publish release** on the draft. The workflow builds, gates, uploads,
+and attaches PEP 740 attestations signed with the same OIDC identity, so a
+consumer can verify the files on PyPI came from this workflow.
+
+If the trusted publisher is not configured yet, the publish step fails with
+*"not a trusted publisher"* and **nothing is uploaded** — a safe failure, not a
+half-finished release.
+
+## 4. After the first publish
+
+Confirm the install path the docs promise actually works:
+
+```bash
+pipx install tridelphi && tridelphi --version
+```
+
+At that point the generated fix-bot workflow (`tridelphi init`) becomes
+functional in downstream repositories: its `pipx install tridelphi` step can
+finally resolve. Until then, downstream fix bots fail at install — this repo's
+own copy sidesteps that by installing from its checkout.
+
+## Version numbers
+
+The Python package version (`pyproject.toml`, `tridelphi/__init__.py`) is a
+**separate** namespace from the Action tags: package `0.2.0` ships alongside
+Action `v3.1.0`. Bump the package version for a PyPI release; PyPI refuses to
+overwrite an existing version, so a re-release always needs a new number.
