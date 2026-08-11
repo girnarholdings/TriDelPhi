@@ -257,13 +257,19 @@ jobs:
         if: steps.auth.outputs.ok == 'true'
         run: pipx install tridelphi
 
-      - name: Switch to the pull request branch (same-repo only)
+      - name: Switch to the pull request branch (open, same-repo only)
         id: pr
         if: steps.auth.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.issue.number }}
         run: |
+          state=$(gh pr view "$PR_NUMBER" --json state -q .state)
+          if [ "$state" != "OPEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Pull request is $state — nothing to fix on a closed branch." >&2
+            exit 0
+          fi
           cross=$(gh pr view "$PR_NUMBER" --json isCrossRepository -q .isCrossRepository)
           if [ "$cross" = "true" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -276,12 +282,15 @@ jobs:
       - name: Apply the automatic fixes (each verified or rolled back)
         if: steps.pr.outputs.skip == 'false'
         id: apply
+        # The log lives OUTSIDE the working tree ($RUNNER_TEMP): a log inside it
+        # made `git status` below report a change on every run, so the bot
+        # committed its own log and reported "fixes applied" when nothing was.
         run: |
-          tridelphi fix --apply > fix-log.txt 2>&1 || true
-          cat fix-log.txt
+          tridelphi fix --apply > "$RUNNER_TEMP/fix-log.txt" 2>&1 || true
+          cat "$RUNNER_TEMP/fix-log.txt"
           {
             echo 'log<<TRIDELPHI_EOF'
-            cat fix-log.txt
+            cat "$RUNNER_TEMP/fix-log.txt"
             echo TRIDELPHI_EOF
           } >> "$GITHUB_OUTPUT"
 
