@@ -376,7 +376,21 @@ claims to be?*
 tridelphi verify --write-trust-lock   # once: record each action's owner + pinned SHA
 git add .tridelphi/trust.lock          # commit the pawl
 tridelphi verify .                     # from now on, a changed signer/SHA fails the build
+tridelphi verify . --relock            # after an intentional bump: re-record and go green
 ```
+
+**When you *meant* to update a tool.** A Dependabot bump (or your own) trips the
+pawl by design — it cannot tell a wanted update from a swap. `--relock` is the
+on-ramp back to green: it re-records the pins that moved and leaves the pawl armed
+on the **new** identity. It **refuses**, writing nothing at all, if an action
+changed *owner* — a repo transfer and a takeover look identical from here, so that
+one needs a human (confirm, then `--write-trust-lock` deliberately). It also
+refuses if one action is pinned to two different versions across your workflows,
+naming both spots, rather than "succeeding" into a state that stays red.
+
+On a pull request you never have to remember the command: TriDelPhi's comment says
+which tools changed and offers the same one-click checkbox, which re-locks and
+re-scans for you.
 
 The **trust-lock** (`verify_cmd.py`) records the resolved owner and pinned SHA of
 every third-party `uses:`. On a later run, an action whose SHA changed *under the

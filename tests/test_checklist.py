@@ -325,3 +325,34 @@ def test_cli_checklist_end_to_end(repo_root):
     assert "NOT YET SAFE" in result.stdout
     # stdout stays clean of the machine formats
     assert "sarif" not in result.stdout.lower()
+
+
+def test_swapped_tool_pins_get_an_explained_path_back_to_green(repo_root):
+    """A dependency bot's bump trips the trust pawl. The comment must say what
+    happened AND how a legitimate update gets merged — a red check with no
+    on-ramp is the dead end this copy exists to prevent."""
+    from tridelphi.api import analyze
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / CLEAN)
+    external = {
+        "trust": ExternalStatus(
+            ran=True,
+            counts={"critical": 2, "warning": 0, "note": 0},
+            items=[
+                ("critical", "ci.yml:7", "actions/checkout was locked to abc123… but"),
+                ("critical", "ci.yml:9", "actions/setup-node was locked to def456… but"),
+            ],
+        ),
+    }
+    md = render_checklist_markdown(
+        result, repo_label="demo", files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned, fail_on="critical", external=external,
+    )
+    assert "2 pinned tools changed in this pull request" in md
+    assert "Dependabot" in md, "name the usual cause in the user's own words"
+    # the one-click path is offered, and described as re-locking (not just 'fixes')
+    assert "- [ ] <!--tridelphi-fix-->" in md
+    assert "updates the trust lock" in md
+    # and the honest warning stays attached
+    assert "didn't expect a tool to change" in md

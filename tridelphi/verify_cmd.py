@@ -243,6 +243,71 @@ def _write_lock(path: Path, refs: list[ActionRef]) -> int:
     return len(actions)
 
 
+def _relock(
+    path: Path, refs: list[ActionRef], lock: dict[str, dict[str, str]]
+) -> tuple[int, list[str], list[str]]:
+    """Re-lock the pins that moved, *without* blessing a change of hands.
+
+    The pawl fires on any pin that is not what was recorded. Usually that is an
+    intentional update — a dependency bot, or the maintainer — and the honest
+    on-ramp back to green is to re-verify and re-record. But the one shape the
+    lock exists to catch is a change of *owner*: a repo transfer or takeover
+    looks exactly like a routine bump, and no amount of re-locking makes that
+    safe to wave through. So an owner change refuses the whole operation and
+    writes nothing — a partial re-lock while a takeover signal is live would
+    bless the rest of the file under the same click.
+
+    Returns ``(written, changed, refused, takeover)``; ``written`` is 0 when
+    refused, and ``takeover`` distinguishes the change-of-owner refusal (which
+    is a security signal) from a merely unrepresentable pin split.
+    """
+    owner_changes = [
+        f"{ref.slug}: locked under owner '{lock[ref.lock_key]['owner']}' but now "
+        f"resolves to '{ref.owner}'"
+        for ref in refs
+        if (entry := lock.get(ref.lock_key)) is not None
+        and entry["owner"].lower() != ref.owner.lower()
+    ]
+    refused = list(owner_changes)
+
+    # One action pinned to two different SHAs cannot be represented in the lock
+    # (one entry per slug), so re-locking it would report success and leave the
+    # gate red — the worst outcome: a green message over a broken state. Name
+    # the split instead, with both pins, so it can actually be resolved.
+    pins: dict[str, dict[str, list[str]]] = {}
+    for ref in refs:
+        pins.setdefault(ref.lock_key, {}).setdefault(ref.pinned_sha or ref.ref, []).append(
+            f"{ref.workflow}:{ref.line}"
+        )
+    for key, by_sha in sorted(pins.items()):
+        if len(by_sha) > 1:
+            spread = "; ".join(
+                f"{sha[:12]}… at {', '.join(sorted(where))}" for sha, where in sorted(by_sha.items())
+            )
+            refused.append(
+                f"{key} is pinned to {len(by_sha)} different versions ({spread}). "
+                "Pin it to one, then re-lock."
+            )
+    if refused:
+        return 0, [], sorted(set(refused)), bool(owner_changes)
+
+    changed: list[str] = []
+    seen: set[str] = set()
+    for ref in sorted(refs, key=lambda r: r.lock_key):
+        if ref.lock_key in seen:
+            continue
+        seen.add(ref.lock_key)
+        current = ref.pinned_sha or ref.ref
+        entry = lock.get(ref.lock_key)
+        if entry is None:
+            changed.append(f"{ref.slug}: newly locked at {current[:12]}…")
+        elif entry["sha"] != current:
+            changed.append(f"{ref.slug}: {entry['sha'][:12]}… → {current[:12]}…")
+    if not changed:
+        return 0, [], [], False
+    return _write_lock(path, refs), changed, [], False
+
+
 @dataclass(frozen=True)
 class VerifyFinding:
     level: str  # "error" | "note"
@@ -405,6 +470,7 @@ def run_verify(
     *,
     trust_lock: str | None = None,
     write_lock: bool = False,
+    relock: bool = False,
     offline: bool = False,
     fail_on: str = "critical",
     tool_version: str = "0",
@@ -430,6 +496,37 @@ def run_verify(
     if write_lock:
         count = _write_lock(lock_path, refs)
         print(f"wrote {count} action identit{'y' if count == 1 else 'ies'} to {lock_path}", file=out)
+        return 0, None
+
+    if relock:
+        written, changed, refused, takeover = _relock(
+            lock_path, refs, _load_lock(lock_path)
+        )
+        if refused:
+            headline = (
+                "refusing to re-lock — an action changed hands, which is what this "
+                "lock exists to catch:"
+                if takeover
+                else "refusing to re-lock — the pins cannot be recorded as they stand:"
+            )
+            print(f"tridelphi: {headline}", file=err)
+            for line in refused:
+                print(f"  {line}", file=err)
+            if takeover:
+                print(
+                    "  Confirm the action is still the one you trust, then record it "
+                    "deliberately with `tridelphi verify --write-trust-lock`.",
+                    file=err,
+                )
+            return 1, None
+        if not changed:
+            print("trust-lock already matches every pinned action — nothing to re-lock", file=out)
+            return 0, None
+        print(f"re-locked {len(changed)} action identit{'y' if len(changed) == 1 else 'ies'}:",
+              file=out)
+        for line in changed:
+            print(f"  {line}", file=out)
+        print(f"wrote {written} entr{'y' if written == 1 else 'ies'} to {lock_path}", file=out)
         return 0, None
 
     lock = _load_lock(lock_path)
