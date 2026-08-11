@@ -54,9 +54,9 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
@@ -88,7 +88,7 @@ jobs:
       # review comments, duplicating the sticky comment below. One voice on the
       # PR; the Security tab tracks the default branch.
       - name: Upload to code scanning
-        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: tridelphi.sarif
@@ -104,7 +104,7 @@ jobs:
       #   - name: Audit shipped output
       #     run: tridelphi expose ./dist --sarif-file expose.sarif --fail-on none
       #   - name: Upload exposure audit
-      #     uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+      #     uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
       #     if: always() && github.event_name != 'pull_request'
       #     with:
       #       sarif_file: expose.sarif
@@ -246,10 +246,10 @@ jobs:
       # Default-branch checkout; the credential stays so the verified commit
       # can be pushed at the end — pushing is this workflow's entire purpose.
       - if: steps.auth.outputs.ok == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - if: steps.auth.outputs.ok == 'true'
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
@@ -400,7 +400,7 @@ Nothing else to configure. The scan reads only files on disk.
 # the one-click / wizard path — a composite-action workflow with chosen inputs
 # ---------------------------------------------------------------------------
 
-_CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4"
+_CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
 
 
 def render_action_workflow(
