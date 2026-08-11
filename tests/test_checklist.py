@@ -203,7 +203,9 @@ def test_markdown_checklist_is_inbox_ready(repo_root):
     assert "| Check | Result |" in md
     assert "<details>" in md and "</details>" in md
     assert "a.yml:3" in md
-    assert "tridelphi fix" in md  # the reply-to-fix invitation
+    # A lone lint advisory is not something the bot can fix, so the report says
+    # so rather than offering a button that would do nothing.
+    assert "Nothing here is a one-click fix" in md
     assert "```" not in md, "no monospace dumps"
 
 
@@ -241,8 +243,17 @@ def test_minor_items_summary_shows_outside_the_fold_for_email(repo_root):
     assert "vulnerable dependencies" in md
 
 
-def test_one_click_fix_checkbox_is_present_and_marked(repo_root):
-    md = _md_with_advisory(repo_root)
+def test_one_click_fix_checkbox_is_shaped_for_the_bot_to_recognise(repo_root):
+    """When the button IS offered it must carry the exact markers the fix bot's
+    `if:` matches: the HTML-comment marker and an unchecked task-list box."""
+    from tridelphi.api import analyze
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / MALICIOUS)
+    md = render_checklist_markdown(
+        result, repo_label="demo", files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned, fail_on="critical", external=None,
+    )
     assert "<!--tridelphi-fix-->" in md, "the fix bot's checkbox marker must be present"
     assert "- [ ] <!--tridelphi-fix-->" in md, "an unchecked task-list checkbox"
     assert "Fix these for me" in md
@@ -356,3 +367,56 @@ def test_swapped_tool_pins_get_an_explained_path_back_to_green(repo_root):
     assert "updates the trust lock" in md
     # and the honest warning stays attached
     assert "didn't expect a tool to change" in md
+
+
+def test_no_fix_button_when_nothing_is_bot_fixable(repo_root):
+    """The bot only edits workflow files. Offering "Fix these for me" against
+    dependency CVEs and Scorecard defaults spends a maintainer's click on a
+    no-op and teaches them the button lies — so it must not be offered."""
+    md = _md_with_advisory(repo_root)  # clean repo + osv/zizmor advisories only
+    assert "<!--tridelphi-fix-->" not in md, "no button when the bot can do nothing"
+    assert "Nothing here is a one-click fix" in md
+    # it says WHERE the work actually lives
+    assert "dependency" in md and "Settings" in md
+    # and does not leave a dangling empty emphasis
+    assert "__" not in md
+
+
+def test_fix_button_returns_when_a_swapped_pin_is_relockable(repo_root):
+    """The trust-lock re-record IS something the bot can do, so the button
+    comes back — this is the guard against over-correcting the fix above."""
+    from tridelphi.api import analyze
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / CLEAN)
+    external = {
+        "trust": ExternalStatus(
+            ran=True, counts={"critical": 1, "warning": 0, "note": 0},
+            items=[("critical", "ci.yml:7", "actions/checkout was locked to abc123… but")],
+        ),
+    }
+    md = render_checklist_markdown(
+        result, repo_label="demo", files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned, fail_on="critical", external=external,
+    )
+    assert "- [ ] <!--tridelphi-fix-->" in md
+    assert "updates the trust lock" in md
+    assert "Nothing here is a one-click fix" not in md
+
+
+def test_fix_button_appears_for_a_mechanically_fixable_finding(repo_root):
+    """A real Rule-of-Two critical with a mechanical remediation is exactly what
+    the bot exists for, so the button must still be offered there."""
+    from tridelphi.api import analyze
+    from tridelphi.apply import AUTO_FIXABLE
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / MALICIOUS)
+    fixable = [f for f in result.findings
+               if f.remediation is not None and f.remediation.kind in AUTO_FIXABLE]
+    assert fixable, "fixture must carry at least one auto-fixable finding"
+    md = render_checklist_markdown(
+        result, repo_label="demo", files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned, fail_on="critical", external=None,
+    )
+    assert "- [ ] <!--tridelphi-fix-->" in md
