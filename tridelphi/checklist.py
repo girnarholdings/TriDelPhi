@@ -612,7 +612,20 @@ def render_checklist_markdown(
             out.append(f"- {text}")
         out.append("")
 
-    if advisory_total or total_to_fix or trust_swaps:
+    # Only offer the button when there is something behind it. The bot's whole
+    # repertoire is the mechanical workflow-YAML fixers plus the trust-lock
+    # re-record; it cannot touch a dependency file or a GitHub setting. Offering
+    # "Fix these for me" against a list of CVEs and Scorecard defaults spends a
+    # maintainer's click on a no-op and teaches them the button is a lie.
+    from .apply import AUTO_FIXABLE
+
+    bot_fixable = sum(
+        1
+        for f in core_findings
+        if f.remediation is not None and f.remediation.kind in AUTO_FIXABLE
+    )
+
+    if bot_fixable or trust_swaps:
         # One-click fix: the maintainer just ticks this box. GitHub only lets
         # people with write access toggle a task list, and the fix bot re-verifies
         # that write access before it runs — so no drive-by stranger can trigger it.
@@ -632,8 +645,23 @@ def render_checklist_markdown(
         )
         out.append("")
         tail = "Prefer typing? Just reply `tridelphi fix` on this pull request."
-        if total_to_fix:
+        if total_to_fix > bot_fixable:
             tail += (" Anything left needs a human eye — run `tridelphi guard` locally "
                      "and it walks you through each one.")
+    elif advisory_total or total_to_fix:
+        # Say plainly that the button is missing on purpose, and where the work
+        # actually lives, so nobody waits for a bot that is never coming.
+        out.append(
+            "🔎 **Nothing here is a one-click fix** — and that is expected. "
+            "TriDelPhi's bot only edits workflow files; the items above live "
+            "somewhere it cannot reach: a dependency's own release (upgrade when "
+            "the fixed version exists upstream) or your repository's Settings "
+            "pages. Nothing above is an open door today."
+        )
+        out.append("")
+        tail = "Want to walk through what you *can* change? Run `tridelphi guard` locally."
+    else:
+        tail = ""
+    if tail:
         out.append(f"_{tail}_")
     return "\n".join(out) + "\n"
