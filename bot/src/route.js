@@ -64,6 +64,17 @@ export function route(eventType, payload, { allowlist } = {}) {
     const pr = payload.pull_request;
     if (!pr?.number) return ignore("pull_request has no number");
     if (pr.draft && payload.action !== "ready_for_review") return ignore("pull request is a draft");
+    // Fork pull requests are deliberately not dispatched. A dispatched run
+    // checks the pull request out and then runs the repository's own action
+    // from that same tree, so a fork's code would execute with the job's write
+    // scopes. The `pull_request` trigger already scans forks with a read-only
+    // token, which is where a stranger's code belongs. The workflow refuses
+    // these too; catching it here just avoids burning a run to be told so.
+    const headRepo = pr.head?.repo?.full_name;
+    const thisRepo = repository.full_name || `${owner}/${repo}`;
+    if (headRepo && headRepo.toLowerCase() !== String(thisRepo).toLowerCase()) {
+      return ignore("pull request comes from a fork; the pull_request trigger scans it read-only");
+    }
     return {
       act: "scan",
       reason: `pull_request.${payload.action}`,

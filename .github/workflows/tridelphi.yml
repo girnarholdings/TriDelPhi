@@ -72,12 +72,28 @@ jobs:
       # plane was told about. Fetch that pull request's head so the scan reads
       # the tree someone actually proposed — scanning the base branch instead
       # would report on code the pull request does not contain.
-      - name: Check out the dispatched pull request
+      #
+      # SAME-REPO ONLY, and this is load-bearing. The next step is `uses: ./`,
+      # which GitHub resolves out of the workspace at the moment it runs — so
+      # after this checkout the action definition, and the TriDelPhi it installs,
+      # come from the pull request. On a fork's pull request that is a stranger's
+      # code executing in a job holding attestations, security-events and
+      # pull-requests write: the pwn-request shape this project exists to flag.
+      # Restricting to branches of this repository keeps the code being run to
+      # people who already have write access, which is the same boundary the fix
+      # bot draws. Fork pull requests are still scanned — by the `pull_request`
+      # trigger, whose token is read-only, which is exactly where they belong.
+      - name: Check out the dispatched pull request (same-repo only)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.pr != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr }}
         run: |
+          cross=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json isCrossRepository -q .isCrossRepository)
+          if [ "$cross" = "true" ]; then
+            echo "::error::Pull request #${PR} comes from a fork. A dispatched run would execute its code with this job's write scopes, so it is refused here; the pull_request trigger scans it with a read-only token instead."
+            exit 1
+          fi
           echo "::group::Fetching pull request #${PR}"
           gh pr checkout "$PR" --repo "$GITHUB_REPOSITORY"
           echo "::endgroup::"

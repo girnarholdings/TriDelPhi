@@ -13,7 +13,7 @@ async function test(name, fn) {
 }
 
 const ALLOW = parseAllowlist("acme/demo");
-const repository = { name: "demo", owner: { login: "acme" }, default_branch: "main" };
+const repository = { name: "demo", full_name: "acme/demo", owner: { login: "acme" }, default_branch: "main" };
 
 // Merge nested overrides rather than replacing them: spreading `over` last
 // would clobber the whole pull_request object and silently drop its number,
@@ -89,6 +89,21 @@ await test("dispatches against the base branch, carrying the PR number", async (
   const d = route("pull_request", prEvent({ pull_request: { base: { ref: "release" } } }), { allowlist: ALLOW });
   assert.equal(d.ref, "release");
   assert.equal(d.pr, 7);
+});
+
+await test("refuses to dispatch a fork's pull request", async () => {
+  // A dispatched run checks the PR out and then runs `uses: ./` from that same
+  // tree, so a fork's code would execute with the job's write scopes. The
+  // pull_request trigger scans forks with a read-only token instead.
+  const fork = prEvent({ pull_request: { head: { repo: { full_name: "stranger/demo" } } } });
+  const d = route("pull_request", fork, { allowlist: ALLOW });
+  assert.equal(d.act, "ignore");
+  assert.match(d.reason, /fork/);
+});
+
+await test("still dispatches a branch of the same repository", async () => {
+  const own = prEvent({ pull_request: { head: { repo: { full_name: "acme/demo" } } } });
+  assert.equal(route("pull_request", own, { allowlist: ALLOW }).act, "scan");
 });
 
 // --- the fix path carries the same trust rule as the in-repo workflow ------
