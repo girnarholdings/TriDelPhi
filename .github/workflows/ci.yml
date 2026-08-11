@@ -186,9 +186,9 @@ jobs:
           node-version: '22'
       # The Worker's signature check is the bot's security boundary. Node runs
       # the same WebCrypto the Worker uses, so no wrangler is needed to gate it.
-      - name: Webhook signature tests
+      - name: Worker tests — signature check and routing rules
         working-directory: bot
-        run: node test/verify.test.mjs
+        run: npm test
 
   # A single check to require in branch protection. Adding a job above without
   # listing it here would silently widen what can merge, so it is spelled out.

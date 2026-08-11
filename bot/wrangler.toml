@@ -5,7 +5,11 @@
 #
 # Secrets (never commit these):
 #   npx wrangler secret put GITHUB_WEBHOOK_SECRET   # the webhook's shared secret
-#   npx wrangler secret put GITHUB_DISPATCH_TOKEN   # optional: PAT with actions:write
+#   npx wrangler secret put GITHUB_DISPATCH_TOKEN   # fine-grained token: Actions=write ONLY
+#
+# ALLOWED_REPOS is not a secret, so it lives in [vars] — but it IS the blast
+# radius. The Worker dispatches into these repositories and nowhere else, and
+# refuses to dispatch at all while the list is empty.
 name = "tridelphi-bot"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
@@ -13,3 +17,5 @@ compatibility_date = "2026-08-01"
 # For `wrangler dev` only. Real secrets go through `wrangler secret put`, not here.
 [vars]
 GITHUB_WEBHOOK_SECRET = "dev-secret-change-me"
+# Comma-separated "owner/repo". Empty means dispatch nothing (fail closed).
+ALLOWED_REPOS = ""

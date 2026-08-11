@@ -1,80 +1,116 @@
-// TriDelPhi bot — a Cloudflare Worker that is the front door for a hosted scan.
+// TriDelPhi bot — the control plane of a two-layer bot.
 //
-// What it IS: a GitHub webhook receiver. It verifies the delivery signature and,
-// on a pull-request event, triggers the repository's TriDelPhi workflow via the
-// Actions API (workflow_dispatch). It is the "deploy as a bot" glue.
+//   layer 1 (here)          Cloudflare Worker. Verifies the delivery signature,
+//                           decides whether an event deserves a run, and asks
+//                           GitHub Actions to do it. Touches no repository
+//                           content, ever.
 //
-// What it is NOT: the analyzer. TriDelPhi is a Python static analyzer and it
-// runs in GitHub Actions, where it can read the repo's files. The edge cannot do
-// that, and this Worker does not pretend to. Its job is authentication and
-// dispatch — deliberately small, so it is auditable in one sitting.
+//   layer 2 (Actions)       Runs the scan with the repository checked out.
+//                           TriDelPhi is a Python analyzer that shells out to
+//                           five pinned scanners; the edge cannot host that and
+//                           this Worker does not pretend otherwise.
+//
+// The division is the security property, not an implementation detail. The
+// public-facing half holds no `contents` access and can read nothing, so the
+// worst a compromised Worker can do is ask Actions to run the workflow that was
+// already going to run. The half that can read your code is not public-facing.
 //
 // Test locally without deploying:
-//   cd bot && npm install && npx wrangler dev
-//   node test/verify.test.mjs          # unit-test the signature check
+//   cd bot && npm install && npm test        # signature + routing, no network
+//   npx wrangler dev                          # serve at http://localhost:8787
 // See bot/README.md for a signed sample-payload curl.
 
+import { route, parseAllowlist } from "./route.js";
 import { verifySignature } from "./verify.js";
 
-const OK = (body, status = 200) => new Response(body, { status });
+// One line, one event, machine-greppable and human-readable. Webhook logs are
+// read at 3am during an incident: a JSON blob per delivery beats prose, and
+// beats a stack of unlabelled lines even harder.
+function log(fields) {
+  console.log(JSON.stringify({ at: "tridelphi-bot", ...fields }));
+}
+
+const text = (body, status) => new Response(body + "\n", { status, headers: { "content-type": "text/plain" } });
 
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
-      return OK("TriDelPhi bot: POST GitHub webhooks here.", 405);
+      return text("TriDelPhi bot. POST GitHub webhooks here.", 405);
     }
 
-    // Read the RAW body first — signature verification must see the exact bytes.
-    const rawBody = await request.text();
-    const signature = request.headers.get("x-hub-signature-256");
+    // The raw bytes, before anything parses them: the signature covers exactly
+    // these, and a re-serialized object would not reproduce them.
+    const raw = await request.text();
+    const delivery = request.headers.get("x-github-delivery") || "unknown";
+    const event = request.headers.get("x-github-event") || "";
 
-    const verified = await verifySignature(env.GITHUB_WEBHOOK_SECRET, rawBody, signature);
-    if (!verified) {
-      // A security bot that acts on unverified events is worse than no bot.
-      return OK("invalid or missing signature", 401);
+    if (!(await verifySignature(env.GITHUB_WEBHOOK_SECRET, raw, request.headers.get("x-hub-signature-256")))) {
+      // A security bot that acts on unverified events is worse than no bot, so
+      // this is the one rejection that is logged as a warning.
+      log({ delivery, event, result: "rejected", reason: "bad or missing signature" });
+      return text("invalid or missing signature", 401);
     }
 
-    const eventType = request.headers.get("x-github-event") || "";
     let payload;
     try {
-      payload = JSON.parse(rawBody);
+      payload = JSON.parse(raw);
     } catch {
-      return OK("bad JSON", 400);
+      log({ delivery, event, result: "rejected", reason: "body is not JSON" });
+      return text("bad JSON", 400);
     }
 
-    // Only act on pull-request activity that warrants a fresh scan.
-    if (eventType !== "pull_request" || !["opened", "synchronize", "reopened"].includes(payload.action)) {
-      return OK(`ignored: ${eventType}.${payload.action || ""}`, 202);
+    const decision = route(event, payload, { allowlist: parseAllowlist(env.ALLOWED_REPOS) });
+    if (decision.act === "ignore") {
+      log({ delivery, event, result: "ignored", reason: decision.reason });
+      return text(`ignored: ${decision.reason}`, 202);
     }
 
-    const repo = payload.repository;
-    if (!repo) return OK("no repository in payload", 400);
-
-    const dispatched = await dispatchScan(env, repo.owner.login, repo.name, payload.pull_request);
-    return OK(JSON.stringify(dispatched), dispatched.ok ? 200 : 502);
+    const target = `${decision.owner}/${decision.repo}#${decision.pr}`;
+    const outcome = await dispatch(env, decision);
+    log({ delivery, event, result: outcome.dispatched ? "dispatched" : "not dispatched",
+          act: decision.act, target, reason: outcome.reason });
+    return text(`${outcome.dispatched ? "dispatched" : "acknowledged"} ${decision.act} for ${target}: ${outcome.reason}`,
+                outcome.ok ? 200 : 502);
   },
 };
 
-// Trigger the repo's TriDelPhi workflow. The scan itself runs there, in Actions,
-// with the repository checked out. Requires a GitHub App / PAT with `actions:
-// write` on the target repo, stored as the GITHUB_DISPATCH_TOKEN secret.
-async function dispatchScan(env, owner, name, pull) {
+// Ask Actions to run. The workflow file is named per act, and the pull-request
+// number rides along as an input so the run can check that pull request out and
+// comment on it — dispatching the bare branch would scan the wrong tree and lose
+// the thread to reply on.
+//
+// The token needs exactly one permission: `actions: write` on the allowlisted
+// repositories. Not contents, not pull-requests — the run itself holds those,
+// scoped to the job that needs them. If this credential leaks, it can start a
+// workflow and nothing else.
+async function dispatch(env, decision) {
   if (!env.GITHUB_DISPATCH_TOKEN) {
-    // Still a useful, testable path: acknowledge without dispatching.
-    return { ok: true, dispatched: false, reason: "no dispatch token; acknowledged only", pr: pull?.number };
+    return { ok: true, dispatched: false, reason: "no GITHUB_DISPATCH_TOKEN; verified and acknowledged only" };
   }
 
-  const url = `https://api.github.com/repos/${owner}/${name}/actions/workflows/tridelphi.yml/dispatches`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.GITHUB_DISPATCH_TOKEN}`,
-      accept: "application/vnd.github+json",
-      "user-agent": "tridelphi-bot",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ ref: pull?.base?.ref || "main" }),
-  });
+  const workflow = decision.act === "fix" ? "tridelphi-fix.yml" : "tridelphi.yml";
+  const url = `https://api.github.com/repos/${decision.owner}/${decision.repo}/actions/workflows/${workflow}/dispatches`;
 
-  return { ok: resp.ok, dispatched: resp.ok, status: resp.status, pr: pull?.number };
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.GITHUB_DISPATCH_TOKEN}`,
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+        "user-agent": "tridelphi-bot",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ ref: decision.ref, inputs: { pr: String(decision.pr) } }),
+    });
+  } catch (err) {
+    return { ok: false, dispatched: false, reason: `dispatch request failed: ${err?.message || err}` };
+  }
+
+  if (response.ok) return { ok: true, dispatched: true, reason: `${workflow} on ${decision.ref}` };
+  // GitHub's error body is small and says useful things ("workflow does not have
+  // workflow_dispatch trigger"), so surface it rather than only the status.
+  const detail = (await response.text().catch(() => "")).slice(0, 200);
+  return { ok: false, dispatched: false, reason: `GitHub returned ${response.status}: ${detail}` };
 }

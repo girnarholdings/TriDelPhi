@@ -16,11 +16,27 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      pr:
+        description: >-
+          Pull request number to scan. Set by the Cloudflare control plane, which
+          knows the number but cannot make GitHub deliver a pull_request event.
+          Empty scans the dispatched ref as-is.
+        required: false
+        default: ""
 
 # Default deny at the workflow level; the one job that needs write scopes
 # declares them itself. A job added later starts with nothing.
 permissions:
   contents: read
+
+# Quieten the runner. pip's upgrade notice and Python's bytecode chatter say
+# nothing about this repository, and they are what a reader has to scroll past
+# to reach the finding they came for.
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_PYTHON_VERSION_WARNING: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
 
 concurrency:
   group: tridelphi-${{ github.ref }}
@@ -52,6 +68,21 @@ jobs:
         with:
           persist-credentials: false
 
+      # A dispatched run starts on a branch, not on the pull request the control
+      # plane was told about. Fetch that pull request's head so the scan reads
+      # the tree someone actually proposed — scanning the base branch instead
+      # would report on code the pull request does not contain.
+      - name: Check out the dispatched pull request
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+        run: |
+          echo "::group::Fetching pull request #${PR}"
+          gh pr checkout "$PR" --repo "$GITHUB_REPOSITORY"
+          echo "::endgroup::"
+          echo "Scanning pull request #${PR} at $(git rev-parse --short HEAD)"
+
       # The one-line install path users take, run against its own source, at
       # the FULL ladder: gitleaks, osv-scanner, zizmor, scorecard (local mode),
       # semgrep, the Rule-of-Two core, the L6 evidence statement, and the L7
@@ -62,6 +93,8 @@ jobs:
         uses: ./
         with:
           level: 7
+          # Empty on a pull_request event, where the context already knows.
+          pr-number: ${{ github.event_name == 'workflow_dispatch' && inputs.pr || '' }}
 
       # The action already failed the job; this adds the guard's Summary-tab
       # fix plan, same as the init-generated workflow. tridelphi is on PATH
