@@ -11,15 +11,15 @@
     },
     "actions/deploy-pages": {
       "owner": "actions",
-      "sha": "d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e"
+      "sha": "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"
     },
     "actions/github-script": {
       "owner": "actions",
-      "sha": "f28e40c7f34bde8b3046d885e986cb6290c5673b"
+      "sha": "3a2844b7e9c422d3c10d287c895573f7108da1b3"
     },
     "actions/setup-node": {
       "owner": "actions",
-      "sha": "49933ea5288caeca8642d1e84afbd3f7d6820020"
+      "sha": "820762786026740c76f36085b0efc47a31fe5020"
     },
     "actions/setup-python": {
       "owner": "actions",
@@ -27,11 +27,11 @@
     },
     "actions/upload-pages-artifact": {
       "owner": "actions",
-      "sha": "56afc609e74202658d3ffba0e8f6dda462b719fa"
+      "sha": "fc324d3547104276b827a68afc52ff2a11cc49c9"
     },
     "step-security/harden-runner": {
       "owner": "step-security",
-      "sha": "5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde"
+      "sha": "b09bb98e06d4d774595224525879c09bc6e98c40"
     }
   }
 }

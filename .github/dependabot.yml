@@ -12,10 +12,18 @@ updates:
   # The SHA-pinned actions in .github/workflows and action.yml. Dependabot
   # updates the pin and the version comment together, keeping the trust-lock
   # (L7) story reviewable: every bump is a diff naming old and new version.
+  # Grouped into ONE pull request on purpose. Ungrouped, a weekly sweep opened
+  # six separate action bumps, and every one of them tripped the L7 trust-lock
+  # independently — six reviews, six re-locks, six approvals, and a rebase
+  # treadmill as each merge invalidated the others. One pull request means one
+  # re-lock and one decision, which is also how a human would have done it.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
 
   # The Python package itself — and ONLY the four dependencies pyproject.toml
   # actually declares. The `allow` list is load-bearing, not decoration: the pip
@@ -37,9 +45,15 @@ updates:
       - dependency-name: jsonschema
       - dependency-name: pytest
       - dependency-name: ruff
+    groups:
+      python:
+        patterns: ["*"]
 
   # The webhook bot worker.
   - package-ecosystem: npm
     directory: /bot
     schedule:
       interval: weekly
+    groups:
+      bot:
+        patterns: ["*"]

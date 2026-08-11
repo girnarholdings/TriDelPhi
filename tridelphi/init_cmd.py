@@ -50,7 +50,7 @@ jobs:
       # Egress telemetry for this job itself (step-security/harden-runner,
       # Apache-2.0). Audit mode only observes; tighten to block once you have
       # a baseline of expected endpoints.
-      - uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
@@ -112,7 +112,7 @@ jobs:
 
       - name: Comment on the pull request
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           REPORT_MD: ${{ steps.scan.outputs.md }}
         with:
@@ -225,7 +225,7 @@ jobs:
       # bot's own edits (its periodic re-render of the comment).
       - name: Authorize the requester
         id: auth
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const p = context.payload;
@@ -239,7 +239,7 @@ jobs:
             if (!ok) core.notice(`${p.sender.login} lacks write access; ignoring.`);
 
       - if: steps.auth.outputs.ok == 'true'
-        uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
@@ -333,7 +333,7 @@ jobs:
 
       - name: Report back
         if: steps.pr.outputs.skip == 'false'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           FIX_LOG: ${{ steps.apply.outputs.log }}
           CHANGED: ${{ steps.push.outputs.changed }}
@@ -352,10 +352,20 @@ jobs:
               : changed
               ? '🔺 **TriDelPhi applied its verified fixes** — each change below was re-scanned before it was kept.'
               : '🔺 **TriDelPhi had nothing it could fix automatically** — the remaining items need a human decision (`tridelphi guard` locally walks you through them).';
+            // Tell them the last step. A push made by GITHUB_TOKEN leaves the
+            // re-run needing a maintainer's "Approve and run" on many repos, so
+            // the checks sit stale and it looks like nothing happened. Saying so
+            // is the difference between "done" and "why is it still red".
+            const nextStep = changed
+              ? "**One last step:** the checks re-run on the new commit, and GitHub may " +
+                "hold them for approval — if they look stuck, open the **Actions** tab and " +
+                "click **Approve and run**."
+              : null;
             const body = [
               headline, '',
               ...(relock.trim() ? ['**Tool pins**', '', '```', relock, '```', ''] : []),
               '```', log, '```',
+              ...(nextStep ? ['', nextStep] : []),
             ].join('\\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo,
