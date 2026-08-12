@@ -105,5 +105,9 @@ fi
 if [ -n "${GITHUB_PATH:-}" ]; then
   echo "$DEST" >> "$GITHUB_PATH"
 else
-  echo "add to PATH: $DEST"
+  # Outside Actions nothing puts these on PATH, and a scan that cannot find a
+  # scanner reports its rung as "not run" — which reads like a clean result
+  # rather than a missing tool. Print the line to paste, not just the path.
+  echo "These are not on your PATH yet. To use them:"
+  echo "    export PATH=\"$DEST:\$PATH\""
 fi
