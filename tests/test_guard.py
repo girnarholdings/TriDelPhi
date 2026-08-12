@@ -241,3 +241,75 @@ def test_guard_disable_choice_disables(tmp_path):
 
 def test_auto_fixable_covers_the_mechanical_kinds():
     assert {"env-indirect", "drop-untrusted-ref", "narrow-trigger"} == AUTO_FIXABLE
+
+
+# --- optional tooling: say what is missing, never fetch it silently ---------
+
+
+def _guard_tools(tmp_path, monkeypatch, *, present, answer="q\n", yes=False, scripts=True):
+    """Run guard in a scratch repo with a chosen set of tools 'installed'."""
+    import shutil as _shutil
+
+    from tridelphi import guard_cmd
+
+    repo = tmp_path / "repo"
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text(
+        "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
+    )
+    if scripts:
+        (repo / "scripts").mkdir()
+        for name in ("install-ladder.sh", "install-privatize.sh"):
+            (repo / "scripts" / name).write_text("#!/bin/sh\nexit 0\n")
+
+    monkeypatch.setattr(guard_cmd.shutil if hasattr(guard_cmd, "shutil") else _shutil,
+                        "which", lambda name: "/usr/bin/" + name if name in present else None)
+    out = io.StringIO()
+    guard_cmd.run_guard(str(repo), yes=yes, input_stream=io.StringIO(answer), out=out,
+                        err=io.StringIO())
+    return out.getvalue()
+
+
+def test_guard_names_the_tools_it_is_missing(tmp_path, monkeypatch):
+    out = _guard_tools(tmp_path, monkeypatch, present={"zizmor"})
+    assert "Optional tools not installed" in out
+    assert "gitleaks" in out and "semgrep" in out
+    assert "zizmor" not in out.split("Optional tools not installed")[1].split("\n\n")[0]
+
+
+def test_guard_is_silent_when_every_tool_is_present(tmp_path, monkeypatch):
+    present = {"gitleaks", "osv-scanner", "zizmor", "scorecard", "semgrep",
+               "javascript-obfuscator"}
+    out = _guard_tools(tmp_path, monkeypatch, present=present)
+    assert "Optional tools not installed" not in out
+
+
+def test_guard_never_installs_without_an_explicit_yes(tmp_path, monkeypatch):
+    """Declining must leave the machine untouched — and say what that costs."""
+    calls = []
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a) or None)
+    out = _guard_tools(tmp_path, monkeypatch, present={"zizmor"}, answer="n\n")
+    assert not calls, "declining must not run an installer"
+    assert "Left alone" in out
+
+
+def test_dash_y_does_not_authorise_downloading_binaries(tmp_path, monkeypatch):
+    """-y means 'apply fixes without asking'. Fetching and running binaries is a
+    different class of act and must not ride along on it."""
+    calls = []
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a) or None)
+    out = _guard_tools(tmp_path, monkeypatch, present=set(), yes=True)
+    assert not calls, "-y must never trigger an install"
+    assert "-y covers applying fixes, not downloading tools" in out
+
+
+def test_guard_does_not_offer_what_it_cannot_run(tmp_path, monkeypatch):
+    """The wheel does not ship scripts/, so the offer only appears where the
+    installers actually exist."""
+    out = _guard_tools(tmp_path, monkeypatch, present={"zizmor"}, scripts=False)
+    assert "Install them now?" not in out
+    assert "checksum-verified scripts" in out
