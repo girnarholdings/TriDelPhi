@@ -45,7 +45,20 @@ linux_amd64() { [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; }
 
 fetch_verified() { # url sha256 outfile
   local url="$1" sha="$2" out="$3"
-  curl -sSL --fail --retry 3 -o "$out" "$url"
+  # Three binaries come from GitHub's release CDN on every CI run, so a blip
+  # there fails the whole ladder. `--retry 3` alone gives up after about seven
+  # seconds (1s + 2s + 4s of backoff), which loses to any real outage — a run
+  # of four 503s is what sent this job red once. Six attempts stretches the
+  # budget past a minute, and --retry-all-errors covers connection resets and
+  # truncated bodies, which the default retry set ignores.
+  #
+  # Retrying is safe precisely because of the next line: whatever arrives is
+  # checked against a recorded digest before anything uses it, so patience here
+  # never trades away the guarantee.
+  curl -sSL --fail \
+    --retry 6 --retry-all-errors --retry-max-time 180 \
+    --connect-timeout 15 \
+    -o "$out" "$url"
   echo "${sha}  ${out}" | sha256sum -c - >/dev/null
 }
 
