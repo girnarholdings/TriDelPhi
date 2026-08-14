@@ -92,6 +92,34 @@ def test_dirsnapshot_reverts_on_exception_and_reraises(tmp_path):
     assert tmp_seen[0] is not None and not tmp_seen[0].exists(), "tempdir must be removed"
 
 
+def test_dirsnapshot_cleans_tempdir_when_enter_copy_fails(tmp_path, monkeypatch):
+    """If the copy inside `__enter__` raises, the `with` block is never entered
+    and `__exit__` never runs — so `__enter__` must clean its own mkdtemp or it
+    leaks a tempdir on every failed snapshot."""
+    import tridelphi.privatize as pv
+
+    target = tmp_path / "dist"
+    target.mkdir()
+    (target / "a.js").write_text("original", encoding="utf-8")
+
+    created: list[str] = []
+    real_mkdtemp = pv.tempfile.mkdtemp
+
+    def spy_mkdtemp(*a, **k):
+        d = real_mkdtemp(*a, **k)
+        created.append(d)
+        return d
+
+    monkeypatch.setattr(pv.tempfile, "mkdtemp", spy_mkdtemp)
+    monkeypatch.setattr(pv.shutil, "copytree", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(OSError), DirSnapshot(target):
+        pass  # unreachable — __enter__ raises
+
+    assert created, "mkdtemp should have been called"
+    assert not Path(created[0]).exists(), "the tempdir must be removed on enter failure"
+
+
 # ---------------------------------------------------------------------------
 # consent gate — never mutate without an explicit human yes
 # ---------------------------------------------------------------------------
@@ -146,6 +174,38 @@ def test_shipped_secret_refuses_obfuscation(tmp_path):
     assert (app / "dist/main.js").read_text() == before
     # And the full secret is never echoed in the refusal message.
     assert "AKIAIOSFODNN7EXAMPLE" not in out.getvalue()
+
+
+def _supabase_service_role_jwt() -> str:
+    """A structurally valid Supabase service_role key (a JWT whose payload sets
+    role=service_role). The signature is a placeholder — the interlock reads the
+    role claim, not the signature."""
+    import base64
+    import json
+
+    def seg(obj) -> str:
+        raw = json.dumps(obj, separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    header = seg({"alg": "HS256", "typ": "JWT"})
+    payload = seg({"role": "service_role", "iss": "supabase", "ref": "abcdefgh"})
+    return f"{header}.{payload}.c2lnbmF0dXJlX3BsYWNlaG9sZGVyX3ZhbHVl"
+
+
+def test_service_role_key_refuses_obfuscation(tmp_path):
+    """Regression: the interlock filtered on `rule == 'client-secret'` only, so a
+    Supabase service_role key — which bypasses Row Level Security and must never
+    ship — sailed straight through and got obfuscated. It must refuse."""
+    jwt = _supabase_service_role_jwt()
+    app = _app(tmp_path, {"dist/main.js": f'var supabase="{jwt}";'})
+    before = (app / "dist/main.js").read_text()
+    out = io.StringIO()
+    code = run_privatize(str(app), input_stream=io.StringIO("y\n"), out=out, err=out,
+                         obfuscate=_marker_obfuscate, run_cmd=_pass)
+    assert code == 2
+    assert "Refusing" in out.getvalue()
+    assert (app / "dist/main.js").read_text() == before
+    assert jwt not in out.getvalue()
 
 
 # ---------------------------------------------------------------------------

@@ -99,8 +99,17 @@ class DirSnapshot:
 
     def __enter__(self) -> DirSnapshot:
         self._tmp = Path(tempfile.mkdtemp(prefix="tridelphi-snap-"))
-        self._backup = self._tmp / self.target.name
-        shutil.copytree(self.target, self._backup, symlinks=True)
+        # If the copy fails (unreadable tree, disk full), `__exit__` never runs —
+        # the `with` block was never entered — so clean the tempdir here rather
+        # than leak it. `BaseException` also covers a KeyboardInterrupt mid-copy.
+        try:
+            self._backup = self._tmp / self.target.name
+            shutil.copytree(self.target, self._backup, symlinks=True)
+        except BaseException:
+            shutil.rmtree(self._tmp, ignore_errors=True)
+            self._tmp = None
+            self._backup = None
+            raise
         return self
 
     def commit(self) -> None:
@@ -206,6 +215,16 @@ def _resolve_output(root: Path, privatize_out: str | None) -> Path | None:
     return None
 
 
+# Every critical rule `_detect_maps_and_secrets` can emit that represents a
+# *shipped secret* — one obfuscation would hide from the owner, not an attacker.
+# Deliberately excludes `source-map-disclosure` (a disclosure, not a key to
+# rotate; privatize forces maps off in its own output) and the public-by-design
+# notes (`firebase-public-key`, `supabase-anon-key`, which are never critical).
+# `supabase-service-role` was the gap: a service_role JWT bypasses Row Level
+# Security, yet the old `client-secret`-only filter let it through the interlock.
+_INTERLOCK_SECRET_RULES = frozenset({"client-secret", "supabase-service-role"})
+
+
 def _shipped_secrets(root: Path, target: Path):
     """Category-A secret findings scoped to the obfuscation target — the interlock.
 
@@ -222,7 +241,7 @@ def _shipped_secrets(root: Path, target: Path):
         elif p.suffix in (".js", ".mjs", ".cjs"):
             surface.bundles.append(p)
     return [f for f in _detect_maps_and_secrets(root, surface)
-            if f.rule == "client-secret" and f.severity == "critical"]
+            if f.severity == "critical" and f.rule in _INTERLOCK_SECRET_RULES]
 
 
 def run_privatize(

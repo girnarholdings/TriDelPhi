@@ -106,6 +106,27 @@ def _sanitize(text: str, width: int = _ITEM_WIDTH) -> str:
     return flat if len(flat) <= width else flat[: width - 1] + "…"
 
 
+# The markdown checklist is posted verbatim as a PR comment (and mailed as the
+# notification), and GitHub renders it as HTML. A finding message, a path, or a
+# job id that a pull request author controls could otherwise inject a link, an
+# image beacon, an HTML tag, or a table break into that comment. `_sanitize`
+# already flattens and bounds the text; these two escape the markdown meaning.
+_MD_META = re.compile(r"([\\`*_{}\[\]<>|~])")
+
+
+def _md_escape(text: str) -> str:
+    """Backslash-escape the Markdown/HTML metacharacters in untrusted text so it
+    renders as the literal characters, never as markup, in the posted comment."""
+    return _MD_META.sub(r"\\\1", text)
+
+
+def _md_code(text: str) -> str:
+    """Wrap ``text`` in an inline-code span safely. Inside `` `…` `` every
+    character is literal *except* a backtick, which would end the span early —
+    so a backtick in an attacker-chosen path or job id is the one thing to drop."""
+    return "`" + text.replace("`", "") + "`"
+
+
 # Alias spam like "(also known as 'PYSEC-…', 'GHSA-…')" doubles the line
 # length and tells a lay reader nothing the primary id doesn't.
 _ALIASES = re.compile(r"\s*\(also known as [^)]*\)")
@@ -169,7 +190,9 @@ def _compact_wheres(wheres: list[str]) -> str:
     return " · ".join(parts)
 
 
-def _grouped(items: list[tuple[str, str, str]], *, hide_where: bool = False) -> list[str]:
+def _grouped(
+    items: list[tuple[str, str, str]], *, hide_where: bool = False, markdown: bool = False
+) -> list[str]:
     """Collapse the raw item list into lines a person wants to read.
 
     Raw tool output repeats itself: the same CVE listed twice, the same
@@ -184,7 +207,13 @@ def _grouped(items: list[tuple[str, str, str]], *, hide_where: bool = False) -> 
     ``hide_where`` drops locations entirely — used for repo-level rungs
     (scorecard) whose synthetic README.md anchor exists only for the SARIF
     upload contract and would read as noise here.
+
+    ``markdown`` escapes every untrusted field before it is composed into a
+    line, because the wrapped tools' messages and locations derive from pull
+    request file content and this output is posted as a PR comment. Grouping
+    keys off the raw text (so dedup is unchanged); only the emitted line escapes.
     """
+    esc = _md_escape if markdown else (lambda s: s)
     if hide_where:
         items = [(sev, "", msg) for sev, _w, msg in items]
     seen: set[tuple[str, str]] = set()
@@ -218,16 +247,17 @@ def _grouped(items: list[tuple[str, str, str]], *, hide_where: bool = False) -> 
             ids = osv[(where, pkg, version)]
             n = len(ids)
             flaw = "known flaw" if n == 1 else "known flaws"
-            lines.append(f"{pkg} {version} has {n} {flaw} ({', '.join(ids)}) — {where}")
+            joined_ids = ", ".join(esc(i) for i in ids)
+            lines.append(f"{esc(pkg)} {esc(version)} has {n} {flaw} ({joined_ids}) — {esc(where)}")
         else:
             message = key  # type: ignore[assignment]
             wheres = by_message[message]
             if not wheres:
-                lines.append(message)
+                lines.append(esc(message))
             elif len(wheres) == 1:
-                lines.append(f"{wheres[0]} — {message}")
+                lines.append(f"{esc(wheres[0])} — {esc(message)}")
             else:
-                lines.append(f"{message} — at {_compact_wheres(wheres)}")
+                lines.append(f"{esc(message)} — at {esc(_compact_wheres(wheres))}")
     return lines
 
 
@@ -515,7 +545,7 @@ def render_checklist_markdown(
         out.append("**Fix these first:**")
         for finding in actionable:
             caps = {h.capability for h in finding.hits if h.observed}
-            where = f"`{finding.primary_position.file}` job `{finding.context.job_id}`"
+            where = f"{_md_code(finding.primary_position.file)} job {_md_code(finding.context.job_id)}"
             fix = ""
             if finding.remediation is not None:
                 fix = _PLAIN_FIX.get(finding.remediation.strip, "remove one of the three powers")
@@ -564,7 +594,7 @@ def render_checklist_markdown(
         out.append("")
         for finding in advisory_core:
             caps = {h.capability for h in finding.hits if h.observed}
-            where = f"`{finding.primary_position.file}` job `{finding.context.job_id}`"
+            where = f"{_md_code(finding.primary_position.file)} job {_md_code(finding.context.job_id)}"
             fix = ""
             if finding.remediation is not None:
                 fix = _PLAIN_FIX.get(finding.remediation.strip, "remove one of the three powers")
@@ -575,6 +605,7 @@ def render_checklist_markdown(
             grouped = _grouped(
                 [it for it in st.items if it[0] != "note"],
                 hide_where=(name == "scorecard"),
+                markdown=True,
             )
             out.append(f"**{question.rstrip('?')} — {st.counts['warning']}**  ")
             out.append(f"_{gloss}_")
@@ -607,7 +638,7 @@ def render_checklist_markdown(
             "didn't expect a tool to change, don't merge until you know why."
         )
         for text in _grouped(
-            [it for it in trust_st.items if it[0] == "critical"]
+            [it for it in trust_st.items if it[0] == "critical"], markdown=True
         )[:_MAX_ITEMS]:
             out.append(f"- {text}")
         out.append("")
