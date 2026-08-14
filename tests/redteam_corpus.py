@@ -312,6 +312,79 @@ def _cross_job_cases() -> Iterator[Case]:
     )
 
 
+def _cross_job_artifact_cases() -> Iterator[Case]:
+    """Taint that crosses jobs through a run-scoped artifact, not a job output.
+    The `build` job checks out pull request code and uploads it as an artifact;
+    the privileged `deploy` job downloads and runs it. Neither job is a finding
+    read alone — the artifact is the channel per-file analysis cannot see."""
+    yield Case(
+        name="cross-job-artifact(upload->download->run)",
+        expect_rule="cross-job-untrusted-flow",
+        workflow=f"""
+        on:
+          pull_request_target:
+            types: [opened, synchronize]
+        jobs:
+          build:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v4
+                with:
+                  ref: ${{{{ github.event.pull_request.head.sha }}}}
+              - run: npm ci && npm run build
+              - uses: actions/upload-artifact@v4
+                with:
+                  name: bundle
+                  path: dist
+          deploy:
+            needs: build
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - uses: actions/download-artifact@v4
+                with:
+                  name: bundle
+              - run: node dist/index.js
+                env:
+                  NPM_TOKEN: {_SECRET}
+        """,
+    )
+    # Control: the SAME two-job shape, but `build` checks out only the trusted
+    # base (no untrusted ref), so the artifact carries no attacker code.
+    yield Case(
+        name="control:cross-job-artifact-trusted-build",
+        kind="control",
+        workflow=f"""
+        on:
+          push:
+            branches: [main]
+        jobs:
+          build:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v4
+              - run: npm ci && npm run build
+              - uses: actions/upload-artifact@v4
+                with:
+                  name: bundle
+                  path: dist
+          deploy:
+            needs: build
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - uses: actions/download-artifact@v4
+                with:
+                  name: bundle
+              - run: node dist/index.js
+                env:
+                  NPM_TOKEN: {_SECRET}
+        """,
+    )
+
+
 def _workflow_run_cases() -> Iterator[Case]:
     yield Case(
         name="workflow-run-upstream-execution(download-artifact)",
@@ -410,6 +483,122 @@ def _weak_actor_guard_cases() -> Iterator[Case]:
                   - run: echo handled
             """,
         )
+
+
+def _run_checkout_cases() -> Iterator[Case]:
+    """PR code pulled into the tree by a `run:` step rather than
+    actions/checkout's `ref:` — the pwn shape that hides in a shell command. On
+    pull_request_target the default checkout is the safe base, so the fetch is a
+    deceptive re-introduction of attacker code beside a write token + secret."""
+    for label, fetch in (
+        ("gh-pr-checkout", "gh pr checkout ${{ github.event.number }}"),
+        ("git-fetch-head",
+         "git fetch origin pull/${{ github.event.number }}/head:pr && git checkout pr"),
+        ("git-fetch-merge", "git fetch origin +refs/pull/${{ github.event.number }}/merge"),
+    ):
+        yield Case(
+            name=f"run-checkout[{label}]",
+            expect_rule="untrusted-checkout-privileged-egress",
+            workflow=f"""
+            on:
+              pull_request_target:
+                types: [opened, synchronize]
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                permissions:
+                  contents: write
+                steps:
+                  - uses: actions/checkout@v4
+                  - run: |
+                      {fetch}
+                      ./build.sh
+                    env:
+                      NPM_TOKEN: {_SECRET}
+            """,
+        )
+    # Control: the SAME fetch, but the job first refuses fork PRs. Now it only
+    # pulls same-repo (write-access-authored) code, so it must stay clean — the
+    # exact pattern the fix bot uses.
+    yield Case(
+        name="control:run-checkout-fork-guarded",
+        kind="control",
+        workflow=f"""
+        on:
+          issue_comment:
+            types: [created]
+        jobs:
+          fix:
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - run: |
+                  cross=$(gh pr view "$PR" --json isCrossRepository -q .isCrossRepository)
+                  if [ "$cross" = "true" ]; then exit 0; fi
+                  gh pr checkout "$PR"
+                env:
+                  PR: ${{{{ github.event.issue.number }}}}
+                  NPM_TOKEN: {_SECRET}
+        """,
+    )
+
+
+def _gate_bypass_cases() -> Iterator[Case]:
+    """A strong-looking `author_association` gate that is actually defeated, so
+    the U-suppression must NOT fire and the agent-prompt-injection critical must
+    stand. Both shapes were real bypasses of the old substring heuristic."""
+    _ASSOC = "contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association)"
+    for label, guard in (
+        # `||` alternative that is true for every event → gate is open.
+        ("or-open", f"{_ASSOC} || github.event.action == 'created'"),
+        # the literal inverse of a gate → fires only for NON-trusted authors.
+        ("inverted", f"{_ASSOC} == false"),
+    ):
+        yield Case(
+            name=f"gate-bypass[{label}]",
+            expect_rule="agent-prompt-injection",
+            workflow=f"""
+            on:
+              issue_comment:
+                types: [created]
+            jobs:
+              assist:
+                runs-on: ubuntu-latest
+                if: {guard}
+                permissions:
+                  contents: write
+                steps:
+                  - uses: anthropics/claude-code-action@v1
+                    with:
+                      prompt: "Handle this: ${{{{ github.event.comment.body }}}}"
+                    env:
+                      ANTHROPIC_API_KEY: {_SECRET}
+            """,
+        )
+    # Control: the CANONICAL gate the tool itself recommends must stay clean —
+    # the fix must not over-correct into "no gate is ever accepted".
+    yield Case(
+        name="control:strong-association-gate",
+        kind="control",
+        workflow=f"""
+        on:
+          issue_comment:
+            types: [created]
+        jobs:
+          assist:
+            runs-on: ubuntu-latest
+            if: {_ASSOC} && github.event.action == 'created'
+            permissions:
+              contents: write
+            steps:
+              - uses: anthropics/claude-code-action@v1
+                with:
+                  prompt: "Handle this: ${{{{ github.event.comment.body }}}}"
+                env:
+                  ANTHROPIC_API_KEY: {_SECRET}
+        """,
+    )
 
 
 def _self_hosted_cases() -> Iterator[Case]:
@@ -576,9 +765,12 @@ _GENERATORS = (
     _hook_execution_cases,
     _mcp_cases,
     _cross_job_cases,
+    _cross_job_artifact_cases,
     _workflow_run_cases,
     _env_file_injection_cases,
     _weak_actor_guard_cases,
+    _gate_bypass_cases,
+    _run_checkout_cases,
     _overbroad_cases,
     _self_hosted_cases,
     _control_cases,
