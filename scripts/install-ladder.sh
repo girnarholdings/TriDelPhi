@@ -30,6 +30,20 @@ set -euo pipefail
 LEVEL="${1:-3}"
 DEST="${2:-${RUNNER_TEMP:-/tmp}/tridelphi-tools}"
 
+# Validate the level before it reaches a `[ "$LEVEL" -ge N ]` test. A
+# non-numeric value would otherwise either abort the script with a cryptic
+# "integer expression expected" under `set -e`, or — if it carried test
+# operators — change which comparisons fire. Accept only a bare 0-7.
+case "$LEVEL" in
+  ''|*[!0-9]*)
+    echo "install-ladder.sh: level must be an integer 0-7, got '$LEVEL'" >&2
+    exit 2 ;;
+esac
+if [ "$LEVEL" -gt 7 ]; then
+  echo "install-ladder.sh: level must be between 0 and 7, got '$LEVEL'" >&2
+  exit 2
+fi
+
 GITLEAKS_VERSION=8.28.0
 GITLEAKS_SHA256=a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
 OSV_SCANNER_VERSION=2.2.4

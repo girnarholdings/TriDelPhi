@@ -60,6 +60,22 @@ __all__ = [
     "verify_to_sarif",
 ]
 
+# A workflow file and the trust-lock are both read whole into memory. They are
+# small by construction, so a file past this cap is not a real one — reading it
+# would only serve a memory-exhaustion attempt. 8 MiB matches the exposure
+# reader's cap; over it we skip the file rather than swallow it.
+_MAX_READ_BYTES = 8 * 1024 * 1024
+
+
+def _read_text_bounded(path: Path) -> str | None:
+    """Read ``path`` as UTF-8, but refuse anything larger than ``_MAX_READ_BYTES``."""
+    try:
+        if path.stat().st_size > _MAX_READ_BYTES:
+            return None
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
 TRUST_LOCK_PATH = ".tridelphi/trust.lock"
 _VERIFY_DOCS = "https://girnarholdings.github.io/TriDelPhi/#l7"
 
@@ -202,9 +218,8 @@ def enumerate_uses(repo_root: str | Path) -> list[ActionRef]:
     root = Path(repo_root)
     refs: list[ActionRef] = []
     for source in _uses_sources(root):
-        try:
-            text = source.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        text = _read_text_bounded(source)
+        if text is None:
             continue
         rel = source.relative_to(root).as_posix()
         lines = text.splitlines()
@@ -226,8 +241,11 @@ def enumerate_uses(repo_root: str | Path) -> list[ActionRef]:
 def _load_lock(path: Path) -> dict[str, dict[str, str]]:
     if not path.is_file():
         return {}
+    text = _read_text_bounded(path)
+    if text is None:
+        return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        data = json.loads(text)
     except ValueError:
         return {}
     entries = data.get("actions") if isinstance(data, dict) else None

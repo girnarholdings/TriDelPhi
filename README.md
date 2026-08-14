@@ -653,7 +653,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: girnarholdings/TriDelPhi@v1   # the whole ladder, one line
+      - uses: girnarholdings/TriDelPhi@v3   # the whole ladder, one line
         with: { level: '3' }
 ```
 
@@ -764,7 +764,7 @@ Security-sensitive reports: please use **private vulnerability reporting**
 
 ```console
 pip install -e ".[dev]"
-pytest -q                                # 337 tests
+pytest -q                                # 670+ tests
 ruff check tridelphi/ tests/ scripts/    # lint
 python scripts/redteam.py --show-missed  # adversarial sweep (must stay 100%)
 python -m build --wheel                  # packaging

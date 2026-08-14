@@ -128,7 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
             "4 +repo posture (scorecard), 5 +code SAST (semgrep), 6 +attest "
             "(writes the evidence statement), 7 +trust (verify consumed actions "
             "against the trust-lock). Rungs are cumulative; core always runs. "
-            "See --credits."
+            "Omit --level to run the core Rule-of-Two scan only (no external "
+            "tools) — the CLI has no default rung; the GitHub Action defaults to "
+            "level 3. See --credits."
         ),
     )
     parser.add_argument(

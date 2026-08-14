@@ -290,6 +290,30 @@ def test_privatize_unreachable_from_cli_yes(tmp_path, monkeypatch):
     assert (app / "dist/main.js").read_text() == before
 
 
+def test_obfuscator_in_a_world_writable_dir_is_rejected(tmp_path):
+    """privatize executes whatever `_find_obfuscator` returns, so a binary in a
+    group/world-writable directory — where anyone could replace it — must be
+    refused even though the file exists and is executable."""
+    import os
+
+    from tridelphi.privatize import _find_obfuscator, _safe_from_tampering
+
+    safe_dir = tmp_path / "safe" / "node_modules" / ".bin"
+    safe_dir.mkdir(parents=True)
+    safe_bin = safe_dir / "javascript-obfuscator"
+    safe_bin.write_text("#!/bin/sh\n")
+    safe_bin.chmod(0o755)
+    assert _safe_from_tampering(safe_bin)
+    assert _find_obfuscator(tmp_path / "safe") == [str(safe_bin)]
+
+    # Same binary, but its directory is world-writable → tamperable → rejected.
+    os.chmod(safe_dir, 0o757)
+    assert not _safe_from_tampering(safe_bin)
+    # ...and now discovery falls through to whatever is (safely) on PATH, or None.
+    got = _find_obfuscator(tmp_path / "safe")
+    assert got is None or got != [str(safe_bin)]
+
+
 # ---------------------------------------------------------------------------
 # live tier — the real javascript-obfuscator, if installed
 # ---------------------------------------------------------------------------
