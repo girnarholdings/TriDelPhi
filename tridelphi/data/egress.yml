@@ -91,3 +91,14 @@ upstream_consumers:
   - actions/download-artifact
   - dawidd6/action-download-artifact
   - gh run download
+
+# Same-workflow, job-to-job artifact taint. An upstream job that checks out
+# pull request code and then uploads an artifact hands that artifact — which
+# may carry attacker-authored files — to any downstream `needs:` job that
+# downloads one. Run-scoped artifacts make this a real channel distinct from
+# the workflow_run (cross-run) case above.
+artifact_producers:
+  - actions/upload-artifact
+artifact_consumers:
+  - actions/download-artifact
+  - dawidd6/action-download-artifact

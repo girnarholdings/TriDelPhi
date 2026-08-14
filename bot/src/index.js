@@ -74,10 +74,12 @@ export default {
   },
 };
 
-// Ask Actions to run. The workflow file is named per act, and the pull-request
-// number rides along as an input so the run can check that pull request out and
-// comment on it — dispatching the bare branch would scan the wrong tree and lose
-// the thread to reply on.
+// Ask Actions to run the scan. The pull-request number rides along as an input
+// so the run can check that pull request out and comment on it — dispatching the
+// bare branch would scan the wrong tree and lose the thread to reply on.
+//
+// Only `tridelphi.yml` (the scan) is ever dispatched. Fix requests are handled
+// by the in-repo issue_comment workflow, never from here — see route.js.
 //
 // The token needs exactly one permission: `actions: write` on the allowlisted
 // repositories. Not contents, not pull-requests — the run itself holds those,
@@ -88,7 +90,7 @@ async function dispatch(env, decision) {
     return { ok: true, dispatched: false, reason: "no GITHUB_DISPATCH_TOKEN; verified and acknowledged only" };
   }
 
-  const workflow = decision.act === "fix" ? "tridelphi-fix.yml" : "tridelphi.yml";
+  const workflow = "tridelphi.yml";
   const url = `https://api.github.com/repos/${decision.owner}/${decision.repo}/actions/workflows/${workflow}/dispatches`;
 
   let response;

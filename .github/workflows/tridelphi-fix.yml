@@ -41,12 +41,22 @@ jobs:
     #     below re-verifies that write access before anything runs. Both branches
     #     use positive `contains` only (never `!contains`/`!=`), so this stays the
     #     strong author_association gate our own detector recognises.
+    # The checkbox branch is restricted to `edited` events on purpose, and it is
+    # load-bearing. A task-list checkbox can only be *toggled* — which arrives as
+    # an `edited` event — and GitHub restricts toggling a box in someone else's
+    # comment to users with write access. Without the `edited` guard, any
+    # stranger could post a NEW comment whose body merely contains the marker and
+    # `[x]`, satisfy this branch, and — because the Authorize step trusts every
+    # `created` event — drive this write-scoped job. So: `created` can reach the
+    # job only through the author_association branch above; the checkbox branch is
+    # `edited`-only and re-verified in Authorize.
     if: >-
       github.event.issue.pull_request != null && (
         (contains(github.event.comment.body, 'tridelphi fix') &&
          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
         ||
-        (contains(github.event.comment.body, '<!--tridelphi-fix-->') &&
+        (github.event.action == 'edited' &&
+         contains(github.event.comment.body, '<!--tridelphi-fix-->') &&
          contains(github.event.comment.body, '[x]'))
       )
     runs-on: ubuntu-latest

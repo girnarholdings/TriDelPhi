@@ -47,6 +47,7 @@ _RULE_FOR_U_KIND = {
     "env-file-injection": "tridelphi/env-file-injection",
     "upstream-artifact": "tridelphi/workflow-run-upstream-execution",
     "cross-job-flow": "tridelphi/cross-job-untrusted-flow",
+    "cross-job-artifact": "tridelphi/cross-job-untrusted-flow",
 }
 
 # Most specific wins, so an agent finding is never reported as a generic one.
@@ -57,6 +58,7 @@ _U_KIND_PRIORITY = (
     "agent-mcp-ingress",
     "upstream-artifact",
     "cross-job-flow",
+    "cross-job-artifact",
     "env-file-injection",
     "untrusted-checkout",
     "expression-injection",
@@ -108,11 +110,47 @@ def _tainted_outputs(context: ExecutionContext, u_hits: Sequence[CapabilityHit],
     return tuple(sorted(set(tainted)))
 
 
+# A job whose worktree holds pull request code (these U kinds) can pack that
+# attacker-authored code into an uploaded artifact. Expression-injection is a
+# shell-exec issue, not a file-on-disk one, so it is deliberately excluded.
+_WORKTREE_U_KINDS = ("untrusted-checkout", "agent-untrusted-worktree")
+
+
+def _uses_position(context: ExecutionContext, markers: tuple[str, ...]) -> Position | None:
+    """Position of the first step whose ``uses:`` matches one of ``markers``."""
+    steps = context.body.get("steps")
+    if steps is None:
+        return None
+    for step in steps.seq():
+        if not step.is_mapping():
+            continue
+        uses = step.get("uses")
+        if uses is None or not uses.text:
+            continue
+        name = uses.text.split("@", 1)[0].strip()
+        if any(name == m or name.startswith(m) for m in markers):
+            return step.position()
+    return None
+
+
+def _tainted_artifact_upload(
+    context: ExecutionContext, u_hits: Sequence[CapabilityHit], tables: Tables
+) -> Position | None:
+    """If this job runs pull request code *and* uploads an artifact, return the
+    upload step's position. The artifact then carries attacker-authored files to
+    any downstream job that downloads it."""
+    if not any(h.kind in _WORKTREE_U_KINDS for h in u_hits):
+        return None
+    return _uses_position(context, tables.tuple_of("egress", "artifact_producers"))
+
+
 def _cross_job_hits(
     context: ExecutionContext,
-    upstream: dict[str, tuple[ExecutionContext, tuple[str, ...]]],
+    upstream: dict[str, tuple[ExecutionContext, tuple[str, ...], Position | None]],
+    tables: Tables,
 ) -> list[CapabilityHit]:
-    """U inherited from a ``needs:`` dependency's tainted outputs.
+    """U inherited from a ``needs:`` dependency — through a tainted job output,
+    or through an artifact built from pull request code.
 
     Neither job is a finding read alone. This is the composition that per-file
     analysis structurally cannot reach.
@@ -121,11 +159,14 @@ def _cross_job_hits(
         return []
     hits: list[CapabilityHit] = []
     body_text = _body_text(context)
+    download_pos: Position | None = None
+    download_checked = False
+    tainted_uploader: str | None = None
     for dep in context.needs:
         entry = upstream.get(f"{context.workflow_file}::{dep}")
         if not entry:
             continue
-        _dep_ctx, tainted = entry
+        _dep_ctx, tainted, artifact_pos = entry
         for output in tainted:
             reference = f"needs.{dep}.outputs.{output}"
             if reference in body_text:
@@ -141,6 +182,27 @@ def _cross_job_hits(
                         position=context.position,
                     )
                 )
+        # Artifact channel: the upstream job packed pull request code into an
+        # artifact. If this job downloads one, that code crosses the boundary.
+        if artifact_pos is not None and tainted_uploader is None:
+            if not download_checked:
+                download_pos = _uses_position(context, tables.tuple_of("egress", "artifact_consumers"))
+                download_checked = True
+            if download_pos is not None:
+                tainted_uploader = dep
+    if tainted_uploader is not None and download_pos is not None:
+        hits.append(
+            CapabilityHit(
+                capability="U",
+                kind="cross-job-artifact",
+                reason=(
+                    f"job `{tainted_uploader}` checked out pull request code and "
+                    f"uploaded an artifact; this job downloads that artifact, so "
+                    "attacker-authored files reach it across the job boundary"
+                ),
+                position=download_pos,
+            )
+        )
     return hits
 
 
@@ -322,6 +384,26 @@ def _remediation(
             ),
         )
 
+    # 4b. Cross-job artifact execution: an upstream job packed pull request code
+    # into an artifact this privileged job downloads.
+    hit = u_kinds.get("cross-job-artifact")
+    if hit is not None:
+        return Remediation(
+            strip="U",
+            kind="drop-step",
+            target="the artifact download",
+            target_position=hit.position,
+            breaks="this job loses the upstream artifact — treat its contents as data, not code",
+            rendered=(
+                f"Strip untrusted input. The download at {_loc(hit.position)} pulls an "
+                "artifact built by a job that checked out pull request code, and this "
+                "job holds credentials. Never execute a downloaded artifact "
+                "(script, archive, binary, or `node_modules`): consume only inert data "
+                "from it. If the artifact must run, build and run it in the same "
+                "unprivileged job that produced it, and pass only a result forward."
+            ),
+        )
+
     # 5. Fall back to the observed secret.
     secret = next((h for h in p_hits if h.observed and h.kind == "secret-reference"), None)
     if secret is not None:
@@ -392,7 +474,7 @@ def _workflow_has_secret(contexts: Iterable[ExecutionContext], workflow_file: st
 
 def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[Finding]:
     per_context: dict[str, tuple[list[CapabilityHit], list[CapabilityHit], list[CapabilityHit]]] = {}
-    upstream: dict[str, tuple[ExecutionContext, tuple[str, ...]]] = {}
+    upstream: dict[str, tuple[ExecutionContext, tuple[str, ...], Position | None]] = {}
 
     for ctx in contexts:
         u = detect_untrusted.detect(ctx, tables)
@@ -400,12 +482,16 @@ def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[F
         p = detect_privilege.detect(ctx, tables)
         e = detect_egress.detect(ctx, tables)
         per_context[ctx.label] = (u, p, e)
-        upstream[ctx.label] = (ctx, _tainted_outputs(ctx, u, tables))
+        upstream[ctx.label] = (
+            ctx,
+            _tainted_outputs(ctx, u, tables),
+            _tainted_artifact_upload(ctx, u, tables),
+        )
 
     findings: list[Finding] = []
     for ctx in contexts:
         u, p, e = per_context[ctx.label]
-        u = sorted(u + _cross_job_hits(ctx, upstream), key=lambda h: h.sort_key)
+        u = sorted(u + _cross_job_hits(ctx, upstream, tables), key=lambda h: h.sort_key)
 
         hooks = detect_agent_ingress.detect_hook_execution(ctx, tables)
         if hooks:

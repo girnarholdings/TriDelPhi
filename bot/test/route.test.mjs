@@ -18,11 +18,18 @@ const repository = { name: "demo", full_name: "acme/demo", owner: { login: "acme
 // Merge nested overrides rather than replacing them: spreading `over` last
 // would clobber the whole pull_request object and silently drop its number,
 // which makes every case look like a refusal for the wrong reason.
+// Default is a same-repo PR (head.repo == the repo). Fork/deleted-fork cases
+// override `pull_request.head`.
 const prEvent = ({ pull_request, ...rest } = {}) => ({
   action: "opened",
   repository,
   ...rest,
-  pull_request: { number: 7, base: { ref: "main" }, ...pull_request },
+  pull_request: {
+    number: 7,
+    base: { ref: "main" },
+    head: { repo: { full_name: "acme/demo" } },
+    ...pull_request,
+  },
 });
 
 const commentEvent = ({ comment, ...rest } = {}) => ({
@@ -106,35 +113,33 @@ await test("still dispatches a branch of the same repository", async () => {
   assert.equal(route("pull_request", own, { allowlist: ALLOW }).act, "scan");
 });
 
-// --- the fix path carries the same trust rule as the in-repo workflow ------
-
-await test("routes a maintainer's fix request", async () => {
-  const d = route("issue_comment", commentEvent(), { allowlist: ALLOW });
-  assert.equal(d.act, "fix");
-  assert.equal(d.pr, 12);
+await test("treats a deleted fork (null head repo) as a fork, not same-repo", async () => {
+  // When the source fork is deleted, head.repo is null. Fail closed rather than
+  // let a missing head be mistaken for a trusted branch.
+  const deleted = prEvent({ pull_request: { head: { repo: null } } });
+  const d = route("pull_request", deleted, { allowlist: ALLOW });
+  assert.equal(d.act, "ignore");
+  assert.match(d.reason, /fork/);
 });
 
-await test("refuses a fix request from an untrusted commenter", async () => {
-  for (const who of ["NONE", "FIRST_TIME_CONTRIBUTOR", "CONTRIBUTOR", undefined]) {
-    const d = route("issue_comment", commentEvent({ comment: { author_association: who } }), { allowlist: ALLOW });
-    assert.equal(d.act, "ignore", String(who));
-    assert.match(d.reason, /not a maintainer/);
+// --- the control plane never dispatches fixes ------------------------------
+
+await test("never dispatches a fix — the in-repo workflow owns that path", async () => {
+  // A workflow_dispatch of the fix job would run WITHOUT the comment-body trust
+  // gate the issue_comment workflow enforces, so the Worker must never route a
+  // fix. Every issue_comment — maintainer or not, created or edited — is left
+  // to the native workflow.
+  const cases = [
+    commentEvent(),
+    commentEvent({ action: "edited" }),
+    commentEvent({ comment: { author_association: "NONE" } }),
+    commentEvent({ comment: { body: "<!--tridelphi-fix--> [x]", author_association: "NONE" } }),
+  ];
+  for (const ev of cases) {
+    const d = route("issue_comment", ev, { allowlist: ALLOW });
+    assert.equal(d.act, "ignore");
+    assert.match(d.reason, /in-repo issue_comment workflow/);
   }
-});
-
-await test("ignores a fix phrase on a plain issue, not a pull request", async () => {
-  const onIssue = { ...commentEvent(), issue: { number: 3 } };
-  const d = route("issue_comment", onIssue, { allowlist: ALLOW });
-  assert.equal(d.act, "ignore");
-  assert.match(d.reason, /not a pull request/);
-});
-
-await test("ignores an edited comment on the dispatch path", async () => {
-  // Editing is how a checkbox tick arrives; that path is handled inside the
-  // repository by the fix workflow, which re-verifies write access. The Worker
-  // deliberately does not widen its own trigger to match.
-  const d = route("issue_comment", commentEvent({ action: "edited" }), { allowlist: ALLOW });
-  assert.equal(d.act, "ignore");
 });
 
 // --- malformed input must be a named refusal, never a throw ----------------

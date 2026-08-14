@@ -49,6 +49,21 @@ __all__ = [
 _BACKTICKED = re.compile(r"`([^`]+)`")
 _STEP_DASH = re.compile(r"^(\s*)-\s")
 
+# A workflow file read whole into memory before editing. Real ones are small; a
+# file past this cap is not one we should slurp. 8 MiB matches the scanner's
+# other readers.
+_MAX_WORKFLOW_BYTES = 8 * 1024 * 1024
+
+
+def _read_workflow(path: Path) -> str | None:
+    """Read a workflow file to edit, refusing an implausibly large one."""
+    try:
+        if path.stat().st_size > _MAX_WORKFLOW_BYTES:
+            return None
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class FixResult:
@@ -360,7 +375,9 @@ def apply_action(repo_root: str | Path, finding: Finding, action: str) -> FixRes
 
     if action == "disable":
         target = workflow.with_name(workflow.name + ".disabled")
-        original = workflow.read_text(encoding="utf-8")
+        original = _read_workflow(workflow)
+        if original is None:
+            return FixResult("failed", action, "workflow file is missing or too large to read")
         header = (
             "# tridelphi: workflow disabled — rename back to "
             f"{workflow.name} to re-enable\n"
@@ -390,7 +407,9 @@ def apply_action(repo_root: str | Path, finding: Finding, action: str) -> FixRes
     else:
         return FixResult("unavailable", action, f"unknown action `{action}`")
 
-    original = workflow.read_text(encoding="utf-8")
+    original = _read_workflow(workflow)
+    if original is None:
+        return FixResult("unavailable", action, "workflow file is missing or too large to read")
     changed = transform(original, finding)
     if changed is None or changed == original:
         return FixResult(

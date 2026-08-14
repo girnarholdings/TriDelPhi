@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
-from .checklist import _compact_wheres
+from .checklist import _compact_wheres, _md_escape
 from .expose import CATEGORIES, ExposeFinding, ExposureResult, analyze_exposure
 from .render import SEVERITY_ORDER
 from .sarif import dumps
@@ -40,8 +40,15 @@ def _status(findings: list[ExposeFinding]) -> tuple[str, str]:
     return "pass", "all clear"
 
 
-def _grouped_lines(findings: list[ExposeFinding]) -> list[tuple[str, str, str]]:
-    """Collapse identical messages across locations. Returns (severity, text, fix)."""
+def _grouped_lines(
+    findings: list[ExposeFinding], *, markdown: bool = False
+) -> list[tuple[str, str, str]]:
+    """Collapse identical messages across locations. Returns (severity, text, fix).
+
+    ``markdown`` escapes the message and location before they are composed, since
+    both carry repo-derived text (a file path, an env var name, a masked key) and
+    the markdown form is posted as a comment where GitHub renders it as HTML."""
+    esc = _md_escape if markdown else (lambda s: s)
     order: list[str] = []
     by_msg: dict[str, dict] = {}
     for f in findings:
@@ -57,11 +64,11 @@ def _grouped_lines(findings: list[ExposeFinding]) -> list[tuple[str, str, str]]:
         slot = by_msg[msg]
         wheres = slot["wheres"]
         if not wheres:
-            text = msg
+            text = esc(msg)
         elif len(wheres) == 1:
-            text = f"{wheres[0]} — {msg}"
+            text = f"{esc(wheres[0])} — {esc(msg)}"
         else:
-            text = f"{msg} — at {_compact_wheres(wheres)}"
+            text = f"{esc(msg)} — at {esc(_compact_wheres(wheres))}"
         out.append((slot["sev"], text, slot["fix"]))
     return out
 
@@ -170,7 +177,9 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
     if crits:
         out.append("**Fix these first:**")
         for letter, _question, _g in CATEGORIES:
-            for _sev, text, fix in _grouped_lines([f for f in crits if f.category == letter]):
+            for _sev, text, fix in _grouped_lines(
+                [f for f in crits if f.category == letter], markdown=True
+            ):
                 out.append(f"- 🚫 {text} **Do this:** {fix}")
         out.append("")
     if warns:
@@ -184,7 +193,7 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
                 continue
             out.append(f"**{question}**  ")
             out.append(f"_{gloss}_")
-            for _sev, text, fix in _grouped_lines(group)[:_MAX_ITEMS]:
+            for _sev, text, fix in _grouped_lines(group, markdown=True)[:_MAX_ITEMS]:
                 out.append(f"- {text} **Do this:** {fix}")
             out.append("")
         out.append("</details>")

@@ -10,6 +10,7 @@ otherwise have no legal way to see it.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -269,6 +270,52 @@ def grants_write(permissions: dict[str, str]) -> tuple[str, str] | None:
 
 _CHECKOUT_ACTIONS = ("actions/checkout",)
 
+# A `run:` step can pull the pull request's own code into the tree without using
+# `actions/checkout` at all — `gh pr checkout N`, or `git fetch origin
+# pull/N/head` then a checkout. On a privileged trigger (pull_request_target /
+# workflow_run / issue_comment) the default `actions/checkout` resolves to the
+# safe base branch, so a job that then does this in a shell step silently
+# re-introduces the attacker's tree that the safe-default logic assumed absent.
+# These markers are deliberately specific to keep false positives near zero.
+_PR_CHECKOUT_CLI = ("gh pr checkout", "hub pr checkout")
+# A git command that fetches, and a PR head/merge refspec. Kept as two separate
+# linear searches (no nested `.*?`) so a long hostile `run:` block cannot cause
+# catastrophic backtracking. The refspec — `pull/<n>/head` or `.../merge`, the
+# `<n>` possibly a `${{ … }}` expression with spaces — is what makes it a PR
+# checkout rather than an ordinary `git pull origin main`.
+_GIT_FETCH_RE = re.compile(r"git\s+(?:fetch|pull)\b", re.IGNORECASE)
+_PR_REFSPEC_RE = re.compile(r"(?:refs/)?pull/[^\n]*?/(?:head|merge)\b", re.IGNORECASE)
+
+
+def _run_fetches_pull_request(run_text: str) -> bool:
+    """Does this shell command pull the PR's own code into the working tree?"""
+    if not run_text:
+        return False
+    if any(cli in run_text for cli in _PR_CHECKOUT_CLI):
+        return True
+    return bool(_GIT_FETCH_RE.search(run_text) and _PR_REFSPEC_RE.search(run_text))
+
+
+def _job_skips_fork_pull_requests(job: YamlNode) -> bool:
+    """Does the job refuse fork pull requests before acting on their code?
+
+    A job that checks ``isCrossRepository`` and skips forks (the pattern our own
+    fix bot uses, and the one we recommend) only ever fetches *same-repo* PR
+    branches — code authored by someone who already has write access, i.e. not
+    untrusted. Because the workflow file itself is trusted (it runs from the base
+    branch, which an attacker's PR cannot modify), a fork-guard expressed in it
+    is a signal we can rely on — the same reasoning under
+    ``has_strong_association_gate``.
+    """
+    steps = job.get("steps")
+    if steps is None:
+        return False
+    for step in steps.seq():
+        run_node = step.get("run")
+        if run_node is not None and "isCrossRepository" in (run_node.text or ""):
+            return True
+    return False
+
 
 def _uses_name(step: YamlNode) -> str:
     uses = step.get("uses")
@@ -294,6 +341,18 @@ def _resolve_untrusted_worktree(
     steps = job.get("steps")
     if steps is None:
         return False, ""
+
+    # A shell step that fetches the PR's own code makes the tree untrusted no
+    # matter how actions/checkout resolved — so this takes precedence over the
+    # checkout-ref logic below (which would otherwise read the base checkout as
+    # safe and stop). This is the pwn-request shape that hides in a `run:` block.
+    # Exception: a job that first refuses fork pull requests only ever fetches
+    # same-repo (write-access-authored) branches, which are not untrusted.
+    if not _job_skips_fork_pull_requests(job):
+        for step in steps.seq():
+            run_node = step.get("run")
+            if run_node is not None and _run_fetches_pull_request(run_node.text or ""):
+                return True, "a run step fetches the pull request's own code into the tree"
 
     for step in steps.seq():
         name = _uses_name(step)

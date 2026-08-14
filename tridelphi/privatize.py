@@ -99,8 +99,17 @@ class DirSnapshot:
 
     def __enter__(self) -> DirSnapshot:
         self._tmp = Path(tempfile.mkdtemp(prefix="tridelphi-snap-"))
-        self._backup = self._tmp / self.target.name
-        shutil.copytree(self.target, self._backup, symlinks=True)
+        # If the copy fails (unreadable tree, disk full), `__exit__` never runs —
+        # the `with` block was never entered — so clean the tempdir here rather
+        # than leak it. `BaseException` also covers a KeyboardInterrupt mid-copy.
+        try:
+            self._backup = self._tmp / self.target.name
+            shutil.copytree(self.target, self._backup, symlinks=True)
+        except BaseException:
+            shutil.rmtree(self._tmp, ignore_errors=True)
+            self._tmp = None
+            self._backup = None
+            raise
         return self
 
     def commit(self) -> None:
@@ -128,8 +137,40 @@ class DirSnapshot:
 # ---------------------------------------------------------------------------
 
 
+def _safe_from_tampering(path: Path) -> bool:
+    """Is the executable ``path`` names writable only by its owner, along with
+    every directory that could redirect or replace it?
+
+    privatize *executes* whatever this resolves to. A predictable, world- or
+    group-writable location — a shared ``/tmp`` on a multi-user box — is exactly
+    where someone else could drop a poisoned ``javascript-obfuscator`` for us to
+    run. So we check three things, all following symlinks (a ``node_modules/.bin``
+    entry is itself a symlink, whose own mode bits are a meaningless ``rwxrwxrwx``
+    and must not be read): the real binary, the directory holding the real
+    binary, and the directory holding the (possibly symlink) entry we were given
+    — a writable entry directory would let an attacker repoint it. The pinned
+    install lands under the repo, which the user owns. (POSIX permission bits; on
+    a platform without them this is a no-op and the other candidates still apply.)"""
+    import stat
+
+    bad = stat.S_IWGRP | stat.S_IWOTH
+    try:
+        real = path.resolve()
+        for check in (real, real.parent, path.parent):
+            if bool(check.stat().st_mode & bad):
+                return False
+        return True
+    except OSError:
+        return False
+
+
 def _find_obfuscator(root: Path) -> list[str] | None:
-    """Locate the pinned javascript-obfuscator installed by install-privatize.sh."""
+    """Locate the pinned javascript-obfuscator installed by install-privatize.sh.
+
+    Every candidate — including the one on PATH — is passed through
+    :func:`_safe_from_tampering` before it is returned, so a binary sitting in a
+    group- or world-writable location is never executed. That gate, not the
+    choice of directory, is what defuses a poisoned obfuscator in a shared temp."""
     import os
 
     dest = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "tridelphi-privatize"
@@ -139,10 +180,12 @@ def _find_obfuscator(root: Path) -> list[str] | None:
         dest / "node_modules" / ".bin" / "javascript-obfuscator",
     ]
     for c in candidates:
-        if c.is_file():
+        if c.is_file() and _safe_from_tampering(c):
             return [str(c)]
     found = shutil.which("javascript-obfuscator")
-    return [found] if found else None
+    if found and _safe_from_tampering(Path(found)):
+        return [found]
+    return None
 
 
 def _default_obfuscate(src: Path, dst: Path) -> tuple[bool, str]:
@@ -206,6 +249,16 @@ def _resolve_output(root: Path, privatize_out: str | None) -> Path | None:
     return None
 
 
+# Every critical rule `_detect_maps_and_secrets` can emit that represents a
+# *shipped secret* — one obfuscation would hide from the owner, not an attacker.
+# Deliberately excludes `source-map-disclosure` (a disclosure, not a key to
+# rotate; privatize forces maps off in its own output) and the public-by-design
+# notes (`firebase-public-key`, `supabase-anon-key`, which are never critical).
+# `supabase-service-role` was the gap: a service_role JWT bypasses Row Level
+# Security, yet the old `client-secret`-only filter let it through the interlock.
+_INTERLOCK_SECRET_RULES = frozenset({"client-secret", "supabase-service-role"})
+
+
 def _shipped_secrets(root: Path, target: Path):
     """Category-A secret findings scoped to the obfuscation target — the interlock.
 
@@ -222,7 +275,7 @@ def _shipped_secrets(root: Path, target: Path):
         elif p.suffix in (".js", ".mjs", ".cjs"):
             surface.bundles.append(p)
     return [f for f in _detect_maps_and_secrets(root, surface)
-            if f.rule == "client-secret" and f.severity == "critical"]
+            if f.severity == "critical" and f.rule in _INTERLOCK_SECRET_RULES]
 
 
 def run_privatize(
@@ -289,6 +342,14 @@ def run_privatize(
         return 2
 
     tmp_out = target.parent / (target.name + ".tridelphi-tmp")
+    # The staging path is predictable and sits beside the build dir. Refuse if
+    # something already occupies it as a symlink or a non-directory: blindly
+    # rmtree-ing a pre-planted symlink, or replace()-ing onto one, would let it
+    # redirect the swap outside the build tree.
+    if tmp_out.is_symlink() or (tmp_out.exists() and not tmp_out.is_dir()):
+        print(f"\n  ⛔ Refusing: {tmp_out.name} already exists and is not a plain\n"
+              "     directory. Remove it and run privatize again.\n", file=err)
+        return 2
     if tmp_out.exists():
         shutil.rmtree(tmp_out)
 

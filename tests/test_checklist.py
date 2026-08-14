@@ -209,6 +209,38 @@ def test_markdown_checklist_is_inbox_ready(repo_root):
     assert "```" not in md, "no monospace dumps"
 
 
+def test_markdown_escapes_untrusted_tool_output(repo_root):
+    """A wrapped tool's finding message and location derive from pull request
+    file content, and this markdown is posted verbatim as a PR comment that
+    GitHub renders as HTML. A crafted message must not inject a link, an image
+    beacon, or a raw HTML tag into that comment."""
+    from tridelphi.checklist import render_checklist_markdown
+
+    payload = "leak [click](https://evil.example) <img src=x onerror=alert(1)> | col"
+    result = analyze(repo_root / CLEAN)
+    external = {
+        "zizmor": ExternalStatus(
+            ran=True,
+            counts={"critical": 0, "warning": 1, "note": 0},
+            items=[("warning", "a.yml`</summary><script>:3", payload)],
+        ),
+    }
+    md = render_checklist_markdown(
+        result, repo_label="demo", files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned, fail_on="critical", external=external,
+    )
+    # The link is broken: the bracket pair is backslash-escaped, so GitHub sees
+    # literal text, not an anchor.
+    assert "[click]" not in md
+    assert "\\[click\\]" in md
+    # Every injected HTML tag is escaped — no bare `<img`/`<script>` survives (the
+    # only `<img`/`<script>` runs in the output are the `\<img`/`\<script>` ones).
+    assert md.count("<img") == md.count("\\<img") and "\\<img" in md
+    assert md.count("<script") == md.count("\\<script") and "\\<script" in md
+    # The stray table pipe is escaped so it can't break the layout.
+    assert "\\| col" in md
+
+
 def _md_with_advisory(repo_root):
     from tridelphi.api import analyze
     from tridelphi.checklist import render_checklist_markdown
