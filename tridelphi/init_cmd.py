@@ -204,17 +204,23 @@ jobs:
     name: Apply verified fixes
     # Trust boundary. Two ways in, both restricted to people this repo trusts:
     #   · a comment that says `tridelphi fix`, gated on author_association; OR
-    #   · the "Fix these for me" checkbox in TriDelPhi's own comment — GitHub only
-    #     lets users with write access toggle a task list, and the Authorize step
-    #     below re-verifies that write access before anything runs. Both branches
-    #     use positive `contains` only (never `!contains`/`!=`), so this stays the
-    #     strong author_association gate our own detector recognises.
+    #   · the "Fix these for me" checkbox in TriDelPhi's own comment — a task-list
+    #     box can only be TOGGLED (an `edited` event), and GitHub restricts
+    #     toggling a box in someone else's comment to users with write access,
+    #     which the Authorize step below re-verifies. The `edited`-only guard is
+    #     load-bearing: without it a stranger could post a NEW comment merely
+    #     containing the marker and `[x]` and — because Authorize trusts every
+    #     `created` event — drive this write-scoped job. So `created` reaches the
+    #     job only via the author_association branch. Both branches use positive
+    #     `contains` only (never `!contains`/`!=`), so this stays the strong
+    #     author_association gate our own detector recognises.
     if: >-
       github.event.issue.pull_request != null && (
         (contains(github.event.comment.body, 'tridelphi fix') &&
          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
         ||
-        (contains(github.event.comment.body, '<!--tridelphi-fix-->') &&
+        (github.event.action == 'edited' &&
+         contains(github.event.comment.body, '<!--tridelphi-fix-->') &&
          contains(github.event.comment.body, '[x]'))
       )
     runs-on: ubuntu-latest
@@ -238,10 +244,23 @@ jobs:
             core.setOutput('ok', ok ? 'true' : 'false');
             if (!ok) core.notice(`${p.sender.login} lacks write access; ignoring.`);
 
+      # Egress is BLOCKED, not audited: this is the one job where a write-capable
+      # token and third-party code (pip's dependency tree) meet, so a compromised
+      # package must have nowhere to send the credential. The allowlist is only
+      # what the job needs — GitHub itself and PyPI. If a step fails on a blocked
+      # connection, the harden-runner log names the endpoint to consider adding.
       - if: steps.auth.outputs.ok == 'true'
         uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
 
       # Default-branch checkout; the credential stays so the verified commit
       # can be pushed at the end — pushing is this workflow's entire purpose.

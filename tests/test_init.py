@@ -43,6 +43,31 @@ def test_fix_bot_holds_its_trust_boundary():
             assert "contains(" in line, f"comment body outside the gate: {line!r}"
 
 
+def test_fix_bot_checkbox_branch_is_edited_only():
+    """The bypass this guards: without the `edited` restriction, a stranger can
+    post a NEW comment merely containing the checkbox marker and `[x]`, satisfy
+    the checkbox branch, and — because the Authorize step trusts every `created`
+    event — drive the write-scoped fix job. The marker branch must require an
+    `edited` action so `created` can only pass through the author_association
+    branch."""
+    lines = FIX_WORKFLOW.split("\n")
+    marker_line = next(i for i, ln in enumerate(lines) if "<!--tridelphi-fix-->" in ln and "contains(" in ln)
+    # The three lines of the checkbox disjunct must include the edited guard.
+    window = "\n".join(lines[marker_line - 1: marker_line + 2])
+    assert "github.event.action == 'edited'" in window, (
+        "the checkbox branch must be gated to edited events"
+    )
+
+
+def test_fix_bot_template_blocks_egress():
+    """The generated fix bot holds a write token beside pip's dependency tree,
+    so a compromised package must have nowhere to send the credential — the same
+    hardening the dogfood workflow uses. `audit` would only observe the theft."""
+    assert "egress-policy: block" in FIX_WORKFLOW
+    assert "egress-policy: audit" not in FIX_WORKFLOW
+    assert "files.pythonhosted.org:443" in FIX_WORKFLOW
+
+
 def test_init_is_idempotent(tmp_path):
     assert run_init(str(tmp_path)) == 0
     # Second run refuses rather than clobbering.

@@ -45,9 +45,14 @@ which is a useful way to watch what it *would* do before granting it anything.
 
 | Event | Action |
 |---|---|
-| `pull_request` opened / synchronize / reopened / ready_for_review | dispatch `tridelphi.yml` with the PR number |
-| `issue_comment` created, saying `tridelphi fix`, by OWNER/MEMBER/COLLABORATOR | dispatch `tridelphi-fix.yml` |
-| anything else | ignored, with the reason in the log |
+| `pull_request` opened / synchronize / reopened / ready_for_review, same-repo | dispatch `tridelphi.yml` with the PR number |
+| anything else (forks, drafts, label churn, comments) | ignored, with the reason in the log |
+
+**Fix requests are NOT handled here.** `tridelphi fix` comments and the "Fix these
+for me" checkbox are handled entirely by the in-repo `tridelphi-fix.yml` workflow,
+which triggers on the comment event and gates on the comment body plus write
+access. The control plane deliberately never dispatches a fix: a `workflow_dispatch`
+would run the fix job *without* that comment-body trust gate.
 
 Drafts are skipped until marked ready, and label/assignee churn is ignored — none
 of it changes code, and a runner minute spent on it is a minute wasted. The fix

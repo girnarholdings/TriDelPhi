@@ -18,15 +18,6 @@
 // runner minute.
 const SCAN_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
 
-// The typed request that also drives the in-repo fix bot. Matching the same
-// phrase keeps one vocabulary across both entry points.
-const FIX_PHRASE = "tridelphi fix";
-
-// Comment authors GitHub itself vouches for as already trusted by the repo.
-// This mirrors the fix workflow's own gate rather than inventing a second,
-// looser rule — two different answers to "who is trusted" is how gaps appear.
-const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-
 /** Parse "owner/repo, owner/other" into a lower-cased Set. */
 export function parseAllowlist(raw) {
   return new Set(
@@ -70,10 +61,13 @@ export function route(eventType, payload, { allowlist } = {}) {
     // scopes. The `pull_request` trigger already scans forks with a read-only
     // token, which is where a stranger's code belongs. The workflow refuses
     // these too; catching it here just avoids burning a run to be told so.
+    // Fail closed: a MISSING head repo (a deleted fork) is treated as a fork,
+    // not as same-repo. Requiring a positive same-repo match means an absent or
+    // unexpected head can never be mistaken for a trusted branch.
     const headRepo = pr.head?.repo?.full_name;
     const thisRepo = repository.full_name || `${owner}/${repo}`;
-    if (headRepo && headRepo.toLowerCase() !== String(thisRepo).toLowerCase()) {
-      return ignore("pull request comes from a fork; the pull_request trigger scans it read-only");
+    if (!headRepo || headRepo.toLowerCase() !== String(thisRepo).toLowerCase()) {
+      return ignore("pull request is from a fork (or a deleted fork); the pull_request trigger scans it read-only");
     }
     return {
       act: "scan",
@@ -89,25 +83,17 @@ export function route(eventType, payload, { allowlist } = {}) {
   }
 
   if (eventType === "issue_comment") {
-    if (payload.action !== "created") return ignore(`issue_comment.${payload.action} is not a new request`);
-    const issue = payload.issue;
-    if (!issue?.pull_request) return ignore("comment is on an issue, not a pull request");
-    const body = String(payload.comment?.body || "");
-    if (!body.toLowerCase().includes(FIX_PHRASE)) return ignore("comment does not request a fix");
-    if (!TRUSTED_ASSOCIATIONS.has(payload.comment?.author_association)) {
-      return ignore(`comment author is ${payload.comment?.author_association || "unknown"}, not a maintainer`);
-    }
-    return {
-      act: "fix",
-      reason: "issue_comment requesting fix",
-      owner,
-      repo,
-      pr: issue.number,
-      ref: repository.default_branch || "main",
-    };
+    // Fix requests are handled ENTIRELY by the in-repo `tridelphi-fix.yml`
+    // workflow, which triggers on the issue_comment event directly and gates on
+    // the comment body plus author_association (and re-verifies write access).
+    // The control plane deliberately stays out of the fix path: a
+    // workflow_dispatch would run the fix job WITHOUT that comment-body trust
+    // gate, so dispatching fixes from here would be a way to bypass it. That is
+    // also why tridelphi-fix.yml has no workflow_dispatch trigger.
+    return ignore("fix requests are handled by the in-repo issue_comment workflow, not the control plane");
   }
 
   return ignore(`${eventType || "unknown"} is not an event this bot acts on`);
 }
 
-export { SCAN_ACTIONS, FIX_PHRASE, TRUSTED_ASSOCIATIONS };
+export { SCAN_ACTIONS };
