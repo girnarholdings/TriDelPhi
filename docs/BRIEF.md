@@ -1,5 +1,21 @@
 # TriDelPhi `core` — Claude Code build brief
 
+> ## ⚠️ Historical document — do not read this as current scope
+>
+> This is the brief the original `core` build ran against. It is kept because
+> the *reasoning* is still load-bearing (why the join is the product, why
+> wrapping more scanners is a trap), and because a later audit found people
+> reading it as a live spec.
+>
+> **Its §0 scope is no longer true.** It forbade `gate`, `attest`, `init`, the
+> ladder and a frontend; all of them shipped, deliberately, and the decisions
+> that overrode it are recorded in [`DECISIONS.md`](DECISIONS.md) and
+> [`RELEASES.md`](RELEASES.md). For what the tool does today, start at the
+> README's two doors.
+>
+> The one line worth carrying forward unchanged: *build the convex thing first.*
+> The per-job U∩P∩E join is still the part nobody else has.
+
 > **Read this whole file before writing any code.** It pre-walks the session so
 > we don't spend the first hour relitigating scope. The decisions below are
 > made. Where something is genuinely open, it says **OPEN** and tells you when

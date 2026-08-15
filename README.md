@@ -367,16 +367,24 @@ tool credited with its own driver metadata and provenance.
 | **L7** | **tridelphi verify** + [gh](https://github.com/cli/cli) | Apache-2.0 / MIT | native trust-lock + `gh attestation verify` | signer/SHA-change detection (offline) + upstream provenance |
 
 ```console
-tridelphi . --level 3      # lean default: secrets + supply chain + workflow lint + core
+tridelphi .                # no rung: the core U∩P∩E scan only, offline, no subprocesses
+tridelphi . --level 3      # + secrets, supply chain, workflow lint
 tridelphi . --level 6      # every rung, then write the evidence statement
 tridelphi . --level 7      # + verify consumed actions against the trust-lock
 tridelphi --credits        # who built what — the wrapped tools, with licenses
 ```
 
-Rungs are cumulative and ordered by **signal density descending**. **Level 3 is
-the default** — fast, and it stays off the heavier dependency trees; opt into 5+
-for code SAST. A missing tool is **skipped with an install hint** — it never
-fails the scan or hides TriDelPhi's own findings. ¹ osv-scanner, scorecard and
+**The CLI has no default rung; the Action defaults to `level: 3`.** That
+asymmetry is deliberate — a local run should not silently shell out to five
+scanners and query osv.dev — but it is easy to misread, so it is spelled out
+here rather than left to `--help`. Level 3 is the recommended rung when you *do*
+pick one: fast, and it stays off the heavier dependency trees; opt into 5+ for
+code SAST.
+
+Rungs are cumulative and ordered by **signal density descending**. A missing
+tool is **skipped with an install hint** — it never fails the scan or hides
+TriDelPhi's own findings. Whatever rung you pick, the checklist marks every rung
+you *didn't* run as an empty box and refuses to print a clean verdict over it. ¹ osv-scanner, scorecard and
 semgrep reach the network; `--offline` skips those rungs and the credit line
 labels each honestly.
 
