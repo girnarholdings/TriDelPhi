@@ -137,6 +137,20 @@ def test_generated_workflows_are_clean_by_our_own_rules(tmp_path):
     assert not gating, "; ".join(f"{f.severity} {f.rule_id}" for f in gating)
 
 
+@pytest.mark.parametrize("kwargs", [{}, {"app": True}, {"from_source": True}])
+def test_every_init_shape_is_clean_by_our_own_rules(tmp_path, kwargs):
+    """All three doors, not just the default. Shipping an onboarding file that
+    our own tool flags would be indefensible, and `--app` adds a `run:` build
+    step — the one place a new template could pick up egress it shouldn't."""
+    run_init(str(tmp_path), **kwargs)
+    result = analyze(tmp_path)
+    assert not result.diagnostics, "; ".join(
+        f"{d.path}: {d.message}" for d in result.diagnostics
+    )
+    gating = [f for f in result.findings if f.severity in ("critical", "warning")]
+    assert not gating, "; ".join(f"{f.severity} {f.rule_id}" for f in gating)
+
+
 def test_init_via_cli(repo_root, tmp_path):
     result = run_cli(["init", str(tmp_path)], cwd=repo_root)
     assert result.returncode == 0

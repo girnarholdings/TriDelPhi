@@ -64,6 +64,9 @@ header .wrap{display:flex;align-items:center;justify-content:space-between;gap:1
 .panel h2{font-size:19px;margin-bottom:4px}
 .panel .sub{color:var(--faint);font-size:13.5px;margin-bottom:18px}
 .field{margin:18px 0}
+/* The two doors show and hide whole groups of controls; `hidden` must win over
+   any layout rule that happens to match one of them. */
+[hidden]{display:none !important}
 .field > label.q{display:block;font-weight:600;margin-bottom:8px}
 .field .hint{color:var(--faint);font-size:13px;margin-top:6px}
 
@@ -136,7 +139,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
   <section class="hero">
     <span class="eyebrow">Setup Studio</span>
     <h1>Pick what runs. Get a ready-to-commit workflow.</h1>
-    <p>Choose your hardening level and options below — the workflow updates live. Then copy it, or
+    <p>Start with what you're actually worried about — the workflow updates live. Then copy it, or
       hit <b>Create this file on GitHub</b> to open the editor pre-filled and commit in one click.
       This page is fully static: your choices never leave your browser.</p>
   </section>
@@ -145,31 +148,56 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
     <!-- ─────────────────────────── CHOICES ─────────────────────────── -->
     <div class="panel">
       <h2>Choose what to run</h2>
-      <p class="sub">Each level is cumulative — it adds a scanner on top of the ones below it.</p>
+      <p class="sub">Two different questions. Pick the one you have.</p>
 
+      <!-- The door. This used to open on "Hardening ladder level", which is a
+           purchasing decision, not onboarding: someone who arrived asking "is my
+           app leaking?" got a bill of materials for a CI pipeline they may not
+           even have. Deep-link the engineer path with ?path=ci. -->
       <div class="field">
-        <label class="q" id="lvl-label">Hardening ladder level</label>
-        <div class="seg" role="radiogroup" aria-labelledby="lvl-label" id="levels"></div>
-        <p class="hint" id="lvl-hint"></p>
+        <label class="q" id="path-label">What are you checking?</label>
+        <div class="seg" role="radiogroup" aria-labelledby="path-label" id="paths">
+          <label><input type="radio" name="path" value="app" checked>
+            <span class="pill"><b>🔦</b>What I ship</span></label>
+          <label><input type="radio" name="path" value="ci">
+            <span class="pill"><b>🤖</b>My GitHub robots</span></label>
+        </div>
+        <p class="hint" id="path-hint"></p>
       </div>
 
-      <div class="field">
-        <label class="q">Extras</label>
-        <label class="toggle"><input type="checkbox" id="expose">
-          <span class="t"><b>Audit what I ship — <code style="font-family:var(--mono)">expose</code></b>
-          <span>Also scan committed code/config for leaked secrets, an open database, or shipped source. Advisory — it uploads to the Security tab and never fails the build.</span></span></label>
-        <label class="toggle"><input type="checkbox" id="comment" checked>
-          <span class="t"><b>Post a plain-language PR comment</b>
-          <span>A sticky, jargon-free summary on each pull request.</span></span></label>
+      <div id="ci-only">
+        <div class="field">
+          <label class="q" id="lvl-label">Hardening ladder level</label>
+          <div class="seg" role="radiogroup" aria-labelledby="lvl-label" id="levels"></div>
+          <p class="hint" id="lvl-hint"></p>
+        </div>
+
+        <div class="field">
+          <label class="q">Extras</label>
+          <label class="toggle"><input type="checkbox" id="expose">
+            <span class="t"><b>Also audit what I ship — <code style="font-family:var(--mono)">expose</code></b>
+            <span>Also scan committed code/config for leaked secrets, an open database, or shipped source. Advisory — it uploads to the Security tab and never fails the build.</span></span></label>
+          <label class="toggle"><input type="checkbox" id="comment" checked>
+            <span class="t"><b>Post a plain-language PR comment</b>
+            <span>A sticky, jargon-free summary on each pull request.</span></span></label>
+        </div>
+
+        <div class="field">
+          <label class="q" for="failon">Fail the build when it finds…</label>
+          <select id="failon">
+            <option value="critical" selected>a critical (recommended)</option>
+            <option value="warning">a warning or worse (strict)</option>
+            <option value="none">never — report only</option>
+          </select>
+        </div>
       </div>
 
-      <div class="field">
-        <label class="q" for="failon">Fail the build when it finds…</label>
-        <select id="failon">
-          <option value="critical" selected>a critical (recommended)</option>
-          <option value="warning">a warning or worse (strict)</option>
-          <option value="none">never — report only</option>
-        </select>
+      <div class="field" id="app-only">
+        <label class="q" for="buildcmd">How do you build your app?</label>
+        <input type="text" id="buildcmd" value="npm ci &amp;&amp; npm run build" autocomplete="off" spellcheck="false">
+        <p class="hint">The audit reads files on disk, so your built output has to exist before it
+          looks. Without a build it still catches committed keys and open database rules — it just
+          can't see inside a bundle that was never built.</p>
       </div>
 
       <div class="field">
@@ -182,9 +210,9 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
     <!-- ─────────────────────────── OUTPUT ─────────────────────────── -->
     <div class="panel out">
       <h2>Your workflow</h2>
-      <p class="sub">Commit this as <code style="font-family:var(--mono)">.github/workflows/tridelphi.yml</code>.</p>
+      <p class="sub">Commit this as <code style="font-family:var(--mono)" id="fname-sub">.github/workflows/tridelphi-app.yml</code>.</p>
 
-      <div class="filebar"><span>.github/workflows/tridelphi.yml</span><span id="lvl-tag"></span></div>
+      <div class="filebar"><span id="fname-bar">.github/workflows/tridelphi-app.yml</span><span id="lvl-tag"></span></div>
       <pre id="yaml" tabindex="0"></pre>
 
       <div class="btns">
@@ -199,14 +227,14 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
         <span class="copied" id="copied">Copied ✓</span>
       </div>
 
-      <div class="oneline">
+      <div class="oneline" id="oneline-wrap">
         <div class="filebar"><span>already have a workflow? just add this step</span></div>
         <pre id="oneline" tabindex="0"></pre>
       </div>
 
       <div class="note">
         <b>Prefer the terminal?</b>
-        <p>Run <code>pipx install tridelphi &amp;&amp; tridelphi init --wizard</code> for the same
+        <p>Run <code>pipx install git+https://github.com/girnarholdings/TriDelPhi &amp;&amp; tridelphi init --wizard</code> for the same
           click-through, plus the optional reply-to-fix bot (comment <code>tridelphi fix</code> on a PR
           and it applies verified fixes).</p>
       </div>
@@ -233,7 +261,15 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
 
 <script>
 (function () {
-  var CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4";
+  // Kept identical to the pins in tridelphi/init_cmd.py — this page and
+  // `tridelphi init` generate the same workflows, so they must agree.
+  var CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1";
+  var SETUP_PYTHON = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0";
+  // Pinned on purpose: an unpinned install inside a job holding a repository
+  // token is the supply-chain shape this tool exists to flag. Mirrors
+  // tridelphi/release.py — install_command(pinned=True).
+  var INSTALL_PINNED = "pipx install git+https://github.com/girnarholdings/TriDelPhi" +
+    "@d5c01388c21de9c1d12159087890d12d2d917990";
   var LEVELS = [
     ["0", "core", "Rule-of-Two capability scan only"],
     ["1", "+secrets", "adds gitleaks — keys committed in the open"],
@@ -251,6 +287,13 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
   var elComment = document.getElementById("comment");
   var elFail = document.getElementById("failon");
   var elRepo = document.getElementById("repo");
+  var elPathHint = document.getElementById("path-hint");
+  var elCiOnly = document.getElementById("ci-only");
+  var elAppOnly = document.getElementById("app-only");
+  var elBuild = document.getElementById("buildcmd");
+  var elFnameBar = document.getElementById("fname-bar");
+  var elFnameSub = document.getElementById("fname-sub");
+  var elOnelineWrap = document.getElementById("oneline-wrap");
   var elYaml = document.getElementById("yaml");
   var elOne = document.getElementById("oneline");
   var elCreate = document.getElementById("createBtn");
@@ -269,7 +312,56 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
     return r ? r.value : "3";
   }
 
-  function buildYaml() {
+  function path() {
+    var r = document.querySelector('input[name="path"]:checked');
+    return r ? r.value : "app";
+  }
+
+  // The exposure audit, as a standalone workflow. Deliberately not the composite
+  // action: this is someone's first workflow file, and it should be short enough
+  // that they can read every line of it before committing.
+  function buildAppYaml() {
+    return [
+      "# Added by the TriDelPhi Setup Studio. Builds your app, then audits what the",
+      "# build actually ships: keys inlined into browser bundles, source maps that",
+      "# hand over your repository, open database rules, committed credentials.",
+      "# Docs: https://girnarholdings.github.io/TriDelPhi/",
+      "name: TriDelPhi app audit",
+      "",
+      "on:",
+      "  pull_request:",
+      "  push:",
+      "    branches: [main, master]",
+      "  workflow_dispatch:",
+      "",
+      "permissions:",
+      "  contents: read",
+      "  pull-requests: write",
+      "",
+      "jobs:",
+      "  audit:",
+      "    name: What does this app leak?",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: " + CHECKOUT,
+      "",
+      "      # The audit reads files on disk, so build first or it can't see inside",
+      "      # your bundle. Edit this to match how you build.",
+      "      - name: Build",
+      "        run: " + (elBuild.value.trim() || "npm ci && npm run build"),
+      "",
+      "      - uses: " + SETUP_PYTHON,
+      "        with:",
+      "          python-version: '3.12'",
+      "      - name: Install TriDelPhi",
+      "        run: " + INSTALL_PINNED,
+      "",
+      "      - name: Audit what we ship",
+      "        run: tridelphi expose . --fail-on none | tee -a \"$GITHUB_STEP_SUMMARY\""
+    ].join("\n") + "\n";
+  }
+
+  function buildCiYaml() {
     var lines = [
       "# Added by the TriDelPhi Setup Studio / `tridelphi init --wizard`. One line runs",
       "# the whole chosen ladder and merges every result into one code-scanning upload.",
@@ -297,7 +389,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
       "    runs-on: ubuntu-latest",
       "    steps:",
       "      - uses: " + CHECKOUT,
-      "      - uses: girnarholdings/TriDelPhi@v3",
+      "      - uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1",
       "        with:",
       "          level: '" + level() + "'",
       "          fail-on: " + elFail.value,
@@ -309,7 +401,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
 
   function buildOneline() {
     var lines = [
-      "- uses: girnarholdings/TriDelPhi@v3",
+      "- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1",
       "  with:",
       "    level: '" + level() + "'",
       "    fail-on: " + elFail.value,
@@ -319,18 +411,49 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
     return lines.join("\n") + "\n";
   }
 
+  var PATH_HINT = {
+    app: "Builds your app, then reports what the build ships — inlined keys, source " +
+         "maps, open database rules, committed credentials. Advisory: it reports, it " +
+         "never fails your build.",
+    ci: "Scans your GitHub Actions for the job a stranger's comment could turn into " +
+        "code execution with your secrets — then whatever else you pick below."
+  };
+
+  function buildYaml() {
+    return path() === "app" ? buildAppYaml() : buildCiYaml();
+  }
+
+  function fileName() {
+    return path() === "app"
+      ? ".github/workflows/tridelphi-app.yml"
+      : ".github/workflows/tridelphi.yml";
+  }
+
   function render() {
+    var isApp = path() === "app";
+    elCiOnly.hidden = isApp;
+    elAppOnly.hidden = !isApp;
+    elOnelineWrap.hidden = isApp;
+    elPathHint.textContent = PATH_HINT[path()];
+
     var yaml = buildYaml();
     elYaml.textContent = yaml;
-    elOne.textContent = buildOneline();
-    var lv = LEVELS[parseInt(level(), 10)];
-    elHint.textContent = "L" + lv[0] + " · " + lv[2];
-    elTag.textContent = "level " + lv[0] + (elExpose.checked ? " · +expose" : "");
+    var name = fileName();
+    elFnameBar.textContent = name;
+    elFnameSub.textContent = name;
+    if (isApp) {
+      elTag.textContent = "advisory";
+    } else {
+      elOne.textContent = buildOneline();
+      var lv = LEVELS[parseInt(level(), 10)];
+      elHint.textContent = "L" + lv[0] + " · " + lv[2];
+      elTag.textContent = "level " + lv[0] + (elExpose.checked ? " · +expose" : "");
+    }
 
     var repo = elRepo.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, "");
     if (/^[\w.-]+\/[\w.-]+$/.test(repo)) {
       var url = "https://github.com/" + repo + "/new/main?filename=" +
-        encodeURIComponent(".github/workflows/tridelphi.yml") +
+        encodeURIComponent(name) +
         "&value=" + encodeURIComponent(yaml);
       elCreate.setAttribute("href", url);
       elCreate.setAttribute("aria-disabled", "false");
@@ -359,6 +482,14 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
     document.querySelector(".panel").addEventListener(ev, render);
     elRepo.addEventListener(ev, render);
   });
+
+  // `?path=ci` opens on the engineer door, so the README, the Marketplace
+  // listing and anywhere else aimed at someone who already has CI can link
+  // straight past the app audit instead of teaching them the wrong thing first.
+  if (/[?&]path=ci\b/.test(window.location.search)) {
+    var ciRadio = document.querySelector('input[name="path"][value="ci"]');
+    if (ciRadio) ciRadio.checked = true;
+  }
   render();
 })();
 </script>

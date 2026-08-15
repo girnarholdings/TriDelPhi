@@ -82,7 +82,7 @@ once it can pass on the first try.
 
 ## Publishing the action (the `@v1` tag)
 
-`- uses: girnarholdings/TriDelPhi@v1` resolves to a git tag, and Marketplace
+`- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1` resolves to a commit, and Marketplace
 listing hangs off a release. Neither can be created from inside CI safely, so
 after the bundle PR merges:
 

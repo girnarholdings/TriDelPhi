@@ -61,7 +61,7 @@ the listing; no separate copy needed. If a short blurb is requested, use:
 **Suggested one-liner for users** (already the README headline):
 
 ```yaml
-- uses: girnarholdings/TriDelPhi@v3
+- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1
   with: { level: '7', expose: 'true' }
 ```
 
@@ -70,7 +70,7 @@ the listing; no separate copy needed. If a short blurb is requested, use:
 - Add the Marketplace badge to `README.md` (swap in the real slug once published):
   `[![Marketplace](https://img.shields.io/badge/GitHub%20Marketplace-TriDelPhi-2ea44f?logo=github)](https://github.com/marketplace/actions/tridelphi)`
 - Point the site's Setup Studio “one line” snippet at the Marketplace listing if
-  desired (it already uses `girnarholdings/TriDelPhi@v3`, which is what Marketplace
+  desired (it already uses `girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1`, which is what Marketplace
   installs).
 
 *Marketplace listing is optional — the action works from the `uses:` path whether or

@@ -179,7 +179,7 @@ jobs:
             echo
             tridelphi fix --markdown || true
             echo
-            echo 'Fix it from your terminal, interactively: `__TRIDELPHI_INSTALL__ && tridelphi guard`'
+            echo 'Fix it from your terminal, interactively: `__TRIDELPHI_INSTALL_LOCAL__ && tridelphi guard`'
           } >> "$GITHUB_STEP_SUMMARY"
           echo "TriDelPhi: critical finding — see the job Summary for the fix plan." >&2
           exit 1
@@ -506,9 +506,11 @@ jobs:
 # — a command that 404s, in the file we hand a first-time user, inside CI where
 # they cannot debug it. A generated workflow must never contain an install that
 # we have not checked resolves.
-WORKFLOW = WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command())
-FIX_WORKFLOW = FIX_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command())
-APP_WORKFLOW = APP_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command())
+WORKFLOW = WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command(pinned=True))
+# …except the one line that tells a *human* what to run on their own laptop.
+WORKFLOW = WORKFLOW.replace("__TRIDELPHI_INSTALL_LOCAL__", install_command())
+FIX_WORKFLOW = FIX_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command(pinned=True))
+APP_WORKFLOW = APP_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command(pinned=True))
 
 
 _NEXT_STEPS = """\

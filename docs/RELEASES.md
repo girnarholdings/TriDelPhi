@@ -86,7 +86,7 @@ gate.
   changed fails the build — the case SHA-pinning can't see (the tj-actions class)
 
 ```yaml
-- uses: girnarholdings/TriDelPhi@v3
+- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1
   with: { level: '7' }
 ```
 
@@ -144,7 +144,7 @@ In CI, add `expose: 'true'` to the action to also audit the checkout (advisory �
 the Security tab, never fails the build). `privatize` is deliberately not in the action.
 
 ```yaml
-- uses: girnarholdings/TriDelPhi@v3
+- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1
   with: { level: '7', expose: 'true' }
 ```
 
@@ -154,12 +154,55 @@ the Security tab, never fails the build). `privatize` is deliberately not in the
 
 ---
 
+# The two switches in `tridelphi/release.py`
+
+Everything a user is told to type — the install line and the Action pin — is
+generated from `tridelphi/release.py`, and `tests/test_release_pin.py` fails the
+build if any surface drifts from it. This is not tidiness. Both strings had
+silently stopped resolving: the site, the README and the Setup Studio told people
+to run `pipx install tridelphi` against a package that 404s, and every `uses:`
+line said `@v3` when only `v3.1.0` and `v3.0.0-beta` were tagged. Those are the
+first two commands anybody runs.
+
+## Switch 1 — `ACTION_SHA` / `ACTION_TAG`
+
+We advertise a **commit SHA with the version in a trailing comment**, the same
+discipline this repo applies to `actions/checkout`. It resolves today and it
+cannot be repointed at code the user never agreed to run.
+
+It is deliberately **not** an older release tag. `v3.1.0` is commit `04bc341`,
+which predates the August 2026 remediation of the fix-bot authorization bypass —
+advertising it would hand every new user the vulnerable bot. Whatever we pin must
+be a default-branch commit carrying the current security posture.
+
+To cut a release:
+
+1. Merge the release commit to `main`.
+2. Tag it: `git tag -a v3.1.1 -m "…" <sha> && git push origin v3.1.1`.
+3. Set `ACTION_SHA` to that commit and `ACTION_TAG` to that tag.
+4. Run `pytest tests/test_release_pin.py` — it rewrites nothing, it only tells
+   you which surface you forgot.
+
+If you later want a moving `v3` major tag (`git tag -f v3 <sha>`), point
+`action_uses()` at it instead. Keep the SHA form until that tag exists; an
+advertised pin that 404s is worse than a long one.
+
+## Switch 2 — `PYPI_PUBLISHED`
+
+Flip to `True` at first publish. Every advertised install becomes the short
+registry form in the same commit, everywhere, with no grep. Until then the git
+URL is what the README, the site and the Setup Studio print, and what the
+generated workflows install (pinned, because an unpinned install inside a job
+holding a repository token is the exact supply-chain shape this tool flags).
+
+---
+
 # Publishing to PyPI
 
-`pipx install tridelphi` is the install path the README, the website and every
-generated fix-bot workflow tell people to use, so until the package exists on
-PyPI those instructions are aspirational — the downstream fix bot in particular
-cannot install itself. This section closes that gap.
+`pipx install tridelphi` is the install path we *want* the README, the website
+and every generated fix-bot workflow to use, so until the package exists on PyPI
+that spelling stays behind `PYPI_PUBLISHED` — the downstream fix bot in
+particular could not install itself. This section closes that gap.
 
 ## How it publishes: Trusted Publishing, no token
 
@@ -231,10 +274,13 @@ Confirm the install path the docs promise actually works:
 pipx install tridelphi && tridelphi --version
 ```
 
-At that point the generated fix-bot workflow (`tridelphi init`) becomes
-functional in downstream repositories: its `pipx install tridelphi` step can
-finally resolve. Until then, downstream fix bots fail at install — this repo's
-own copy sidesteps that by installing from its checkout.
+Then flip `PYPI_PUBLISHED = True` in `tridelphi/release.py` and re-run
+`pytest tests/test_release_pin.py`. That one edit switches the README, the site,
+the Setup Studio and every generated workflow to the registry form at once.
+
+Until that flip, downstream workflows install from the pinned git URL, which
+works — the earlier failure mode was that they installed from PyPI, which did
+not.
 
 ## Version numbers
 

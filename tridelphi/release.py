@@ -58,18 +58,25 @@ def action_uses() -> str:
     return f"{ACTION_REPO}@{ACTION_SHA} # {ACTION_TAG}"
 
 
-def install_command(*, tool: str = "pipx") -> str:
+def install_command(*, tool: str = "pipx", pinned: bool = False) -> str:
     """The install line that works right now.
 
     ``tool`` is ``pipx`` (isolated, what we recommend) or ``pip`` (into the
-    current environment). Until the package is on PyPI this returns the git
-    form, which installs the same commit the Action pins — so a user's CLI and
-    their CI agree on a version instead of silently differing.
+    current environment).
+
+    ``pinned`` decides floating-vs-immutable, and the two callers want opposite
+    things for good reasons. A human at a laptop gets the floating form: it is
+    short enough to retype, and re-running it is how they pick up a fix. A
+    **generated CI workflow always gets the pinned form** — an unpinned install
+    inside a job holding a repository token is precisely the supply-chain
+    sloppiness this tool exists to flag, and shipping it in our own onboarding
+    file would be indefensible.
     """
     prefix = "pipx install" if tool == "pipx" else "pip install"
     if PYPI_PUBLISHED:
-        return f"{prefix} tridelphi"
-    return f"{prefix} git+https://github.com/{ACTION_REPO}@{ACTION_SHA}"
+        return f"{prefix} tridelphi" if not pinned else f"{prefix} tridelphi=={ACTION_TAG[1:]}"
+    url = f"git+https://github.com/{ACTION_REPO}"
+    return f"{prefix} {url}@{ACTION_SHA}" if pinned else f"{prefix} {url}"
 
 
 # The full `uses:` line as it appears in generated workflow YAML.

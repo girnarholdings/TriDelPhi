@@ -1,6 +1,6 @@
 # Composite action — the one-line way to run the TriDelPhi hardening ladder.
 #
-#   - uses: girnarholdings/TriDelPhi@v1
+#   - uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1
 #
 # By default it climbs the full L1-L3 ladder over the checked-out repo:
 #

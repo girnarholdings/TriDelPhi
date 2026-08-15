@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/girnarholdings/TriDelPhi/actions/workflows/ci.yml/badge.svg)](https://github.com/girnarholdings/TriDelPhi/actions/workflows/ci.yml)
 [![Site](https://img.shields.io/badge/site-girnarholdings.github.io%2FTriDelPhi-e6b34a)](https://girnarholdings.github.io/TriDelPhi/)
-[![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-3776ab)](https://pypi.org/project/tridelphi/)
+[![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-3776ab)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-3ddc97)](LICENSE)
 [![Offline](https://img.shields.io/badge/default%20network%20calls-zero-f2604f)](#-offline-by-design)
 
@@ -22,8 +22,63 @@
 
 ---
 
+## Two doors
+
+TriDelPhi answers two different questions. Start at the one you actually have.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**“Can a stranger's comment steal my keys?”**
+
+You wired an AI agent — Claude Code, Gemini, Codex — or a `pull_request_target`
+into GitHub Actions, and you want to know which job a crafted comment turns into
+remote code execution.
+
 ```console
-$ pipx install tridelphi
+$ pipx install git+https://github.com/girnarholdings/TriDelPhi
+$ tridelphi .          # scan .github/workflows
+$ tridelphi init       # add the guard to CI
+```
+
+This is the rest of this README, and the thing nothing else does: a per-job
+**U ∩ P ∩ E** capability graph with per-action restore semantics.
+
+</td>
+<td width="50%" valign="top">
+
+**“Did I just leak my app?”**
+
+You shipped a Next/Vite/Firebase app and you are worried your OpenAI key, your
+database, or your source is public. You may not have GitHub Actions at all.
+
+```console
+$ pipx install git+https://github.com/girnarholdings/TriDelPhi
+$ tridelphi expose .   # audit what you ship
+$ tridelphi init --app # add that audit to CI
+```
+
+Keys inlined into browser bundles, source maps that hand over your repository,
+`allow … : if true`, Supabase `service_role`, committed credentials, open
+databases. Jump to **[`expose`](#-audit--harden-what-you-ship)**.
+
+</td>
+</tr>
+</table>
+
+> **`tridelphi .` reads `.github/workflows` and nothing else.** If your repo has
+> no Actions it will tell you so and point you at `expose` — it will never report
+> a clean bill of health for an app it did not open.
+
+> **Install note.** `tridelphi` is not on PyPI yet, so the git URL above is the
+> install that works; it is the same commit the Action pins, so your CLI and your
+> CI run identical code. See [`docs/RELEASES.md`](docs/RELEASES.md).
+
+---
+
+```console
+$ pipx install git+https://github.com/girnarholdings/TriDelPhi
 $ tridelphi .
 ```
 
@@ -64,24 +119,24 @@ one merged report.
 
 ---
 
-### 🔦 New — audit & harden what you *ship*, not just your CI
+### 🔦 Door 2 in detail — audit what you *ship*, not just your CI
 
-Two sibling commands extend TriDelPhi past the pipeline to your deployed product —
-built for people who *vibe-code* an app and worry their source, secrets, and
-self-hosted database are exposed:
+**[`tridelphi expose`](#-audit--harden-what-you-ship)** is a static audit of your
+committed code and config for what a shipped app actually leaks: source maps that
+hand over your whole repo, ~25 shapes of live API key (AWS, Stripe, GitHub, **and
+AI keys** — OpenAI/Anthropic/…), secrets behind a `NEXT_PUBLIC_` prefix, weak
+password hashing, self-hosted databases left open, committed credentials, and
+wide-open Firebase rules.
 
-- **[`tridelphi expose`](#-audit--harden-what-you-ship)** — a static audit of your
-  committed code and config for what a shipped app actually leaks: source maps that
-  hand over your whole repo, ~25 shapes of live API key (AWS, Stripe, GitHub, **and
-  AI keys** — OpenAI/Anthropic/…), secrets behind a `NEXT_PUBLIC_` prefix, weak
-  password hashing, self-hosted databases left open, committed credentials, and
-  wide-open Firebase rules. Offline, deterministic, and honest — a browser can never
-  keep a secret, so it says *rotate and move it server-side*, never "hide it."
-- **[`tridelphi privatize`](#-audit--harden-what-you-ship)** — an opt-in,
-  consent-gated obfuscator that raises the effort of copying your JavaScript. It is
-  **not security**, refuses to run if your build ships a secret, and keeps its result
-  **only if your own smoke check still passes** — otherwise it reverts to your exact
-  bytes.
+Offline, deterministic, and honest about what it cannot know. A browser can never
+keep a secret, so it says *rotate it and move it server-side* — never "hide it."
+Public-by-design keys (Firebase web config, Supabase `anon`) are graded as notes,
+not scare-criticals; Supabase `service_role` is the one that gates.
+
+<sub>There is also `tridelphi privatize`, a consent-gated JavaScript obfuscator. It
+is **not security**, it refuses to run if your build ships a secret, and it is
+deliberately not part of either door — see
+[Audit & harden what you ship](#-audit--harden-what-you-ship).</sub>
 
 ---
 
@@ -460,13 +515,25 @@ a gap is a [tracked contribution](#-harden-it-further).
 ## 📦 Install
 
 ```console
-pipx install tridelphi          # recommended — isolated
-pip install tridelphi           # or into your environment
-uvx tridelphi .                 # or run without installing
+# recommended — isolated
+pipx install git+https://github.com/girnarholdings/TriDelPhi
+
+# or into the current environment
+pip install git+https://github.com/girnarholdings/TriDelPhi
 ```
 
 **Python 3.11+. One runtime dependency: `ruamel.yaml`.** The wrapped ladder tools
 are optional and detected on `PATH`.
+
+> **Why a git URL and not `pipx install tridelphi`?** Because the package is not
+> on PyPI yet, and an install line that 404s is worse than a long one — it is the
+> first command you run, and it fails without telling you the docs were wrong.
+> The same reason applies to `uvx tridelphi`, which cannot work until the package
+> is published. When it is, this line becomes the short one; see
+> [`docs/RELEASES.md`](docs/RELEASES.md).
+>
+> To pin a specific commit (what our generated CI workflows do, and what you
+> should do in yours), append `@<sha>`.
 
 ## 🚀 Use it
 
@@ -653,7 +720,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: girnarholdings/TriDelPhi@v3   # the whole ladder, one line
+      - uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1   # the whole ladder, one line
         with: { level: '3' }
 ```
 
