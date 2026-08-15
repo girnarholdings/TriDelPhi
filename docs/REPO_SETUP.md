@@ -80,22 +80,25 @@ once it can pass on the first try.
 
 ---
 
-## Publishing the action (the `@v1` tag)
+## Publishing the action
 
-`- uses: girnarholdings/TriDelPhi@v1` resolves to a git tag, and Marketplace
-listing hangs off a release. Neither can be created from inside CI safely, so
-after the bundle PR merges:
+This section described a `v1` / `v1.0.0` scheme that the project left behind at
+`v3.0.0-beta`; the live tags are `v3.1.0` and `v3.0.0-beta`, and no `v3` exists.
+That drift is exactly how every `uses:` line in the repo came to advertise a pin
+that 404s.
 
-```console
-git tag -f v1 <merge-commit>     # the major tag users pin to
-git tag v1.0.0 <merge-commit>    # the immutable release tag
-git push origin v1 v1.0.0
-```
+What we advertise now is a **commit SHA with the version in a trailing comment**
+— `- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1` —
+generated from `tridelphi/release.py` and enforced by `tests/test_release_pin.py`.
+A SHA resolves immediately, needs no tag to exist first, and cannot be repointed
+at code the user never agreed to run. The full runbook, including when to switch
+to a moving major tag, is **[`docs/RELEASES.md`](RELEASES.md)** — a single file,
+so this one cannot drift again.
 
-Then draft a GitHub release from `v1.0.0` and tick **Publish this Action to
-the GitHub Marketplace** (requires the repo to be public and `action.yml` at
-the root — both already true). On every future release, move `v1` forward to
-the new release commit; never move `v1.0.0`.
+Tagging and the Marketplace listing still cannot be done from inside CI safely:
+after the release PR merges, tag the merge commit, draft a GitHub release from
+it, and tick **Publish this Action to the GitHub Marketplace** (requires the repo
+to be public and `action.yml` at the root — both already true).
 
 The wrapped scanners are pinned by version + SHA-256 in
 `scripts/install-ladder.sh`; bumping them is a normal PR that updates the

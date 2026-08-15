@@ -28,16 +28,46 @@ _SCOPE = (
 _MAX_ITEMS = 5
 
 
-def _status(findings: list[ExposeFinding]) -> tuple[str, str]:
+def _status(
+    findings: list[ExposeFinding], elsewhere: list[ExposeFinding] | None = None
+) -> tuple[str, str]:
+    """The row's icon and note.
+
+    ``elsewhere`` is the findings that answer this question but are *reported*
+    under another category (see ``ExposeFinding.also``). They never change the
+    body of the report — each finding is still printed exactly once, where its
+    explanation is most precise — but they do stop this row from printing "all
+    clear". A committed `.env` holding a live key made F say "all clear" while
+    the key was named three lines above under A; the row was technically about
+    where the finding was filed, and read as a clean bill of health.
+    """
     crit = sum(1 for f in findings if f.severity == "critical")
     warn = sum(1 for f in findings if f.severity == "warning")
     if crit:
         return "fail", f"{crit} to fix"
     if warn:
         return "warn", f"{warn} worth a look"
+    if elsewhere:
+        n = len(elsewhere)
+        return ("fail" if any(f.severity == "critical" for f in elsewhere) else "warn",
+                f"{n} listed above")
     if findings:  # notes only
         return "note", "informational"
     return "pass", "all clear"
+
+
+def _by_category(
+    findings: list[ExposeFinding],
+) -> tuple[dict[str, list[ExposeFinding]], dict[str, list[ExposeFinding]]]:
+    """Findings grouped by the category they are *reported* under, and separately
+    by the categories they are merely *evidence* for."""
+    owned: dict[str, list[ExposeFinding]] = {}
+    cross: dict[str, list[ExposeFinding]] = {}
+    for f in findings:
+        owned.setdefault(f.category, []).append(f)
+        for letter in f.also:
+            cross.setdefault(letter, []).append(f)
+    return owned, cross
 
 
 def _grouped_lines(
@@ -82,13 +112,11 @@ def _render_text(result: ExposureResult, repo: str, out: TextIO) -> None:
     print(bar, file=out)
     print("", file=out)
 
-    by_cat: dict[str, list[ExposeFinding]] = {c[0]: [] for c in CATEGORIES}
-    for f in result.findings:
-        by_cat.setdefault(f.category, []).append(f)
+    by_cat, cross_cat = _by_category(result.findings)
 
     icon = {"pass": "✅", "warn": "⚠️ ", "fail": "🚫", "note": "🔎", "skip": "⬜"}
     for letter, question, _gloss in CATEGORIES:
-        st, note = _status(by_cat.get(letter, []))
+        st, note = _status(by_cat.get(letter, []), cross_cat.get(letter))
         q = question if len(question) <= 52 else question[:51] + "…"
         print(f"  {icon[st]}  {q.ljust(52)}  {note}", file=out)
     if not result.semgrep_ran:
@@ -165,11 +193,9 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
     out.append("")
     out.append("| Check | Result |")
     out.append("|---|---|")
-    by_cat: dict[str, list[ExposeFinding]] = {}
-    for f in result.findings:
-        by_cat.setdefault(f.category, []).append(f)
+    by_cat, cross_cat = _by_category(result.findings)
     for letter, question, _gloss in CATEGORIES:
-        st, note = _status(by_cat.get(letter, []))
+        st, note = _status(by_cat.get(letter, []), cross_cat.get(letter))
         cell = {"fail": f"🚫 **{note}**", "warn": f"⚠️ {note}",
                 "note": f"🔎 {note}", "pass": "✅ all clear"}[st]
         out.append(f"| {question} | {cell} |")

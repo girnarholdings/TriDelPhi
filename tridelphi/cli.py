@@ -64,6 +64,16 @@ def build_parser() -> argparse.ArgumentParser:
              "a one-line composite-action workflow",
     )
     parser.add_argument(
+        "--app", action="store_true",
+        help="with init: write the app-exposure workflow instead — build, then audit what "
+             "your shipped product leaks. No ladder, no gate.",
+    )
+    parser.add_argument(
+        "--from-source", action="store_true",
+        help="with init: write the long transparent workflow (installs the CLI and runs "
+             "every step in the open) instead of the short composite-action one",
+    )
+    parser.add_argument(
         "--markdown", action="store_true",
         help="with `fix`: render the plan as Markdown to paste into a PR or ticket",
     )
@@ -93,10 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="with `privatize`: the built-output directory to obfuscate (default: dist/build/out)",
     )
     parser.add_argument(
-        "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default="text",
+        "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default=None,
         help=(
-            "output format (default: text; 'checklist' is the plain-language, "
-            "no-jargon report a first-time user can act on; html is browsable)"
+            "output format. Default: 'checklist' at an interactive terminal — the "
+            "plain-language, no-jargon report a first-time user can act on — and "
+            "'text' (the U/P/E detail) when stdout is a pipe, a file or CI, so "
+            "existing scripts are unchanged. 'html' is browsable; 'sarif' is the "
+            "machine contract."
         ),
     )
     parser.add_argument("--sarif-file", metavar="PATH", help="also write SARIF here")
@@ -206,16 +219,36 @@ def _list_rules(out) -> int:
     return 0
 
 
+def _default_format(stream) -> str:
+    """What `--format` means when nobody said.
+
+    A person at a terminal gets the checklist: the website promises plain
+    English, and "0 critical · 0 warning" plus a rule id is not something a
+    first-time reader can act on. Anything else — a pipe, a redirect, a CI log —
+    keeps the `text` renderer, so every existing script and workflow that reads
+    our stdout sees exactly what it saw before. `--format` always wins.
+    """
+    return "checklist" if hasattr(stream, "isatty") and stream.isatty() else "text"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.format is None:
+        args.format = _default_format(sys.stdout)
 
     # `tridelphi init` sets up the scan workflow; `tridelphi core .` and
     # `tridelphi .` both scan; `gate` and `attest` are L6's two processes.
     if args.path == "init":
         from .init_cmd import run_init
 
-        return run_init(args.command or ".", force=args.force, wizard=args.wizard)
+        return run_init(
+            args.command or ".",
+            force=args.force,
+            wizard=args.wizard,
+            app=args.app,
+            from_source=args.from_source,
+        )
     if args.path == "expose":
         # The exposure audit: shipped source maps + client secrets, DB config,
         # data hygiene. A sibling of the scan, not a ladder rung.
@@ -336,8 +369,20 @@ def main(argv: list[str] | None = None) -> int:
     elapsed = time.monotonic() - started
 
     if result.files_scanned == 0:
+        # "nothing to scan" and exit 0 is how someone ships a leaked key. This
+        # scan reads `.github/workflows`; a repo with none is not a safe repo,
+        # it is a repo we have said nothing about. Name the command that does
+        # look at their app — for most people arriving here, that is the one
+        # they actually wanted.
         print(
-            f"tridelphi: no .github/workflows found under {path} — nothing to scan",
+            f"tridelphi: no .github/workflows found under {path} — this scan checks "
+            "GitHub Actions, so it has not looked at your app at all.",
+            file=sys.stderr,
+        )
+        print(
+            f"tridelphi: to check what your app itself ships (keys in browser "
+            f"bundles, source maps, open database rules, committed credentials), "
+            f"run:  tridelphi expose {path}",
             file=sys.stderr,
         )
         if args.require_workflows:

@@ -574,9 +574,17 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
 
     <div class="cta">
       <div class="cmd-row">
-        <span class="cmd"><span class="pr">$</span> pipx install tridelphi</span>
+        <span class="cmd"><span class="pr">$</span> pipx install git+https://github.com/girnarholdings/TriDelPhi</span>
+        <span class="cmd"><span class="pr">$</span> tridelphi expose .</span>
         <span class="cmd"><span class="pr">$</span> tridelphi .</span>
       </div>
+      <span class="fine"><b>Two commands, two questions.</b>
+        <span class="mono">expose</span> checks <b>the app you shipped</b> — keys baked into the
+        browser bundle, an open database, your source in a <span class="mono">.map</span>.
+        <span class="mono">tridelphi&nbsp;.</span> checks <b>your GitHub robots</b>. It reads
+        <span class="mono">.github/workflows</span> and nothing else, so if you have no robots yet
+        it says so and sends you to <span class="mono">expose</span> — it will never tell you
+        you're fine about an app it didn't open.</span>
       <span class="fine"><b>No account. No sign-up. Nothing leaves your computer.</b> It just reads your files and tells you the truth.</span>
     </div>
 
@@ -679,10 +687,17 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
           <h3>Secrets and source your app leaks</h3>
           <p>AI keys baked into the bundle, a database open to the world, or your whole source shipped in a <span class="mono">.map</span> — read from your committed code, honestly.</p>
         </article>
+        <!-- `privatize` deliberately does not have a card here. "Make your code
+             harder to copy" is the most clickable thing on this page and the
+             least useful: obfuscation is not security, it cannot hide a key, and
+             putting it beside the real checks invites someone to reach for it
+             *instead of* rotating the secret. It keeps its honest write-up
+             further down the page, after `expose` has explained what actually
+             leaks. -->
         <article class="fcard" style="--ac:var(--p)">
-          <span class="ico">🕶️</span><span class="tag">privatize · optional</span>
-          <h3>Make your shipped code harder to copy</h3>
-          <p>An honest obfuscator for your built JavaScript — not security, refuses if you ship a secret, and reverts if it can't verify your app still runs.</p>
+          <span class="ico">🩺</span><span class="tag">expose · the fix, not the cover-up</span>
+          <h3>Told what to do, not just what's wrong</h3>
+          <p>Every finding names the file, the line, and the actual next step — <i>rotate this key and read it on the server</i>, <i>turn source maps off with this setting</i>, <i>replace <span class="mono">if true</span> with this rule</i>. A browser can never keep a secret, so it never tells you to hide one.</p>
         </article>
       </div>
       <div class="c-nav">
@@ -694,7 +709,7 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
 
     <p class="c-onboard">🎛️ Easy onboarding — pick exactly what runs in the
       <a href="setup.html">Setup Studio</a> and commit in one click, or run
-      <span class="mono">pipx install tridelphi &amp;&amp; tridelphi init --wizard</span>.</p>
+      <span class="mono">pipx install git+https://github.com/girnarholdings/TriDelPhi &amp;&amp; tridelphi init --wizard</span>.</p>
   </section>
 
   <!-- ======================================================= RULE OF TWO -->
@@ -1096,7 +1111,7 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
       <div class="term-win">
         <div class="term-top"><i></i><i></i><i></i><span>your terminal</span></div>
 <pre><span class="c"># 1. install it (once)</span>
-$ pipx install tridelphi
+$ pipx install git+https://github.com/girnarholdings/TriDelPhi
 
 <span class="c"># 2. set up the guard robot</span>
 $ tridelphi init

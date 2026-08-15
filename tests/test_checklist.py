@@ -48,10 +48,47 @@ def test_critical_reads_as_not_safe_with_a_plain_fix(repo_root):
     assert "critical" not in out.lower()  # the word severity never appears
 
 
-def test_clean_repo_reads_as_good(repo_root):
+def _all_ran(**overrides) -> dict:
+    """Every row reporting a clean run — the only state that earns a green banner."""
+    clean = {"critical": 0, "warning": 0, "note": 0}
+    names = ("gitleaks", "osv-scanner", "zizmor", "scorecard", "semgrep", "trust", "expose")
+    status = {n: ExternalStatus(ran=True, counts=dict(clean)) for n in names}
+    status.update(overrides)
+    return status
+
+
+def test_clean_core_scan_does_not_claim_more_than_it_checked(repo_root):
+    """The most dangerous sentence this tool can print is an unqualified
+    "YOU'RE GOOD" over a column of empty boxes. A core-only scan has looked at
+    GitHub Actions and nothing else — including nothing about the app itself —
+    so it must say so, and name the command that does look."""
     out = _render(repo_root / CLEAN)
-    assert "YOU'RE GOOD" in out
+    assert "YOU'RE GOOD" not in out
+    assert "NOTHING WRONG IN WHAT WE CHECKED" in out
+    assert "still empty" in out
+    assert "tridelphi expose" in out
     assert "✅" in out
+
+
+def test_green_banner_requires_every_check_to_have_run(repo_root):
+    """The converse: when everything really did run and pass, the reader gets
+    the unhedged verdict — the honesty fix must not make a clean repo unable to
+    ever look clean."""
+    out = _render(repo_root / CLEAN, external=_all_ran())
+    assert "YOU'RE GOOD — every check ran, and every check passed." in out
+    assert "NOTHING WRONG IN WHAT WE CHECKED" not in out
+    assert "not run" not in out
+
+
+def test_empty_repo_says_nothing_was_checked(repo_root, tmp_path):
+    """A repo with no workflows is not a repo that passed. It is a repo we said
+    nothing about — and it is the shape of every deployed web app."""
+    (tmp_path / "app").mkdir()
+    out = _render(tmp_path / "app")
+    assert "NOTHING WAS CHECKED" in out
+    assert "no GitHub Actions here" in out
+    assert "tridelphi expose" in out
+    assert "YOU'RE GOOD" not in out
 
 
 def test_ladder_rows_show_run_and_not_run(repo_root):
@@ -68,11 +105,12 @@ def test_ladder_rows_show_run_and_not_run(repo_root):
 
 def test_warnings_only_is_good_but_acknowledged(repo_root):
     # fail_on note demotes nothing, but warnings should soften the verdict text
-    external = {
-        "zizmor": ExternalStatus(ran=True, counts={"critical": 0, "warning": 3, "note": 0}),
-    }
+    external = _all_ran(
+        zizmor=ExternalStatus(ran=True, counts={"critical": 0, "warning": 3, "note": 0}),
+    )
     out = _render(repo_root / CLEAN, external=external)
-    assert "YOU'RE GOOD" in out
+    assert "NOT YET SAFE" not in out
+    assert "Every check ran; nothing urgent to fix." in out
     assert "minor items" in out or "worth a look" in out
 
 
@@ -98,7 +136,7 @@ def test_worth_a_look_is_explained_and_itemized(repo_root):
     assert ".github/workflows/ci.yml:25" in out
     assert ".github/workflows/other.yml:41" in out
     # still a pass — advisory items never flip the verdict
-    assert "YOU'RE GOOD" in out
+    assert "NOT YET SAFE" not in out
 
 
 def test_items_are_capped_with_a_pointer_to_the_full_report(repo_root):

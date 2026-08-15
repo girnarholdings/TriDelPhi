@@ -121,10 +121,13 @@ cost. Revisit when the rule count passes ~15.
 
 - Python **3.11.15** present.
 - `ruamel.yaml 0.19.1`, `jsonschema 4.26.0`, `pytest` all install clean in a venv.
-- The dependency allowlist in the brief (§2.3) holds. **No graph library needed** —
-  v1's model is one flat list of contexts with no edges between them. Adjacency
-  code would be zero lines, not forty. If cross-workflow `workflow_run` chaining
-  lands later, revisit.
+- The dependency allowlist in the brief (§2.3) holds. **No graph library needed.**
+  At the time of this prewalk the model was one flat list of contexts with no
+  edges; it has since grown them — `needs:` propagation and the artifact taint
+  channel (`DECISIONS.md` §3, and detection case D3). The conclusion survived the
+  change: the edges are a few dozen lines of in-process adjacency, and pulling in
+  a graph library (or a Neo4j server, as Raven does) would cost the offline
+  guarantee for nothing.
 
 ---
 

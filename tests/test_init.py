@@ -13,14 +13,55 @@ import pytest
 from conftest import run_cli
 
 from tridelphi.api import analyze
-from tridelphi.init_cmd import FIX_WORKFLOW, WORKFLOW, render_action_workflow, run_init
+from tridelphi.init_cmd import (
+    APP_WORKFLOW,
+    FIX_WORKFLOW,
+    WORKFLOW,
+    render_action_workflow,
+    run_init,
+)
+from tridelphi.release import ACTION_REF, install_command
 
 
-def test_init_writes_the_workflow(tmp_path):
+def test_init_writes_the_short_action_workflow_by_default(tmp_path):
+    """The default has to be the file a first-time user will actually commit.
+    The long transparent workflow is ~140 lines of pipx, harden-runner and
+    SARIF plumbing — correct, auditable, and the wrong thing to hand someone
+    who has never opened `.github/`."""
     assert run_init(str(tmp_path)) == 0
     wf = tmp_path / ".github/workflows/tridelphi.yml"
     assert wf.is_file()
+    assert wf.read_text() == render_action_workflow()
+    assert len(wf.read_text().splitlines()) < 40
+
+
+def test_init_from_source_writes_the_transparent_workflow(tmp_path):
+    assert run_init(str(tmp_path), from_source=True) == 0
+    wf = tmp_path / ".github/workflows/tridelphi.yml"
     assert wf.read_text() == WORKFLOW
+
+
+def test_init_app_writes_the_exposure_workflow(tmp_path):
+    """`--app` is the door for someone whose question is "did I leak my app?".
+    It builds, then audits what the build ships — no ladder, no gate."""
+    assert run_init(str(tmp_path), app=True) == 0
+    wf = tmp_path / ".github/workflows/tridelphi-app.yml"
+    assert wf.read_text() == APP_WORKFLOW
+    assert "tridelphi expose" in APP_WORKFLOW
+    assert "--fail-on none" in APP_WORKFLOW, "the app audit is advisory"
+    assert "level" not in APP_WORKFLOW, "no ladder vocabulary on this path"
+    # No fix bot: nothing `expose` reports is a workflow edit the bot can make.
+    assert not (tmp_path / ".github/workflows/tridelphi-fix.yml").exists()
+
+
+def test_generated_workflows_never_contain_a_broken_install(tmp_path):
+    """Every install line we write into someone's CI comes from `release.py`.
+    `pipx install tridelphi` was hard-coded in three templates while the package
+    404'd on PyPI — an install that fails inside CI, where they cannot debug it."""
+    for template in (WORKFLOW, FIX_WORKFLOW, APP_WORKFLOW):
+        assert "__TRIDELPHI_INSTALL__" not in template, "placeholder left unsubstituted"
+        assert install_command() in template
+    assert ACTION_REF in render_action_workflow()
 
 
 def test_init_writes_the_fix_bot(tmp_path):
@@ -96,6 +137,20 @@ def test_generated_workflows_are_clean_by_our_own_rules(tmp_path):
     assert not gating, "; ".join(f"{f.severity} {f.rule_id}" for f in gating)
 
 
+@pytest.mark.parametrize("kwargs", [{}, {"app": True}, {"from_source": True}])
+def test_every_init_shape_is_clean_by_our_own_rules(tmp_path, kwargs):
+    """All three doors, not just the default. Shipping an onboarding file that
+    our own tool flags would be indefensible, and `--app` adds a `run:` build
+    step — the one place a new template could pick up egress it shouldn't."""
+    run_init(str(tmp_path), **kwargs)
+    result = analyze(tmp_path)
+    assert not result.diagnostics, "; ".join(
+        f"{d.path}: {d.message}" for d in result.diagnostics
+    )
+    gating = [f for f in result.findings if f.severity in ("critical", "warning")]
+    assert not gating, "; ".join(f"{f.severity} {f.rule_id}" for f in gating)
+
+
 def test_init_via_cli(repo_root, tmp_path):
     result = run_cli(["init", str(tmp_path)], cwd=repo_root)
     assert result.returncode == 0
@@ -133,7 +188,7 @@ def _yaml(text: str):
 def test_render_action_workflow_carries_choices():
     wf = render_action_workflow(level=5, fail_on="warning", comment=False, expose=True)
     step = _yaml(wf)["jobs"]["harden"]["steps"][1]
-    assert step["uses"] == "girnarholdings/TriDelPhi@v3"
+    assert step["uses"] == ACTION_REF.split(" #")[0]
     assert step["with"]["level"] == "5"
     assert step["with"]["fail-on"] == "warning"
     assert step["with"]["comment"] == "false"

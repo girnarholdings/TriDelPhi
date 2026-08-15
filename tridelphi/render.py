@@ -177,4 +177,26 @@ def render_text(
             file=stream,
         )
     if not result.findings:
-        print(style.dim("  no findings — every job holds at most two of three capabilities"), file=stream)
+        # Distinguish "we looked and it was clean" from "there was nothing to
+        # look at". Both used to print the same reassuring line, so a repo with
+        # no CI at all — the common case for a deployed web app — got a clean
+        # bill of health for a scan that never opened a file.
+        if result.files_scanned == 0:
+            print(
+                style.dim(
+                    "  nothing scanned — no .github/workflows here. This checks GitHub\n"
+                    "  Actions only; it has not looked at your app. For what your app\n"
+                    "  ships, run: tridelphi expose ."
+                ),
+                file=stream,
+            )
+        else:
+            print(
+                style.dim(
+                    "  no findings — every job holds at most two of three capabilities.\n"
+                    "  Scope: your GitHub Actions. For what your app ships (keys in\n"
+                    "  browser bundles, source maps, open database rules), run:\n"
+                    "  tridelphi expose ."
+                ),
+                file=stream,
+            )
