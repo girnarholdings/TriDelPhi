@@ -37,6 +37,19 @@ _LADDER_ROWS: tuple[tuple[str, int, str], ...] = (
     ("trust", 7, "Did any trusted outside tool get swapped?"),
 )
 
+# The one question this scan cannot answer at any ladder level, because it is a
+# different command. It earns a permanent row: a reader who came here asking
+# "did I leak my keys?" must not close the report without learning that we never
+# looked at their app. Populate `external["expose"]` to mark it done.
+# (name, level, question) like the ladder rows, with level 0 meaning "not a rung
+# — a sibling command".
+_APP_ROW = ("expose", 0, "Does the app you ship leak keys, source, or your data?")
+
+# Every row's "how do I actually run this?" — printed next to an unchecked box,
+# because "not run" without the command is just a shrug.
+_HOW_TO_RUN = {name: f"add --level {level}" for name, level, _q in _LADDER_ROWS}
+_HOW_TO_RUN["expose"] = "run `tridelphi expose`"
+
 # which capability the fix removes → what a person actually does
 _PLAIN_FIX = {
     "U": "gate this job so only trusted people can trigger it",
@@ -323,9 +336,16 @@ def render_checklist(
         return "pass", "all clear"
 
     any_warn = False
+    # Every question we printed a ⬜ against. This list is what stops the report
+    # from ending in a green banner it has not earned.
+    unchecked: list[str] = []
 
-    # Core: the Rule of Two — always runs.
-    if core_crit:
+    # Core: the Rule of Two — always runs. Except it does not *look at anything*
+    # when the repo has no workflows, and an empty scan is not a passing scan.
+    if files_scanned == 0:
+        status, cnote = "skip", "no GitHub Actions here — nothing was checked"
+        unchecked.append("core")
+    elif core_crit:
         status, cnote = "fail", f"{len(core_crit)} to fix"
     elif core_warn:
         status, cnote = "warn", f"{len(core_warn)} worth a look"
@@ -334,10 +354,11 @@ def render_checklist(
     any_warn = any_warn or status == "warn"
     print(_row(status, "Can a stranger trick a robot into leaking your keys?", cnote), file=stream)
 
-    for name, level, question in _LADDER_ROWS:
+    for name, _level, question in (*_LADDER_ROWS, _APP_ROW):
         st = external.get(name)
         if st is None or not st.ran:
-            print(_row("skip", question, f"not run — add --level {level}"), file=stream)
+            unchecked.append(name)
+            print(_row("skip", question, f"not run — {_HOW_TO_RUN[name]}"), file=stream)
         else:
             status, cnote = note_for(st.counts)
             any_warn = any_warn or status == "warn"
@@ -443,18 +464,47 @@ def render_checklist(
             print("", file=stream)
 
     # --- verdict, in plain words ---
+    #
+    # The rule this section exists to enforce: **never claim safety for something
+    # we did not look at.** "YOU'RE GOOD" under five ⬜ boxes is how a person
+    # ships a live Stripe key — the empty boxes are easy to ignore next to a
+    # green banner, and the banner is the only line most readers keep. So a
+    # green verdict is reserved for the run where everything actually ran, and
+    # every other clean run says plainly what was and was not examined.
     print(f"\n  {'─' * 54}\n", file=stream)
-    safe = total_to_fix == 0
-    if safe and not any_warn:
-        print("  Result:  ✅  YOU'RE GOOD — every check passed.", file=stream)
-        print("           Run this again whenever you change your workflows.", file=stream)
-    elif safe:
-        print("  Result:  ✅  YOU'RE GOOD — nothing urgent to fix.", file=stream)
-        print("           The minor items are spelled out above if you'd like to tidy up.", file=stream)
-    else:
+    if total_to_fix:
         item = "item" if total_to_fix == 1 else "items"
         print(f"  Result:  ⚠️  NOT YET SAFE — fix the {total_to_fix} {item} above, then run this again.", file=stream)
         print("           None of it is hard; each fix is usually one setting.", file=stream)
+        if unchecked:
+            n = len(unchecked)
+            print(f"           Note: {n} check{'s' if n != 1 else ''} above did not run. Fixing "
+                  "these clears what", file=stream)
+            print("           we looked at, not what we never looked at.", file=stream)
+    elif files_scanned == 0:
+        print("  Result:  ⬜  NOTHING WAS CHECKED — this repo has no GitHub Actions,", file=stream)
+        print("               and GitHub Actions is the only thing this command reads.", file=stream)
+        print("           Your app itself has not been looked at. To check what it", file=stream)
+        print("           ships — keys inlined into browser bundles, source maps,", file=stream)
+        print("           open database rules, committed credentials — run:", file=stream)
+        print("               tridelphi expose .", file=stream)
+    elif unchecked:
+        n = len(unchecked)
+        print("  Result:  ✅  NOTHING WRONG IN WHAT WE CHECKED — and we did not", file=stream)
+        print(f"               check everything: {n} box{'es' if n != 1 else ''} above "
+              f"{'are' if n != 1 else 'is'} still empty.", file=stream)
+        if "expose" in unchecked:
+            print("           Most importantly, your app itself was not examined. If", file=stream)
+            print("           what worries you is a leaked key or an open database,", file=stream)
+            print("           that is a different command:  tridelphi expose .", file=stream)
+        else:
+            print("           Each empty box above names how to run it.", file=stream)
+    elif not any_warn:
+        print("  Result:  ✅  YOU'RE GOOD — every check ran, and every check passed.", file=stream)
+        print("           Run this again whenever you change your workflows.", file=stream)
+    else:
+        print("  Result:  ✅  Every check ran; nothing urgent to fix.", file=stream)
+        print("           The minor items are spelled out above if you'd like to tidy up.", file=stream)
 
     if result.diagnostics:
         n = len(result.diagnostics)
@@ -510,12 +560,26 @@ def render_checklist_markdown(
     )
     total_to_fix = len(core_crit) + external_crit
 
+    # Same rule as the terminal verdict: the heading must not claim safety for a
+    # check that never ran. This heading is the notification email's subject line
+    # for most readers — it is the single most-read string the tool produces.
+    unchecked = [
+        name for name, _lvl, _q in (*_LADDER_ROWS, _APP_ROW)
+        if (st := external.get(name)) is None or not st.ran
+    ]
+    if files_scanned == 0:
+        unchecked.insert(0, "core")
+
     out: list[str] = []
     if total_to_fix:
         item = "thing" if total_to_fix == 1 else "things"
         out.append(f"### 🔺 TriDelPhi — 🚫 {total_to_fix} {item} to fix before this is safe")
+    elif files_scanned == 0:
+        out.append("### 🔺 TriDelPhi — ⬜ nothing was checked (no GitHub Actions here)")
+    elif unchecked:
+        out.append("### 🔺 TriDelPhi — ✅ nothing wrong in what we checked")
     else:
-        out.append("### 🔺 TriDelPhi — ✅ You're good, nothing urgent")
+        out.append("### 🔺 TriDelPhi — ✅ every check ran and passed")
     out.append(
         f"_{repo_label} · {jobs_scanned} job{'s' if jobs_scanned != 1 else ''} across "
         f"{files_scanned} workflow{'s' if files_scanned != 1 else ''} · ran on the runner, "
@@ -525,16 +589,45 @@ def render_checklist_markdown(
     out.append("| Check | Result |")
     out.append("|---|---|")
     core_counts = {"critical": len(core_crit), "warning": len(core_warn), "note": 0}
-    out.append(
-        f"| Can a stranger trick a robot into leaking your keys? | {status_cell(core_counts)} |"
+    core_cell = (
+        "⬜ no GitHub Actions here — nothing was checked"
+        if files_scanned == 0
+        else status_cell(core_counts)
     )
+    out.append(f"| Can a stranger trick a robot into leaking your keys? | {core_cell} |")
     for name, level, question in _LADDER_ROWS:
         st = external.get(name)
         if st is None or not st.ran:
             out.append(f"| {question} | ⬜ not run — add `--level {level}` |")
         else:
             out.append(f"| {question} | {status_cell(st.counts)} |")
+    app_st = external.get(_APP_ROW[0])
+    if app_st is None or not app_st.ran:
+        out.append(f"| {_APP_ROW[2]} | ⬜ not run — `tridelphi expose` |")
+    else:
+        out.append(f"| {_APP_ROW[2]} | {status_cell(app_st.counts)} |")
     out.append("")
+    if unchecked:
+        # Spelled out in prose, not only as ⬜ in a table: a reader skimming an
+        # email sees the heading and the first paragraph, and a row of empty
+        # boxes under a ✅ heading reads as "all fine" to the eye.
+        n = len(unchecked)
+        scope = (
+            "This checked your GitHub Actions only."
+            if files_scanned
+            else "This repo has no GitHub Actions, so nothing was checked at all."
+        )
+        app_line = (
+            " Your app itself was **not** examined — run `tridelphi expose` for the "
+            "keys, source maps, database rules and credentials your product ships."
+            if _APP_ROW[0] in unchecked
+            else ""
+        )
+        out.append(
+            f"> **{scope}** {n} check{'s' if n != 1 else ''} in the table above did not "
+            f"run.{app_line}"
+        )
+        out.append("")
 
     # Criticals stay in the open — never folded.
     actionable = sorted(

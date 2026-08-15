@@ -490,3 +490,91 @@ def test_public_bucket_acl_in_terraform_is_a_warning(tmp_path):
     result = _native(root)
     hits = [f for f in result.findings if f.category == "G" and f.rule == "public-bucket"]
     assert hits and hits[0].severity == "warning"
+
+
+# ---------------------------------------------------------------------------
+# report consistency — the two contradictions a first-run reader actually hit
+#
+# `expose`'s "Do this:" voice is the most persuasive writing in the product, and
+# a reader only extends that trust once. Both of these were cases where two parts
+# of the same report disagreed, which costs more than a missed finding: it teaches
+# the reader that the tool does not know what it is talking about.
+# ---------------------------------------------------------------------------
+
+
+def test_firebase_web_key_in_env_matches_the_bundle_verdict(tmp_path):
+    """A `NEXT_PUBLIC_FIREBASE_API_KEY` is the same public-by-design key whether
+    we find it in a bundle or in `.env`. It used to be a note in one place and a
+    critical in the other — and the website says we leave it alone."""
+    root = _repo(tmp_path, {
+        ".env": "NEXT_PUBLIC_FIREBASE_API_KEY=AIza" + "b" * 35 + "\n",
+    })
+    result = _native(root)
+    assert not result.gating(), "a Firebase web key must never fail the build"
+    notes = [f for f in result.findings if f.rule == "firebase-public-key"]
+    assert len(notes) == 1
+    assert notes[0].severity == "note"
+    assert "does not grant access" in notes[0].message
+
+
+def test_a_real_secret_behind_a_public_prefix_still_gates(tmp_path):
+    """The Firebase carve-out must not become a hole: a Stripe key behind the
+    same prefix is the exact trap the check exists for."""
+    root = _repo(tmp_path, {".env": "NEXT_PUBLIC_STRIPE_KEY=sk_live_" + "a" * 26 + "\n"})
+    result = _native(root)
+    crit = [f for f in result.gating() if f.rule == "public-env-secret"]
+    assert len(crit) == 1
+    assert "ships to every visitor" in crit[0].message
+
+
+def test_supabase_service_role_behind_a_public_prefix_is_critical(tmp_path):
+    """The inverse of the Firebase case. A `service_role` key is a JWT, and a
+    JWT alone is only a warning — but behind `NEXT_PUBLIC_` the build tool
+    inlines it into the browser, handing every visitor RLS-bypassing access.
+    It used to be graded a generic 'named like a secret' warning."""
+    root = _repo(tmp_path, {
+        ".env": f"NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY={_supabase_jwt('service_role')}\n",
+    })
+    result = _native(root)
+    crit = [f for f in result.gating() if f.rule == "supabase-service-role"]
+    assert len(crit) == 1
+    assert "Row Level Security" in crit[0].message
+
+
+def test_supabase_anon_key_behind_a_public_prefix_is_a_note(tmp_path):
+    root = _repo(tmp_path, {
+        ".env": f"NEXT_PUBLIC_SUPABASE_ANON_KEY={_supabase_jwt('anon')}\n",
+    })
+    result = _native(root)
+    assert not result.gating()
+    assert [f for f in result.findings if f.rule == "supabase-anon-key"]
+
+
+def test_committed_keys_row_never_says_all_clear_over_a_committed_env(tmp_path):
+    """The checkbox that read as a lie: "Are your keys or cloud config committed
+    to the repo? — all clear", printed above a finding naming a live key in a
+    committed `.env`. The finding is still reported once, under the category
+    whose explanation is more precise; the row just stops claiming a clean
+    result it has not earned."""
+    root = _repo(tmp_path, {".env": "NEXT_PUBLIC_STRIPE_KEY=sk_live_" + "a" * 26 + "\n"})
+    buf = io.StringIO()
+    run_expose(str(root), fmt="checklist", out=buf, err=io.StringIO())
+    report = buf.getvalue()
+    committed_row = next(
+        ln for ln in report.splitlines() if "keys or cloud config committed" in ln
+    )
+    assert "all clear" not in committed_row
+    assert "listed above" in committed_row
+    # …and the finding itself is printed exactly once, not duplicated into F.
+    assert report.count("NEXT_PUBLIC_STRIPE_KEY") == 1
+
+
+def test_the_row_is_clear_when_nothing_is_committed(tmp_path):
+    """The cross-reference must not make F permanently dirty."""
+    root = _repo(tmp_path, {"dist/app.js": "console.log(1)"})
+    buf = io.StringIO()
+    run_expose(str(root), fmt="checklist", out=buf, err=io.StringIO())
+    committed_row = next(
+        ln for ln in buf.getvalue().splitlines() if "keys or cloud config committed" in ln
+    )
+    assert "all clear" in committed_row

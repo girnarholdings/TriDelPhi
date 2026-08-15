@@ -7,6 +7,20 @@ comment on the PR — and *fails the build* when a critical exists, with the
 ordered fix plan in the run's Summary tab. Explain first, then block: the
 comment and the SARIF always land before the gate fires.
 
+Three shapes, because "protect my repo" means different things to different
+people and guessing wrong wastes the one command they were willing to run:
+
+``tridelphi init``
+    The short composite-Action workflow — a dozen readable lines that a
+    first-time user will actually commit. The default.
+``tridelphi init --app``
+    For someone who shipped a web app and has no CI to speak of: build, then
+    `expose` — what your *product* leaks. No ladder, no Rule-of-Two vocabulary.
+``tridelphi init --from-source``
+    The long transparent workflow that installs the CLI and runs every step in
+    the open. Auditable line by line; the right choice if you want to read
+    exactly what runs, and the wrong first impression for everyone else.
+
 Idempotent: it refuses to clobber an existing file unless `--force` is given,
 and it prints exactly what to do next.
 """
@@ -16,7 +30,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-__all__ = ["FIX_WORKFLOW", "WORKFLOW", "render_action_workflow", "run_init"]
+from .release import ACTION_REF, install_command
+
+__all__ = [
+    "APP_WORKFLOW",
+    "FIX_WORKFLOW",
+    "WORKFLOW",
+    "render_action_workflow",
+    "run_init",
+]
 
 # The workflow is itself Rule-of-Two clean: it runs on pull_request (where fork
 # tokens are read-only), interpolates no github.event data into a shell, and the
@@ -61,7 +83,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install TriDelPhi
-        run: pipx install tridelphi
+        run: __TRIDELPHI_INSTALL__
 
       - name: Scan
         id: scan
@@ -157,7 +179,7 @@ jobs:
             echo
             tridelphi fix --markdown || true
             echo
-            echo 'Fix it from your terminal, interactively: `pipx install tridelphi && tridelphi guard`'
+            echo 'Fix it from your terminal, interactively: `__TRIDELPHI_INSTALL__ && tridelphi guard`'
           } >> "$GITHUB_STEP_SUMMARY"
           echo "TriDelPhi: critical finding — see the job Summary for the fix plan." >&2
           exit 1
@@ -274,7 +296,7 @@ jobs:
 
       - name: Install TriDelPhi
         if: steps.auth.outputs.ok == 'true'
-        run: pipx install tridelphi
+        run: __TRIDELPHI_INSTALL__
 
       - name: Switch to the pull request branch (open, same-repo only)
         id: pr
@@ -392,6 +414,103 @@ jobs:
             });
 """
 
+# The workflow for someone whose fear is "did I just leak my app?", not "can a
+# stranger's comment reach my secrets?". No ladder, no Rule-of-Two vocabulary, no
+# gate: build the app, audit what the build actually ships, say so on the PR.
+#
+# Advisory on purpose (`--fail-on none`). `expose` reads static files and cannot
+# see your live deployment, so a flagged database may already be firewalled — a
+# static audit should not be the thing that blocks your merge until you have
+# seen its false-positive rate on your own repo. When you trust it, drop the
+# flag and it will fail the build on a shipped key.
+APP_WORKFLOW = """\
+# Added by `tridelphi init --app`. Builds your app, then audits what the build
+# actually ships: keys inlined into browser bundles, source maps that hand over
+# your repository, open database rules, credentials committed by accident.
+# Docs: https://girnarholdings.github.io/TriDelPhi/
+name: TriDelPhi app audit
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  audit:
+    name: What does this app leak?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # `expose` reads files on disk, so your built output has to exist before
+      # it looks. Without this step it will still catch committed secrets and
+      # open database rules, but it cannot see inside a bundle you never built.
+      # Edit this line to match how you build. (ubuntu-latest already has Node;
+      # add actions/setup-node if you need a specific version.)
+      - name: Build
+        run: npm ci && npm run build
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install TriDelPhi
+        run: __TRIDELPHI_INSTALL__
+
+      - name: Audit what we ship
+        id: audit
+        run: |
+          tridelphi expose . --markdown --fail-on none > report.md 2>&1 || true
+          {
+            echo 'md<<TRIDELPHI_EOF'
+            cat report.md
+            echo TRIDELPHI_EOF
+          } >> "$GITHUB_OUTPUT"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on the pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REPORT_MD: ${{ steps.audit.outputs.md }}
+        with:
+          script: |
+            const report = process.env.REPORT_MD || 'TriDelPhi produced no output.';
+            const body = ['<!-- tridelphi-expose -->', report.slice(0, 60000)].join('\\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              c => c.body && c.body.includes('<!-- tridelphi-expose -->'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body,
+              });
+            }
+"""
+
+# The install line is written once, in `release.py`, and substituted into every
+# template here. It used to be typed out in each one as `pipx install tridelphi`
+# — a command that 404s, in the file we hand a first-time user, inside CI where
+# they cannot debug it. A generated workflow must never contain an install that
+# we have not checked resolves.
+WORKFLOW = WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command())
+FIX_WORKFLOW = FIX_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command())
+APP_WORKFLOW = APP_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command())
+
+
 _NEXT_STEPS = """\
 Done. TriDelPhi now guards this repo: every pull request is scanned, a
 plain-English comment explains what it found, and a critical FAILS the build —
@@ -414,6 +533,26 @@ Next:
 Nothing else to configure. The scan reads only files on disk.
 """
 
+_APP_NEXT_STEPS = """\
+Done. Every pull request now builds your app and reports what the build ships —
+inlined keys, source maps, open database rules, committed credentials — as a
+plain-English comment.
+
+Next:
+  1. Check the Build step matches how you build:
+       .github/workflows/tridelphi-app.yml  (it assumes `npm ci && npm run build`)
+  2. Commit and push:
+       git add .github/workflows/tridelphi-app.yml
+       git commit -m "Add TriDelPhi app exposure audit"
+       git push
+  3. Run it locally any time, without waiting for CI:
+       tridelphi expose .
+
+This audit is advisory — it reports, it never fails your build. It reads static
+files, so it cannot see your live deployment; verify anything network-facing
+against the real thing.
+"""
+
 
 # ---------------------------------------------------------------------------
 # the one-click / wizard path — a composite-action workflow with chosen inputs
@@ -425,11 +564,18 @@ _CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
 def render_action_workflow(
     *, level: int = 3, fail_on: str = "critical", comment: bool = True, expose: bool = False,
 ) -> str:
-    """The one-line composite-action workflow the Setup Studio and `init --wizard`
-    emit: ``uses: girnarholdings/TriDelPhi@v3`` with the chosen inputs, so the whole
-    selected ladder (plus optional `expose`) runs and merges into one code-scanning
-    upload. Plain ``tridelphi init`` writes the transparent, pipx-based workflow
-    instead; this is the click-and-choose spelling."""
+    """The short composite-action workflow: one `uses:` line with the chosen
+    inputs, so the whole selected ladder (plus optional `expose`) runs and merges
+    into one code-scanning upload.
+
+    This is what plain ``tridelphi init``, ``init --wizard`` and the Setup Studio
+    all emit — a dozen readable lines someone will actually commit. The long
+    transparent workflow that installs the CLI and runs each step in the open is
+    ``init --from-source``.
+
+    The pin comes from :mod:`tridelphi.release`, never a literal: it is a commit
+    SHA with the version named in a comment, so it resolves today and cannot
+    silently start meaning something else."""
     lines = [
         "# Added by the TriDelPhi Setup Studio / `tridelphi init --wizard`. One line runs",
         "# the whole chosen ladder and merges every result into one code-scanning upload.",
@@ -457,7 +603,7 @@ def render_action_workflow(
         "    runs-on: ubuntu-latest",
         "    steps:",
         f"      - uses: {_CHECKOUT}",
-        "      - uses: girnarholdings/TriDelPhi@v3",
+        f"      - uses: {ACTION_REF}",
         "        with:",
         f"          level: '{level}'",
         f"          fail-on: {fail_on}",
@@ -506,6 +652,7 @@ def _ask_wizard(stream, out) -> dict:
 
 def run_init(
     target: str = ".", *, force: bool = False, wizard: bool = False,
+    app: bool = False, from_source: bool = False,
     input_stream=None, out=None, err=None,
 ) -> int:
     out = out or sys.stdout
@@ -516,17 +663,27 @@ def run_init(
         return 2
 
     workflow_dir = root / ".github" / "workflows"
-    if wizard:
+    next_steps = _NEXT_STEPS
+    if app:
+        # The exposure audit stands alone: no fix bot, because nothing `expose`
+        # reports is a workflow edit the bot could make.
+        targets: tuple[tuple[Path, str], ...] = (
+            (workflow_dir / "tridelphi-app.yml", APP_WORKFLOW),
+        )
+        next_steps = _APP_NEXT_STEPS
+    elif wizard:
         opts = _ask_wizard(input_stream or sys.stdin, out)
         fix_bot = opts.pop("fix_bot")
-        targets: tuple[tuple[Path, str], ...] = (
-            (workflow_dir / "tridelphi.yml", render_action_workflow(**opts)),
-        )
+        targets = ((workflow_dir / "tridelphi.yml", render_action_workflow(**opts)),)
         if fix_bot:
             targets += ((workflow_dir / "tridelphi-fix.yml", FIX_WORKFLOW),)
     else:
+        # Default: the short composite-Action file. `--from-source` opts into the
+        # long transparent one — same scan, every step in the open, and a far
+        # worse first thing to hand someone who has never read a workflow.
+        scan = WORKFLOW if from_source else render_action_workflow()
         targets = (
-            (workflow_dir / "tridelphi.yml", WORKFLOW),
+            (workflow_dir / "tridelphi.yml", scan),
             (workflow_dir / "tridelphi-fix.yml", FIX_WORKFLOW),
         )
 
@@ -544,5 +701,5 @@ def run_init(
         path.write_text(content, encoding="utf-8", newline="\n")
         print(f"wrote {path}", file=out)
     print(file=out)
-    print(_NEXT_STEPS, file=out)
+    print(next_steps, file=out)
     return 0

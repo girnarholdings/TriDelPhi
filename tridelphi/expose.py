@@ -142,12 +142,17 @@ def _public_env_prefix(key: str) -> str | None:
     return next((p for p in _PUBLIC_ENV_PREFIXES if key.upper().startswith(p)), None)
 
 
-def _first_secret(text: str) -> tuple[str, str, str] | None:
-    """First ``_SECRET_PATTERNS`` hit in ``text`` as (label, masked, severity)."""
+def _first_secret(text: str) -> tuple[str, str, str, str] | None:
+    """First ``_SECRET_PATTERNS`` hit in ``text``.
+
+    Returns (label, masked, severity, matched) — ``matched`` is the raw token,
+    needed to decode a Supabase JWT's role claim. It never reaches output; only
+    ``masked`` is ever printed.
+    """
     for label, pattern, severity in _SECRET_PATTERNS:
         m = pattern.search(text)
         if m:
-            return label, m.group(0)[:4] + "…", severity
+            return label, m.group(0)[:4] + "…", severity, m.group(0)
     return None
 
 
@@ -187,12 +192,21 @@ _DB_URL_RE = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class ExposeFinding:
-    category: str          # "A".."E"
+    category: str          # "A".."G"
     rule: str              # slug, e.g. "source-map-disclosure"
     severity: str          # critical / warning / note
     where: str             # repo-relative "path" or "path:line"
     message: str           # plain-English, self-contained
     fix: str               # what to actually do
+    # Other categories this finding is *also* evidence for. A key sitting in a
+    # committed `.env` behind a `NEXT_PUBLIC_` prefix is reported once, under
+    # category A, because the prefix is the more precise thing to explain — but
+    # it is unarguably also an answer to F, "are your keys committed to the
+    # repo?". Without this, F printed "all clear" with the key in plain sight,
+    # which is a lie to the eye even though the finding is right there above it.
+    # The finding still renders once, under `category`; `also` only stops the
+    # other row from claiming a clean result it has not earned.
+    also: tuple[str, ...] = ()
 
 
 @dataclass
@@ -395,12 +409,27 @@ _FIX_PUBLIC_ENV = ("give it a non-public name (drop the NEXT_PUBLIC_/VITE_/… p
                    "it only on the server; anything with that prefix is compiled into the "
                    "browser bundle. Rotate it if it was a real secret.")
 
+# A `NEXT_PUBLIC_FIREBASE_API_KEY` is AIza-shaped and looks exactly like a leaked
+# Google API key — but a Firebase *web* config key is public by design, and we
+# already say so when we find one in a bundle. Saying the opposite about the same
+# key because it was found in `.env` instead is the kind of contradiction that
+# costs a tool its credibility on the one screen where it had the reader's trust.
+_FIREBASE_ENV_NAME = re.compile(r"(?i)firebase")
+
 
 def _detect_public_env(root: Path, surface: _Surface) -> list[ExposeFinding]:
     """A secret behind a framework 'public' env prefix — it ships to the browser.
 
     Distinct from the committed-secret case (category F): here the *prefix* is the
-    danger, so the message and fix are about the prefix, not about committing."""
+    danger, so the message and fix are about the prefix, not about committing. The
+    findings still carry ``also=("F",)`` so F's row cannot report "all clear" while
+    a real key sits in a committed `.env`.
+
+    Public-by-design keys (Firebase web config, Supabase `anon`) are graded the
+    same way here as they are in a bundle: a note, not a critical. The one that
+    inverts is Supabase `service_role` — behind a public prefix it is worse than a
+    plain committed secret, because the build tool ships it to every visitor.
+    """
     out: list[ExposeFinding] = []
     for path in surface.env:
         raw = _read_text(path)
@@ -416,20 +445,49 @@ def _detect_public_env(root: Path, surface: _Surface) -> list[ExposeFinding]:
             prefix = _public_env_prefix(key)
             if prefix is None or not value:
                 continue
+            where = f"{where_file}:{i}"
             hit = _first_secret(value)
-            if hit and hit[2] == "critical":
-                _label, masked, _sev = hit
-                out.append(ExposeFinding("A", "public-env-secret", "critical",
-                    f"{where_file}:{i}",
-                    f"`{key}` holds what looks like a real key ({masked}). The `{prefix}` "
-                    "prefix makes your build tool inline it into the browser bundle, so it "
-                    "ships to every visitor.", _FIX_PUBLIC_ENV))
-            elif _SECRETY_NAME.search(key) and len(value) >= 8:
-                out.append(ExposeFinding("A", "public-env-suspicious", "warning",
-                    f"{where_file}:{i}",
+            if hit:
+                label, masked, severity, matched = hit
+                if label == "a Google API key" and _FIREBASE_ENV_NAME.search(key):
+                    out.append(ExposeFinding("A", "firebase-public-key", "note", where,
+                        f"`{key}` is a Firebase web API key ({masked}). Unlike a normal "
+                        "secret it is meant to ship in the browser — it names your project, "
+                        "it does not grant access. Your real protection is server-side "
+                        "Security Rules.",
+                        "no need to hide this key; make sure your Firestore/Storage Security "
+                        "Rules actually restrict who can read and write your data."))
+                    continue
+                if label.endswith("(JWT)") and (role := _supabase_role(matched)):
+                    if role == "service_role":
+                        out.append(ExposeFinding("A", "supabase-service-role", "critical",
+                            where,
+                            f"`{key}` is a Supabase service_role key ({masked}) behind the "
+                            f"`{prefix}` prefix, so your build tool inlines it into the "
+                            "browser bundle. It bypasses Row Level Security — every visitor "
+                            "gets full, unrestricted access to your database.",
+                            "rotate this key immediately and never expose service_role to "
+                            "the browser; the client should use the anon key plus RLS "
+                            "policies.", ("F",)))
+                    else:
+                        out.append(ExposeFinding("A", "supabase-anon-key", "note", where,
+                            f"`{key}` is a Supabase anon key ({masked}). Like a Firebase web "
+                            "key it is meant to ship in the browser; it grants nothing on "
+                            "its own.",
+                            "no need to hide it; your protection is Row Level Security — "
+                            "make sure RLS is enabled on every table with real policies."))
+                    continue
+                if severity == "critical":
+                    out.append(ExposeFinding("A", "public-env-secret", "critical", where,
+                        f"`{key}` holds what looks like a real key ({masked}). The `{prefix}` "
+                        "prefix makes your build tool inline it into the browser bundle, so it "
+                        "ships to every visitor.", _FIX_PUBLIC_ENV, ("F",)))
+                    continue
+            if _SECRETY_NAME.search(key) and len(value) >= 8:
+                out.append(ExposeFinding("A", "public-env-suspicious", "warning", where,
                     f"`{key}` is named like a secret but carries the `{prefix}` prefix, which "
                     "ships its value to the browser. If it is sensitive, it is exposed.",
-                    _FIX_PUBLIC_ENV))
+                    _FIX_PUBLIC_ENV, ("F",)))
     return out
 
 
@@ -552,7 +610,8 @@ def _detect_db_misconfig(root: Path, surface: _Surface) -> list[ExposeFinding]:
                 out.append(ExposeFinding("D", "db-url-credential", "warning",
                     f"{where_file}:{i}",
                     "A database URL with an inline username:password is committed here. "
-                    "Rotate the credential and keep it out of committed files.", _FIX_D))
+                    "Rotate the credential and keep it out of committed files.", _FIX_D,
+                    ("F",)))
                 break
     return out
 
@@ -660,7 +719,7 @@ def _detect_committed_credentials(root: Path, surface: _Surface) -> list[ExposeF
             out.append(ExposeFinding("F", "committed-aws-credential", "critical", where,
                 "An AWS secret access key is committed in this credentials file.", _FIX_CRED))
         elif (hit := _first_secret(raw)) and hit[2] == "critical":
-            label, masked, _sev = hit
+            label, masked, _sev, _matched = hit
             out.append(ExposeFinding("F", "committed-secret-file", "critical", where,
                 f"What looks like {label} ({masked}) is committed in this file.", _FIX_CRED))
         elif name.endswith((".tfstate", ".tfstate.backup")):
@@ -691,7 +750,7 @@ def _detect_committed_credentials(root: Path, surface: _Surface) -> list[ExposeF
                 continue
             hit = _first_secret(ln)
             if hit and hit[2] == "critical":
-                label, masked, _sev = hit
+                label, masked, _sev, _matched = hit
                 out.append(ExposeFinding("F", "committed-env-secret", "critical",
                     f"{where_file}:{i}",
                     f"What looks like {label} ({masked}) is committed in this env file. "

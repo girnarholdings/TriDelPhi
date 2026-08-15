@@ -44,10 +44,15 @@ def test_missing_path_exits_2(repo_root):
 
 def test_no_workflows_exits_0(repo_root, tmp_path):
     """Fresh repos and monorepo subdirectories are legitimate; only a bad path
-    is an error."""
+    is an error.
+
+    But exit 0 must not read as "you are fine". A repo with no Actions is the
+    shape of every deployed web app, and this scan has not looked at the app at
+    all — so the message states the scope and names the command that does."""
     result = run_cli([str(tmp_path)], cwd=repo_root)
     assert result.returncode == 0
-    assert "nothing to scan" in result.stderr
+    assert "has not looked at your app" in result.stderr
+    assert "tridelphi expose" in result.stderr
 
 
 def test_require_workflows_makes_it_an_assertion(repo_root, tmp_path):
