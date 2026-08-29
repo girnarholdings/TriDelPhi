@@ -26,6 +26,7 @@ from .model import (
     Position,
     Remediation,
 )
+from .steps import iter_steps, uses_name
 from .tables import Tables
 
 __all__ = ["evaluate_all"]
@@ -118,16 +119,10 @@ _WORKTREE_U_KINDS = ("untrusted-checkout", "agent-untrusted-worktree")
 
 def _uses_position(context: ExecutionContext, markers: tuple[str, ...]) -> Position | None:
     """Position of the first step whose ``uses:`` matches one of ``markers``."""
-    steps = context.body.get("steps")
-    if steps is None:
-        return None
-    for step in steps.seq():
-        if not step.is_mapping():
+    for step in iter_steps(context.body):
+        name = uses_name(step)
+        if not name:
             continue
-        uses = step.get("uses")
-        if uses is None or not uses.text:
-            continue
-        name = uses.text.split("@", 1)[0].strip()
         if any(name == m or name.startswith(m) for m in markers):
             return step.position()
     return None

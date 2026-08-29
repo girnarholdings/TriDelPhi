@@ -21,12 +21,39 @@ from importlib import resources
 from typing import Any
 
 from .model import RULES, Diagnostic, Finding, rule_by_id
+from .severity import SEVERITY_TO_SARIF_LEVEL as _LEVEL
 
-__all__ = ["dumps", "fingerprint", "load_schema", "to_sarif", "validate_sarif"]
+__all__ = [
+    "dumps",
+    "fingerprint",
+    "is_suppressed",
+    "load_schema",
+    "simple_sarif",
+    "to_sarif",
+    "validate_sarif",
+]
 
 SCHEMA_URI = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
-_LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
+
+def is_suppressed(result: dict[str, Any]) -> bool:
+    """Whether a SARIF result is suppressed (SARIF 2.1.0 §3.27.23).
+
+    A wrapped tool that supports in-source suppression — semgrep's `# nosemgrep`,
+    for one — does not drop the finding from its SARIF; it emits the result with a
+    non-empty ``suppressions`` array (``kind: inSource``). That is the author's
+    reviewed, in-code statement that the finding was audited and accepted, so it
+    must not be counted as an open item or gate the build. It stays in the merged
+    document (GitHub renders it as a dismissed alert), just not as a live finding.
+
+    Defensive: the field is attacker-adjacent (it rides in a subprocess's output),
+    so a malformed ``suppressions`` never raises — only a well-formed, non-empty
+    array suppresses, and anything else counts, which fails safe toward showing.
+    """
+    supp = result.get("suppressions")
+    return isinstance(supp, list) and len(supp) > 0 and all(
+        isinstance(s, dict) for s in supp
+    )
 
 
 def load_schema() -> dict[str, Any]:
@@ -207,6 +234,55 @@ def to_sarif(
     if validate:
         validate_sarif(document)
     return document
+
+
+def simple_sarif(findings, *, tool: str, audit_label: str, tool_version: str,
+                 help_uri: str) -> dict[str, Any]:
+    """One SARIF run for the sibling audits' flat findings.
+
+    ``scan`` and ``expose`` findings carry (rule, severity, where, message)
+    rather than the core model's :class:`Finding`, and the two commands had
+    grown identical forty-line builders. Any object with those four attributes
+    renders here; output is deterministic (sorted by where/rule/message) like
+    everything else that feeds the gate.
+    """
+    rules: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+    for f in sorted(findings, key=lambda x: (x.where, x.rule, x.message)):
+        rule_id = f"{tool}/{f.rule}"
+        if rule_id not in seen:
+            seen.add(rule_id)
+            rules.append({
+                "id": rule_id,
+                "name": f.rule.replace("-", ""),
+                "shortDescription": {"text": f"{audit_label}: {f.rule}"},
+                "helpUri": help_uri,
+            })
+        path, _sep, line = f.where.partition(":")
+        region = {"startLine": int(line)} if line.isdigit() else {"startLine": 1}
+        results.append({
+            "ruleId": rule_id,
+            "level": _LEVEL.get(f.severity, "warning"),
+            "message": {"text": f.message},
+            "locations": [{"physicalLocation": {
+                "artifactLocation": {"uri": path or "README.md"},
+                "region": region,
+            }}],
+        })
+    return {
+        "version": "2.1.0",
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "runs": [{
+            "tool": {"driver": {
+                "name": tool,
+                "version": tool_version,
+                "informationUri": help_uri,
+                "rules": rules,
+            }},
+            "results": results,
+        }],
+    }
 
 
 def dumps(document: dict[str, Any]) -> str:

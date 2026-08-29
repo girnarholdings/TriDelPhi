@@ -68,17 +68,52 @@ def test_runtime_dependencies_stay_minimal():
 def test_no_network_imports_in_the_execution_path():
     """`tridelphi .` must not be able to phone home.
 
-    orchestrate.py is exempt: it shells out to zizmor, but only behind an
-    explicit --with-zizmor flag, and it makes no network calls of its own.
+    Two modules are exempt, both for reasons the code keeps true:
+      * orchestrate.py shells out to zizmor, but only behind --with-zizmor, and
+        makes no network calls of its own.
+      * scan_cmd.py fetches a registry tarball for `tridelphi scan npm:<pkg>` /
+        `pypi:<pkg>` — its only network use, gated behind those explicit
+        prefixes, announced on stderr before it connects, and download-only. It
+        is imported lazily (see the test below), so the default scan never even
+        loads it.
     """
+    exempt = {"orchestrate.py", "scan_cmd.py"}
     banned = ("import requests", "import urllib.request", "import http.client", "import socket")
     offenders = []
     for source in (ROOT / "tridelphi").glob("*.py"):
+        if source.name in exempt:
+            continue
         text = source.read_text()
         for needle in banned:
             if needle in text:
                 offenders.append(f"{source.name}: {needle}")
     assert not offenders, f"network imports in the execution path: {offenders}"
+
+
+def test_network_capable_modules_are_imported_lazily():
+    """The exemption above is only safe if the default scan never imports the
+    network-capable modules. cli.py must load scan_cmd (and orchestrate's
+    ladder) on demand inside their command branches, not at module top — so
+    `import tridelphi.cli` pulls in no network-capable code."""
+    cli_src = (ROOT / "tridelphi" / "cli.py").read_text()
+    # A module-top import starts at column 0; an import inside a command
+    # handler is indented. Only the former defeats the laziness.
+    top_level_imports = [
+        line for line in cli_src.splitlines()
+        if line.startswith(("from .scan_cmd", "import tridelphi.scan_cmd"))
+    ]
+    assert not top_level_imports, (
+        "scan_cmd must be imported lazily inside its command handler, "
+        f"not at module top: {top_level_imports}"
+    )
+    import importlib
+    import sys
+
+    sys.modules.pop("tridelphi.scan_cmd", None)
+    importlib.import_module("tridelphi.cli")
+    assert "tridelphi.scan_cmd" not in sys.modules, (
+        "importing tridelphi.cli pulled in the network-capable scan_cmd module"
+    )
 
 
 @pytest.mark.parametrize("workflow", ["ci.yml", "pages.yml"])

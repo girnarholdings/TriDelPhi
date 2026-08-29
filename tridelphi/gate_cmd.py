@@ -33,11 +33,10 @@ from pathlib import Path
 
 from . import __version__
 from .orchestrate import MAX_OUTPUT_BYTES, sarif_shape_error
+from .severity import SARIF_LEVEL_TO_SEVERITY as _LEVEL_TO_SEVERITY
+from .severity import SEVERITY_ORDER as _SEVERITY_RANK
 
 __all__ = ["run_attest", "run_gate"]
-
-_LEVEL_TO_SEVERITY = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
-_SEVERITY_RANK = {"critical": 0, "warning": 1, "note": 2}
 
 EVIDENCE_PREDICATE_TYPE = "https://girnarholdings.github.io/TriDelPhi/evidence/v1"
 

@@ -163,6 +163,26 @@ def test_severity_counts_follow_sarif_levels(stub_path):
     assert res.finding_count == 3
 
 
+def test_in_source_suppressed_results_do_not_count_but_stay_in_sarif(stub_path):
+    """A wrapped tool (semgrep's `# nosemgrep`) reports an audited finding with a
+    non-empty `suppressions` array rather than dropping it. That is the author's
+    reviewed acceptance: it must not gate or show as an open item, but it stays in
+    the merged document so the Security tab renders it as a dismissed alert."""
+    bin_dir, repo = stub_path
+    results = [
+        {"ruleId": "live", "level": "error", "message": {"text": "x"}},
+        {"ruleId": "audited", "level": "error", "message": {"text": "x"},
+         "suppressions": [{"kind": "inSource"}]},
+    ]
+    make_stub(bin_dir, "osv-scanner", stub_sarif("osv-scanner", results), exit_code=1)
+    res = run_tool(OSV_SCANNER, repo)
+    assert res.severity_counts == {"critical": 1, "warning": 0, "note": 0}
+    assert res.finding_count == 1
+    # the suppressed result is preserved in the document, just not counted
+    kept = res.sarif["runs"][0]["results"]
+    assert any(r.get("ruleId") == "audited" for r in kept)
+
+
 # --- URI normalization -------------------------------------------------------
 
 

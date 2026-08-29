@@ -15,10 +15,10 @@ import html
 
 from . import __version__
 from .model import AnalysisResult, Finding
+from .severity import SEVERITY_ORDER as _SEV_ORDER
 
 __all__ = ["render_html"]
 
-_SEV_ORDER = {"critical": 0, "warning": 1, "note": 2}
 _SEV_LABEL = {"critical": "Critical", "warning": "Warning", "note": "Note"}
 
 

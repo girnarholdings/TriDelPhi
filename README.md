@@ -22,54 +22,76 @@
 
 ---
 
-## Two doors
+## Three doors
 
-TriDelPhi answers two different questions. Start at the one you actually have.
+TriDelPhi answers three different questions. Start at the one you actually have.
 
 <table>
 <tr>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
+
+**“Is this thing I'm about to install safe to run?”**
+
+An assistant handed you a download link, or you found a package. Before the
+installer runs, read what it *does* — install hooks, download-and-run cradles,
+credential grabs, poisoned agent files, links that lie.
+
+```console
+$ tridelphi scan ./download/
+$ tridelphi scan npm:some-pkg
+$ tridelphi scan pypi:some-pkg
+```
+
+The newest door, and the one people feel first. Jump to
+**[`scan`](#-scan-before-you-install)**.
+
+</td>
+<td width="33%" valign="top">
 
 **“Can a stranger's comment steal my keys?”**
 
 You wired an AI agent — Claude Code, Gemini, Codex — or a `pull_request_target`
-into GitHub Actions, and you want to know which job a crafted comment turns into
-remote code execution.
+into GitHub Actions, and want the job a crafted comment turns into RCE.
 
 ```console
-$ pipx install git+https://github.com/girnarholdings/TriDelPhi
 $ tridelphi .          # scan .github/workflows
 $ tridelphi init       # add the guard to CI
+$ tridelphi init --local  # …or a git hook, no CI
 ```
 
-This is the rest of this README, and the thing nothing else does: a per-job
-**U ∩ P ∩ E** capability graph with per-action restore semantics.
+The thing nothing else does: a per-job **U ∩ P ∩ E** capability graph with
+per-action restore semantics.
 
 </td>
-<td width="50%" valign="top">
+<td width="33%" valign="top">
 
 **“Did I just leak my app?”**
 
-You shipped a Next/Vite/Firebase app and you are worried your OpenAI key, your
-database, or your source is public. You may not have GitHub Actions at all.
+You shipped a Next/Vite/Firebase app and worry your OpenAI key, your database,
+or your source is public. You may not have GitHub Actions at all.
 
 ```console
-$ pipx install git+https://github.com/girnarholdings/TriDelPhi
 $ tridelphi expose .   # audit what you ship
 $ tridelphi init --app # add that audit to CI
 ```
 
-Keys inlined into browser bundles, source maps that hand over your repository,
-`allow … : if true`, Supabase `service_role`, committed credentials, open
-databases. Jump to **[`expose`](#-audit--harden-what-you-ship)**.
+Keys inlined into bundles, source maps, `allow … : if true`, Supabase
+`service_role`, open databases. Jump to
+**[`expose`](#-audit--harden-what-you-ship)**.
 
 </td>
 </tr>
 </table>
 
-> **`tridelphi .` reads `.github/workflows` and nothing else.** If your repo has
-> no Actions it will tell you so and point you at `expose` — it will never report
-> a clean bill of health for an app it did not open.
+```console
+$ pipx install git+https://github.com/girnarholdings/TriDelPhi   # one install, all three doors
+```
+
+> **Every door runs on your machine.** `scan` reads files (the two registry
+> forms download-only, and say so before connecting); `tridelphi .` reads
+> `.github/workflows` and nothing else; `expose` reads your committed code. None
+> of them install, execute, or upload anything — and none will ever report a
+> clean result for something they did not actually open.
 
 > **Install note.** `tridelphi` is not on PyPI yet, so the git URL above is the
 > install that works; it is the same commit the Action pins, so your CLI and your
@@ -145,7 +167,7 @@ deliberately not part of either door — see
 - [The problem](#-the-problem) · [The rule](#-the-rule-two-is-fine-three-is-an-exploit)
 - [**How a scan works** (architecture)](#-how-a-scan-works) · [The restore-semantics moat](#-the-part-no-other-scanner-does)
 - [The hardening ladder L1–L7](#-the-hardening-ladder--l1l7) · [Output contract (SARIF)](#-output-contract)
-- [**Audit what you ship** — `expose` + `privatize`](#-audit--harden-what-you-ship) · [Coverage vs ADR](#-coverage-against-a-published-taxonomy)
+- [**Scan before you install** — `tridelphi scan`](#-scan-before-you-install) · [**Audit what you ship** — `expose` + `privatize`](#-audit--harden-what-you-ship) · [Coverage vs ADR](#-coverage-against-a-published-taxonomy)
 - [Install & use](#-install) · [In CI](#-put-it-in-ci--one-line)
 - [Credits](#-credits--standing-on-the-shoulders) · [**Harden it further**](#-harden-it-further)
 
@@ -546,8 +568,11 @@ are optional and detected on `PATH`.
 ## 🚀 Use it
 
 ```console
-tridelphi .                                    # scan, human-readable
+tridelphi scan npm:some-pkg                    # audit code BEFORE you install it
+tridelphi scan ./download/                     # …a directory, an archive, or pypi:<pkg>
+tridelphi .                                    # scan .github/workflows, human-readable
 tridelphi . --format checklist                 # plain-language pass/fail, no jargon
+tridelphi init --local                         # guard on this machine — a git pre-push hook, no CI
 tridelphi fix                                  # an ordered to-do list, cheapest change first
 tridelphi fix --markdown                       # the same plan, ready to paste into a PR
 tridelphi guard                                # fix interactively: yes/no per finding
@@ -560,6 +585,11 @@ tridelphi --explain agent-config-ingress       # what a rule means and why
 tridelphi --coverage                           # ADR taxonomy coverage
 tridelphi --list-rules                         # every rule at a glance
 ```
+
+**No GitHub Actions? Run it all locally.** Every check works without CI:
+`tridelphi scan`, `tridelphi .`, and `tridelphi expose` run on your machine, and
+`tridelphi init --local` installs a git **pre-push** hook that runs the scans
+before code ever leaves your laptop — no workflow file, no GitHub involvement.
 
 ### 🛠️ From finding to fix
 
@@ -627,6 +657,52 @@ remediation demands, and it passes the scanner that ships it:
   of the same repository, i.e. code written by someone with write access; and
   because `issue_comment` workflows run the file from the *default* branch, a
   PR cannot modify the bot that acts on it.
+
+## 🛡️ Scan before you install
+
+> Got hacked yesterday. The link came from inside a chat window. I was
+> installing a transcription app, the assistant sent the download link, I pasted
+> the command. It looked legit. It was a copycat site bundling malware — it ran
+> instantly and tried to take everything. Restoring from backup, I found a
+> poisoned `SKILL.md` that looked exactly like my own style guide, but buried
+> inside were instructions to silently re-download the malware and steal my
+> credentials every time the AI loaded it.
+
+`tridelphi scan <target>` is for exactly that moment: the audit you run **before**
+you install someone else's code. It reads — never executes — and grades what it
+finds against the shapes of real 2026 supply-chain attacks.
+
+```console
+tridelphi scan ./downloaded-app/     # a directory you cloned or unpacked
+tridelphi scan ./package.tgz         # an archive (.tgz/.zip/.whl), extracted safely first
+tridelphi scan npm:left-pad          # fetch the npm tarball (no scripts run) and scan it
+tridelphi scan pypi:requests         # download the PyPI artifact (never `pip`) and scan it
+```
+
+| It looks for | Because |
+|---|---|
+| **Install-time execution** — npm `postinstall`, `setup.py`, `.envrc`, VS Code `folderOpen` tasks, shipped git hooks | code that runs the moment you install or open the folder, before you chose to run anything |
+| **Download-and-run** — `curl \| bash`, PowerShell cradles, fetch→chmod→execute | the copycat-installer shape: the server decides what runs on your machine |
+| **Obfuscation** — base64-piped-to-shell, `eval(atob(…))`, and **invisible Unicode** (zero-width / bidi) | encoding a command has one purpose: stopping you reading it first. Invisible characters hide text from you but not the model |
+| **Credential reach** — `~/.ssh`, `~/.aws`, browser logins, crypto wallets — and whether the same file also phones home | a read plus a network send is exfiltration's exact shape |
+| **Poisoned agent files** — `SKILL.md`, `CLAUDE.md`, `.cursorrules`, `.mcp.json` hooks | an assistant *acts on* these. Secrecy language next to an action, or an imperative hidden in an HTML comment, is the poisoned-skill shape |
+| **Dishonest links** — link text that names one domain while the URL goes to another, shorteners, raw-IP and throwaway-host code sources | the copycat-site trick, mechanized |
+
+**Install context is the severity dial.** `curl \| bash` in a README is how you
+install Homebrew — a warning, not a siren, because a README does not run itself.
+The *same line* in a `postinstall` or an agent file is critical, because it runs
+without you choosing to. And the verdict is honest about its own limits: a clean
+result means *no known-bad patterns in the source and config we read* — it cannot
+vouch for a compiled binary or predict what a server sends tomorrow.
+
+Registry fetches (`npm:` / `pypi:`) are the tool's only network use. They
+download the artifact without installing or executing it — `npm pack` runs no
+scripts, and the PyPI path is a plain HTTP GET, never `pip download` (which can
+execute a hostile `setup.py` just to resolve metadata) — and they say so on
+stderr before they connect.
+
+Every rule, with its severity and the context that grades it, is in
+**[`docs/SCAN_RULES.md`](docs/SCAN_RULES.md)**.
 
 ## 🔎 Audit & harden what you ship
 

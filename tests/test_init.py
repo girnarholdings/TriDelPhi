@@ -137,6 +137,38 @@ def test_generated_workflows_are_clean_by_our_own_rules(tmp_path):
     assert not gating, "; ".join(f"{f.severity} {f.rule_id}" for f in gating)
 
 
+def test_init_local_writes_an_executable_pre_push_hook(tmp_path):
+    """The no-CI path. For repos that never see GitHub Actions, the same scans
+    run at a git hook — on push, not commit, because a scan people bypass is no
+    scan at all."""
+    (tmp_path / ".git" / "hooks").mkdir(parents=True)
+    assert run_init(str(tmp_path), local=True) == 0
+    hook = tmp_path / ".git" / "hooks" / "pre-push"
+    assert hook.is_file()
+    body = hook.read_text()
+    assert body.startswith("#!/bin/sh")
+    assert "tridelphi ." in body
+    assert "tridelphi expose ." in body
+    assert hook.stat().st_mode & 0o111, "the hook must be executable"
+
+
+def test_init_local_needs_a_git_repo(tmp_path):
+    """--local installs a git hook, so it must refuse a directory that is not a
+    repo rather than silently doing nothing."""
+    assert run_init(str(tmp_path), local=True) == 2
+    assert not (tmp_path / ".git").exists()
+
+
+def test_init_local_refuses_to_clobber_an_existing_hook(tmp_path):
+    hooks = tmp_path / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "pre-push").write_text("#!/bin/sh\necho mine\n")
+    assert run_init(str(tmp_path), local=True) == 1
+    assert "echo mine" in (hooks / "pre-push").read_text()
+    assert run_init(str(tmp_path), local=True, force=True) == 0
+    assert "tridelphi" in (hooks / "pre-push").read_text()
+
+
 @pytest.mark.parametrize("kwargs", [{}, {"app": True}, {"from_source": True}])
 def test_every_init_shape_is_clean_by_our_own_rules(tmp_path, kwargs):
     """All three doors, not just the default. Shipping an onboarding file that

@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any
 
 from .orchestrate import sarif_shape_error
+from .severity import SARIF_LEVEL_TO_SEVERITY, should_fail
 
 __all__ = [
     "TRUST_LOCK_PATH",
@@ -602,12 +603,8 @@ def run_verify(
             file=out,
         )
 
-    from .render import SEVERITY_ORDER
-
-    if fail_on == "none":
-        return 0, document
-    threshold = SEVERITY_ORDER[fail_on]
-    level_to_sev = {"error": "critical", "note": "note"}
-    if any(SEVERITY_ORDER[level_to_sev[f.level]] <= threshold for f in findings):
+    # The shared map covers every SARIF level, so a future `warning`-level
+    # trust finding gates correctly instead of raising KeyError.
+    if should_fail((SARIF_LEVEL_TO_SEVERITY.get(f.level, "warning") for f in findings), fail_on):
         return 1, document
     return 0, document
