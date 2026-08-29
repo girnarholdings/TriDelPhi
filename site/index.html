@@ -575,17 +575,18 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
     <div class="cta">
       <div class="cmd-row">
         <span class="cmd"><span class="pr">$</span> pipx install git+https://github.com/girnarholdings/TriDelPhi</span>
+        <span class="cmd"><span class="pr">$</span> tridelphi scan npm:that-package</span>
         <span class="cmd"><span class="pr">$</span> tridelphi expose .</span>
         <span class="cmd"><span class="pr">$</span> tridelphi .</span>
       </div>
-      <span class="fine"><b>Two commands, two questions.</b>
+      <span class="fine"><b>Three commands, three questions.</b>
+        <span class="mono">scan</span> reads code <b>before you install it</b> — the copycat installer,
+        the poisoned <span class="mono">SKILL.md</span>, the link that lies about where it goes.
         <span class="mono">expose</span> checks <b>the app you shipped</b> — keys baked into the
-        browser bundle, an open database, your source in a <span class="mono">.map</span>.
-        <span class="mono">tridelphi&nbsp;.</span> checks <b>your GitHub robots</b>. It reads
-        <span class="mono">.github/workflows</span> and nothing else, so if you have no robots yet
-        it says so and sends you to <span class="mono">expose</span> — it will never tell you
-        you're fine about an app it didn't open.</span>
-      <span class="fine"><b>No account. No sign-up. Nothing leaves your computer.</b> It just reads your files and tells you the truth.</span>
+        bundle, an open database, your source in a <span class="mono">.map</span>.
+        <span class="mono">tridelphi&nbsp;.</span> checks <b>your GitHub robots</b> — and never tells
+        you you're fine about something it didn't open.</span>
+      <span class="fine"><b>No account. No sign-up. Nothing leaves your computer.</b> It just reads files and tells you the truth.</span>
     </div>
 
     <!-- why it's a no-brainer -->
@@ -647,7 +648,12 @@ footer .frow{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
 
     <div class="carousel" id="carousel">
       <div class="c-stage" id="c-stage" aria-live="polite">
-        <article class="fcard active" style="--ac:var(--u)">
+        <article class="fcard active" style="--ac:var(--e)">
+          <span class="ico">🛡️</span><span class="tag">scan · before you install</span>
+          <h3>The copycat installer a chat window handed you</h3>
+          <p>Read code <b>before</b> you run its installer: the postinstall that fires on paste, the poisoned <span class="mono">SKILL.md</span> that steals your keys every time the AI loads it, the link whose text says one site and goes to another.</p>
+        </article>
+        <article class="fcard" style="--ac:var(--u)">
           <span class="ico">🔺</span><span class="tag">The core</span>
           <h3>A stranger's comment becoming remote code execution</h3>
           <p>The one CI job that reads untrusted text, holds your keys, and can reach the internet — the “Rule of Two” violation no other scanner names.</p>
