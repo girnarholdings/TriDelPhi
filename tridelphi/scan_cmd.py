@@ -32,8 +32,6 @@ import urllib.request
 from pathlib import Path
 from typing import TextIO
 
-from .checklist import _compact_wheres, _md_escape
-from .expose_cmd import _wrap
 from .preflight import (
     CATEGORIES,
     PreflightFinding,
@@ -41,6 +39,7 @@ from .preflight import (
     analyze_preflight,
     extract_archive,
 )
+from .reportutil import grouped_lines, md_escape, wrap
 from .sarif import dumps
 from .severity import should_fail
 
@@ -217,37 +216,14 @@ def _resolve_target(arg: str, tmp: Path, err: TextIO) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
-def _grouped(findings: list[PreflightFinding], *, markdown: bool = False) -> list[tuple[str, str, str]]:
-    esc = _md_escape if markdown else (lambda s: s)
-    order: list[str] = []
-    by_msg: dict[str, dict] = {}
-    for f in findings:
-        slot = by_msg.get(f.message)
-        if slot is None:
-            slot = {"sev": f.severity, "fix": f.fix, "wheres": []}
-            by_msg[f.message] = slot
-            order.append(f.message)
-        if f.where and f.where not in slot["wheres"]:
-            slot["wheres"].append(f.where)
-    out = []
-    for msg in order:
-        slot = by_msg[msg]
-        wheres = slot["wheres"]
-        if not wheres:
-            text = esc(msg)
-        elif len(wheres) == 1:
-            text = f"{esc(wheres[0])} — {esc(msg)}"
-        else:
-            text = f"{esc(msg)} — at {esc(_compact_wheres(wheres))}"
-        out.append((slot["sev"], text, slot["fix"]))
-    return out
+_grouped = grouped_lines
 
 
 def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
     bar = "─" * 60
     print(bar, file=out)
     print(f"  🔺 TriDelPhi pre-install scan · {label}", file=out)
-    for line in _wrap(_SCOPE, 66):
+    for line in wrap(_SCOPE, 66):
         print(f"  {line}", file=out)
     print(bar, file=out)
     print("", file=out)
@@ -284,9 +260,9 @@ def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
                 continue
             print(f"  🚫 {question}", file=out)
             for _sev, text, fix in _grouped(group)[:_MAX_ITEMS]:
-                for i, wl in enumerate(_wrap(text, 64)):
+                for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
-                for fl in _wrap(f"Do this: {fix}", 64):
+                for fl in wrap(f"Do this: {fix}", 64):
                     print(f"        {fl}", file=out)
             print("", file=out)
 
@@ -302,13 +278,13 @@ def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
                 continue
             print(f"  ⚠️  {question}", file=out)
             for _sev, text, fix in _grouped(group)[:_MAX_ITEMS]:
-                for i, wl in enumerate(_wrap(text, 64)):
+                for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
-                for fl in _wrap(f"Do this: {fix}", 64):
+                for fl in wrap(f"Do this: {fix}", 64):
                     print(f"        {fl}", file=out)
             print("", file=out)
     for _sev, text, _fix in _grouped(notes)[:_MAX_ITEMS + 4]:
-        for i, wl in enumerate(_wrap(text, 66)):
+        for i, wl in enumerate(wrap(text, 66)):
             print(f"  {'🔎 ' if i == 0 else '   '}{wl}", file=out)
     if notes:
         print("", file=out)
@@ -345,7 +321,7 @@ def _render_markdown(result: PreflightResult, label: str) -> str:
         out.append("### 🔺 TriDelPhi pre-install scan — ⚠️ read before installing")
     else:
         out.append("### 🔺 TriDelPhi pre-install scan — ✅ no known-bad patterns")
-    out.append(f"_{_md_escape(label)} · {_SCOPE}_")
+    out.append(f"_{md_escape(label)} · {_SCOPE}_")
     out.append("")
     by_cat: dict[str, list[PreflightFinding]] = {}
     for f in result.findings:

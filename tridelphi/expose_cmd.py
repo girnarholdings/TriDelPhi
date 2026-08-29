@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
-from .checklist import _compact_wheres, _md_escape
 from .expose import CATEGORIES, ExposeFinding, ExposureResult, analyze_exposure
+from .reportutil import grouped_lines, wrap
 from .sarif import dumps
 from .severity import should_fail
 
@@ -70,44 +70,11 @@ def _by_category(
     return owned, cross
 
 
-def _grouped_lines(
-    findings: list[ExposeFinding], *, markdown: bool = False
-) -> list[tuple[str, str, str]]:
-    """Collapse identical messages across locations. Returns (severity, text, fix).
-
-    ``markdown`` escapes the message and location before they are composed, since
-    both carry repo-derived text (a file path, an env var name, a masked key) and
-    the markdown form is posted as a comment where GitHub renders it as HTML."""
-    esc = _md_escape if markdown else (lambda s: s)
-    order: list[str] = []
-    by_msg: dict[str, dict] = {}
-    for f in findings:
-        slot = by_msg.get(f.message)
-        if slot is None:
-            slot = {"sev": f.severity, "fix": f.fix, "wheres": []}
-            by_msg[f.message] = slot
-            order.append(f.message)
-        if f.where and f.where not in slot["wheres"]:
-            slot["wheres"].append(f.where)
-    out: list[tuple[str, str, str]] = []
-    for msg in order:
-        slot = by_msg[msg]
-        wheres = slot["wheres"]
-        if not wheres:
-            text = esc(msg)
-        elif len(wheres) == 1:
-            text = f"{esc(wheres[0])} — {esc(msg)}"
-        else:
-            text = f"{esc(msg)} — at {esc(_compact_wheres(wheres))}"
-        out.append((slot["sev"], text, slot["fix"]))
-    return out
-
-
 def _render_text(result: ExposureResult, repo: str, out: TextIO) -> None:
     bar = "─" * 60
     print(bar, file=out)
     print(f"  🔺 TriDelPhi exposure audit · {repo}", file=out)
-    for line in _wrap(_SCOPE, 66):
+    for line in wrap(_SCOPE, 66):
         print(f"  {line}", file=out)
     print(bar, file=out)
     print("", file=out)
@@ -135,10 +102,10 @@ def _render_text(result: ExposureResult, repo: str, out: TextIO) -> None:
             if not group:
                 continue
             print(f"  🚫 {question}", file=out)
-            for _sev, text, fix in _grouped_lines(group):
-                for i, wl in enumerate(_wrap(text, 64)):
+            for _sev, text, fix in grouped_lines(group):
+                for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
-                for fl in _wrap(f"Do this: {fix}", 64):
+                for fl in wrap(f"Do this: {fix}", 64):
                     print(f"        {fl}", file=out)
             print("", file=out)
 
@@ -155,15 +122,15 @@ def _render_text(result: ExposureResult, repo: str, out: TextIO) -> None:
                 continue
             print(f"  ⚠️  {question}", file=out)
             print(f"      {gloss}", file=out)
-            for _sev, text, fix in _grouped_lines(group)[:_MAX_ITEMS]:
-                for i, wl in enumerate(_wrap(text, 64)):
+            for _sev, text, fix in grouped_lines(group)[:_MAX_ITEMS]:
+                for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
-                for fl in _wrap(f"Do this: {fix}", 64):
+                for fl in wrap(f"Do this: {fix}", 64):
                     print(f"        {fl}", file=out)
             print("", file=out)
 
     for f in notes:
-        for i, wl in enumerate(_wrap(f.message, 66)):
+        for i, wl in enumerate(wrap(f.message, 66)):
             print(f"  {'🔎 ' if i == 0 else '   '}{wl}", file=out)
     if notes:
         print("", file=out)
@@ -203,7 +170,7 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
     if crits:
         out.append("**Fix these first:**")
         for letter, _question, _g in CATEGORIES:
-            for _sev, text, fix in _grouped_lines(
+            for _sev, text, fix in grouped_lines(
                 [f for f in crits if f.category == letter], markdown=True
             ):
                 out.append(f"- 🚫 {text} **Do this:** {fix}")
@@ -219,7 +186,7 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
                 continue
             out.append(f"**{question}**  ")
             out.append(f"_{gloss}_")
-            for _sev, text, fix in _grouped_lines(group, markdown=True)[:_MAX_ITEMS]:
+            for _sev, text, fix in grouped_lines(group, markdown=True)[:_MAX_ITEMS]:
                 out.append(f"- {text} **Do this:** {fix}")
             out.append("")
         out.append("</details>")
@@ -227,21 +194,6 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
     out.append("_Static audit of committed code + config — verify network-facing config "
                "against your live deployment._")
     return "\n".join(out) + "\n"
-
-
-def _wrap(text: str, width: int) -> list[str]:
-    words = text.split()
-    lines: list[str] = []
-    cur = ""
-    for w in words:
-        if cur and len(cur) + 1 + len(w) > width:
-            lines.append(cur)
-            cur = w
-        else:
-            cur = f"{cur} {w}" if cur else w
-    if cur:
-        lines.append(cur)
-    return lines or [""]
 
 
 def run_expose(

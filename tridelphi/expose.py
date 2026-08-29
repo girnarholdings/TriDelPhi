@@ -30,10 +30,9 @@ from typing import Any
 
 from .ladder import SEMGREP_EXPOSURE, ExternalRun, run_tool
 from .orchestrate import merge_runs
-from .sarif import is_suppressed
+from .sarif import is_suppressed, simple_sarif
 from .severity import SARIF_LEVEL_TO_SEVERITY as _LEVEL_TO_SEV
 from .severity import SEVERITY_ORDER
-from .severity import SEVERITY_TO_SARIF_LEVEL as _SEV_TO_LEVEL
 
 __all__ = ["ExposeFinding", "ExposureResult", "analyze_exposure"]
 
@@ -872,45 +871,13 @@ _HELP_URI = "https://girnarholdings.github.io/TriDelPhi/"
 
 
 def _native_sarif(findings: list[ExposeFinding], tool_version: str) -> dict[str, Any]:
-    rules: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    results: list[dict[str, Any]] = []
-    for f in sorted(findings, key=lambda x: (x.where, x.rule, x.message)):
-        rule_id = f"tridelphi-expose/{f.rule}"
-        if rule_id not in seen:
-            seen.add(rule_id)
-            rules.append({
-                "id": rule_id,
-                "name": f.rule.replace("-", ""),
-                "shortDescription": {"text": f"Exposure audit: {f.rule}"},
-                "helpUri": _HELP_URI,
-            })
-        path, _sep, line = f.where.partition(":")
-        region = {"startLine": int(line)} if line.isdigit() else {"startLine": 1}
-        results.append({
-            "ruleId": rule_id,
-            "level": _SEV_TO_LEVEL.get(f.severity, "warning"),
-            "message": {"text": f.message},
-            "locations": [{
-                "physicalLocation": {
-                    "artifactLocation": {"uri": path or "README.md"},
-                    "region": region,
-                }
-            }],
-        })
-    return {
-        "version": "2.1.0",
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-        "runs": [{
-            "tool": {"driver": {
-                "name": "tridelphi-expose",
-                "version": tool_version,
-                "informationUri": _HELP_URI,
-                "rules": rules,
-            }},
-            "results": results,
-        }],
-    }
+    return simple_sarif(
+        findings,
+        tool="tridelphi-expose",
+        audit_label="Exposure audit",
+        tool_version=tool_version,
+        help_uri=_HELP_URI,
+    )
 
 
 # ---------------------------------------------------------------------------
