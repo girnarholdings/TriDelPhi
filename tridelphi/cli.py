@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from . import __version__
@@ -238,141 +239,167 @@ def _default_format(stream) -> str:
     return "checklist" if hasattr(stream, "isatty") and stream.isatty() else "text"
 
 
+def _cmd_init(args) -> int:
+    from .init_cmd import run_init
+
+    return run_init(
+        args.command or ".",
+        force=args.force,
+        wizard=args.wizard,
+        app=args.app,
+        from_source=args.from_source,
+        local=args.local,
+    )
+
+
+def _cmd_scan(args) -> int:
+    # The pre-install trust audit: read someone else's code — install hooks,
+    # droppers, poisoned agent files, dishonest links — before the installer
+    # ever runs. A sibling of the repo scan, not a ladder rung.
+    from .scan_cmd import run_scan
+
+    if not args.command:
+        print(
+            "tridelphi: scan needs a target: a directory, an archive "
+            "(.tgz/.zip/.whl), npm:<package>, or pypi:<package>",
+            file=sys.stderr,
+        )
+        return 2
+    return run_scan(
+        args.command,
+        fmt="markdown" if args.markdown else args.format,
+        sarif_file=args.sarif_file,
+        checklist_md_file=args.checklist_md_file,
+        fail_on=args.fail_on,
+        tool_version=__version__,
+    )
+
+
+def _cmd_expose(args) -> int:
+    # The exposure audit: shipped source maps + client secrets, DB config,
+    # data hygiene. A sibling of the scan, not a ladder rung.
+    from .expose_cmd import run_expose
+
+    return run_expose(
+        args.command or ".",
+        fmt="markdown" if args.markdown else args.format,
+        sarif_file=args.sarif_file,
+        checklist_md_file=args.checklist_md_file,
+        fail_on=args.fail_on,
+        tool_version=__version__,
+    )
+
+
+def _cmd_privatize(args) -> int:
+    # The honest obfuscator: opt-in, consent-gated, verified-or-reverted,
+    # and never reachable from --yes / fix --apply / guard -y.
+    from .privatize import run_privatize
+
+    return run_privatize(
+        args.command or ".",
+        build_cmd=args.build_cmd,
+        smoke_cmd=args.smoke_cmd,
+        privatize_out=args.privatize_out,
+        assume_yes=args.yes,
+    )
+
+
+def _cmd_fix(args) -> int:
+    if args.apply:
+        # `fix --apply` is the batch spelling of guard: automatic fixers
+        # only, every edit verified against a re-scan or rolled back.
+        return _cmd_guard(args, yes=True)
+    from .fix_cmd import run_fix
+
+    return run_fix(
+        args.command or ".",
+        markdown=args.markdown,
+        include_warnings=args.include_warnings,
+    )
+
+
+def _cmd_guard(args, *, yes: bool | None = None) -> int:
+    from .guard_cmd import run_guard
+
+    return run_guard(
+        args.command or ".",
+        yes=args.yes if yes is None else yes,
+        include_warnings=args.include_warnings,
+        level=args.level,
+        offline=args.offline,
+    )
+
+
+def _cmd_gate(args) -> int:
+    from .gate_cmd import run_gate
+
+    if not args.command:
+        print("tridelphi: gate needs a SARIF file: tridelphi gate out.sarif", file=sys.stderr)
+        return 2
+    return run_gate(args.command, fail_on=args.fail_on)
+
+
+def _cmd_attest(args) -> int:
+    from .gate_cmd import run_attest
+
+    if not args.command:
+        print(
+            "tridelphi: attest needs a SARIF file: tridelphi attest out.sarif",
+            file=sys.stderr,
+        )
+        return 2
+    return run_attest(args.command, evidence_path=args.evidence_file)
+
+
+def _cmd_verify(args) -> int:
+    # L7: `tridelphi verify [repo]` checks the trust-lock (and, when gh is
+    # present and online, upstream provenance). It scans the workflows, not
+    # a SARIF file, so its argument is a repo root like a normal scan.
+    from .verify_cmd import run_verify
+
+    want_sarif = args.format in ("sarif", "json")
+    # Keep stdout clean for SARIF; the human summary goes to stderr then.
+    code, document = run_verify(
+        args.command or ".",
+        trust_lock=args.trust_lock,
+        write_lock=args.write_trust_lock,
+        relock=args.relock,
+        offline=args.offline,
+        fail_on=args.fail_on,
+        tool_version=__version__,
+        out=sys.stderr if want_sarif else sys.stdout,
+    )
+    if document is not None and want_sarif:
+        sys.stdout.write(dumps(document))
+    return code
+
+
+# Subcommand registry: `tridelphi <name> …` dispatches here; anything else is
+# a path to scan (`core` being the explicit spelling of the same). Each
+# handler imports its implementation lazily so `tridelphi .` never pays for —
+# or gains the capabilities of — the siblings it did not run.
+_SUBCOMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
+    "init": _cmd_init,
+    "scan": _cmd_scan,
+    "expose": _cmd_expose,
+    "privatize": _cmd_privatize,
+    "fix": _cmd_fix,
+    "guard": _cmd_guard,
+    "gate": _cmd_gate,
+    "attest": _cmd_attest,
+    "verify": _cmd_verify,
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.format is None:
         args.format = _default_format(sys.stdout)
 
-    # `tridelphi init` sets up the scan workflow; `tridelphi core .` and
-    # `tridelphi .` both scan; `gate` and `attest` are L6's two processes.
-    if args.path == "init":
-        from .init_cmd import run_init
-
-        return run_init(
-            args.command or ".",
-            force=args.force,
-            wizard=args.wizard,
-            app=args.app,
-            from_source=args.from_source,
-            local=args.local,
-        )
-    if args.path == "scan":
-        # The pre-install trust audit: read someone else's code — install
-        # hooks, droppers, poisoned agent files, dishonest links — before the
-        # installer ever runs. A sibling of the repo scan, not a ladder rung.
-        from .scan_cmd import run_scan
-
-        if not args.command:
-            print(
-                "tridelphi: scan needs a target: a directory, an archive "
-                "(.tgz/.zip/.whl), npm:<package>, or pypi:<package>",
-                file=sys.stderr,
-            )
-            return 2
-        fmt = "markdown" if args.markdown else args.format
-        return run_scan(
-            args.command,
-            fmt=fmt,
-            sarif_file=args.sarif_file,
-            checklist_md_file=args.checklist_md_file,
-            fail_on=args.fail_on,
-            tool_version=__version__,
-        )
-    if args.path == "expose":
-        # The exposure audit: shipped source maps + client secrets, DB config,
-        # data hygiene. A sibling of the scan, not a ladder rung.
-        from .expose_cmd import run_expose
-
-        fmt = "markdown" if args.markdown else args.format
-        return run_expose(
-            args.command or ".",
-            fmt=fmt,
-            sarif_file=args.sarif_file,
-            checklist_md_file=args.checklist_md_file,
-            fail_on=args.fail_on,
-            tool_version=__version__,
-        )
-    if args.path == "privatize":
-        # The honest obfuscator: opt-in, consent-gated, verified-or-reverted,
-        # and never reachable from --yes / fix --apply / guard -y.
-        from .privatize import run_privatize
-
-        return run_privatize(
-            args.command or ".",
-            build_cmd=args.build_cmd,
-            smoke_cmd=args.smoke_cmd,
-            privatize_out=args.privatize_out,
-            assume_yes=args.yes,
-        )
-    if args.path == "fix":
-        if args.apply:
-            # `fix --apply` is the batch spelling of guard: automatic fixers
-            # only, every edit verified against a re-scan or rolled back.
-            from .guard_cmd import run_guard
-
-            return run_guard(
-                args.command or ".",
-                yes=True,
-                include_warnings=args.include_warnings,
-                level=args.level,
-                offline=args.offline,
-            )
-        from .fix_cmd import run_fix
-
-        return run_fix(
-            args.command or ".",
-            markdown=args.markdown,
-            include_warnings=args.include_warnings,
-        )
-    if args.path == "guard":
-        from .guard_cmd import run_guard
-
-        return run_guard(
-            args.command or ".",
-            yes=args.yes,
-            include_warnings=args.include_warnings,
-            level=args.level,
-            offline=args.offline,
-        )
-    if args.path == "gate":
-        from .gate_cmd import run_gate
-
-        if not args.command:
-            print("tridelphi: gate needs a SARIF file: tridelphi gate out.sarif", file=sys.stderr)
-            return 2
-        return run_gate(args.command, fail_on=args.fail_on)
-    if args.path == "attest":
-        from .gate_cmd import run_attest
-
-        if not args.command:
-            print(
-                "tridelphi: attest needs a SARIF file: tridelphi attest out.sarif",
-                file=sys.stderr,
-            )
-            return 2
-        return run_attest(args.command, evidence_path=args.evidence_file)
-    if args.path == "verify":
-        # L7: `tridelphi verify [repo]` checks the trust-lock (and, when gh is
-        # present and online, upstream provenance). It scans the workflows, not
-        # a SARIF file, so its argument is a repo root like a normal scan.
-        from .verify_cmd import run_verify
-
-        want_sarif = args.format in ("sarif", "json")
-        # Keep stdout clean for SARIF; the human summary goes to stderr then.
-        code, document = run_verify(
-            args.command or ".",
-            trust_lock=args.trust_lock,
-            write_lock=args.write_trust_lock,
-            relock=args.relock,
-            offline=args.offline,
-            fail_on=args.fail_on,
-            tool_version=__version__,
-            out=sys.stderr if want_sarif else sys.stdout,
-        )
-        if document is not None and want_sarif:
-            sys.stdout.write(dumps(document))
-        return code
+    handler = _SUBCOMMANDS.get(args.path)
+    if handler is not None:
+        return handler(args)
 
     path = args.path
     if path == "core":
