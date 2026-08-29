@@ -21,6 +21,7 @@ import re
 from collections.abc import Iterator
 
 from .model import CapabilityHit, ExecutionContext
+from .steps import iter_steps
 from .tables import Tables
 
 __all__ = ["detect", "has_strong_association_gate"]
@@ -132,14 +133,10 @@ def _guard_expressions(context: ExecutionContext) -> Iterator[tuple[str, object]
     node to anchor a position on."""
     if context.job_if:
         yield context.job_if, None
-    steps = context.body.get("steps")
-    if steps is not None:
-        for step in steps.seq():
-            if not step.is_mapping():
-                continue
-            node = step.get("if")
-            if node is not None and node.text:
-                yield node.text, node
+    for step in iter_steps(context.body):
+        node = step.get("if")
+        if node is not None and node.text:
+            yield node.text, node
 
 
 def detect(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:

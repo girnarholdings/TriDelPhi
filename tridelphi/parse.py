@@ -25,6 +25,7 @@ from .model import (
     Position,
     RepoInventory,
 )
+from .steps import iter_steps, uses_name
 from .tables import Tables
 from .yamlnode import YamlNode
 
@@ -307,22 +308,11 @@ def _job_skips_fork_pull_requests(job: YamlNode) -> bool:
     is a signal we can rely on — the same reasoning under
     ``has_strong_association_gate``.
     """
-    steps = job.get("steps")
-    if steps is None:
-        return False
-    for step in steps.seq():
+    for step in iter_steps(job):
         run_node = step.get("run")
         if run_node is not None and "isCrossRepository" in (run_node.text or ""):
             return True
     return False
-
-
-def _uses_name(step: YamlNode) -> str:
-    uses = step.get("uses")
-    if uses is None:
-        return ""
-    text = uses.text
-    return text.split("@", 1)[0].strip()
 
 
 def _resolve_untrusted_worktree(
@@ -338,9 +328,6 @@ def _resolve_untrusted_worktree(
     the PR merge ref, which is attacker code.
     """
     untrusted_refs = tables.tuple_of("untrusted_expressions", "untrusted_refs")
-    steps = job.get("steps")
-    if steps is None:
-        return False, ""
 
     # A shell step that fetches the PR's own code makes the tree untrusted no
     # matter how actions/checkout resolved — so this takes precedence over the
@@ -349,13 +336,13 @@ def _resolve_untrusted_worktree(
     # Exception: a job that first refuses fork pull requests only ever fetches
     # same-repo (write-access-authored) branches, which are not untrusted.
     if not _job_skips_fork_pull_requests(job):
-        for step in steps.seq():
+        for step in iter_steps(job):
             run_node = step.get("run")
             if run_node is not None and _run_fetches_pull_request(run_node.text or ""):
                 return True, "a run step fetches the pull request's own code into the tree"
 
-    for step in steps.seq():
-        name = _uses_name(step)
+    for step in iter_steps(job):
+        name = uses_name(step)
         if not any(name == c or name.startswith(c) for c in _CHECKOUT_ACTIONS):
             continue
         with_node = step.get("with")
@@ -371,8 +358,8 @@ def _resolve_untrusted_worktree(
         # documented safe configuration.
         return False, ""
 
-    if fork_reachable and "pull_request" in triggers:
-        return False, ""
+    # No checkout step at all: the runner starts with an empty tree, so there
+    # is no attacker-chosen code in it regardless of trigger.
     return False, ""
 
 
