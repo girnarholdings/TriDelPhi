@@ -10,7 +10,14 @@ from jsonschema.validators import Draft4Validator, validator_for
 from tridelphi import __version__
 from tridelphi.api import analyze
 from tridelphi.model import RULES
-from tridelphi.sarif import dumps, fingerprint, load_schema, to_sarif, validate_sarif
+from tridelphi.sarif import (
+    dumps,
+    fingerprint,
+    is_suppressed,
+    load_schema,
+    to_sarif,
+    validate_sarif,
+)
 
 
 def _all_findings():
@@ -110,3 +117,18 @@ def test_output_is_valid_json_and_stable():
     assert first == second
     assert json.loads(first)
     assert first.endswith("\n")
+
+
+def test_is_suppressed_matches_sarif_semantics():
+    """SARIF 2.1.0 §3.27.23: a non-empty `suppressions` array means suppressed.
+    Anything else — absent, empty, or malformed — is a live result, failing safe
+    toward showing rather than hiding."""
+    assert is_suppressed({"suppressions": [{"kind": "inSource"}]})
+    assert is_suppressed({"suppressions": [{"kind": "external"}, {"kind": "inSource"}]})
+    # not suppressed:
+    assert not is_suppressed({})
+    assert not is_suppressed({"suppressions": []})
+    # malformed suppressions must never raise and must fail toward "show it":
+    assert not is_suppressed({"suppressions": "nope"})
+    assert not is_suppressed({"suppressions": ["not-a-dict"]})
+    assert not is_suppressed({"suppressions": None})

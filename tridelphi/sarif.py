@@ -22,11 +22,31 @@ from typing import Any
 
 from .model import RULES, Diagnostic, Finding, rule_by_id
 
-__all__ = ["dumps", "fingerprint", "load_schema", "to_sarif", "validate_sarif"]
+__all__ = ["dumps", "fingerprint", "is_suppressed", "load_schema", "to_sarif", "validate_sarif"]
 
 SCHEMA_URI = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
 _LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
+
+
+def is_suppressed(result: dict[str, Any]) -> bool:
+    """Whether a SARIF result is suppressed (SARIF 2.1.0 §3.27.23).
+
+    A wrapped tool that supports in-source suppression — semgrep's `# nosemgrep`,
+    for one — does not drop the finding from its SARIF; it emits the result with a
+    non-empty ``suppressions`` array (``kind: inSource``). That is the author's
+    reviewed, in-code statement that the finding was audited and accepted, so it
+    must not be counted as an open item or gate the build. It stays in the merged
+    document (GitHub renders it as a dismissed alert), just not as a live finding.
+
+    Defensive: the field is attacker-adjacent (it rides in a subprocess's output),
+    so a malformed ``suppressions`` never raises — only a well-formed, non-empty
+    array suppresses, and anything else counts, which fails safe toward showing.
+    """
+    supp = result.get("suppressions")
+    return isinstance(supp, list) and len(supp) > 0 and all(
+        isinstance(s, dict) for s in supp
+    )
 
 
 def load_schema() -> dict[str, Any]:

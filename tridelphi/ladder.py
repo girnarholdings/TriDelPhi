@@ -55,6 +55,7 @@ from urllib.parse import unquote, urlparse
 
 from .model import Diagnostic
 from .orchestrate import MAX_OUTPUT_BYTES, run_zizmor, sarif_shape_error
+from .sarif import is_suppressed
 
 __all__ = [
     "LADDER",
@@ -206,6 +207,12 @@ class ExternalRun:
         self.severity_counts: dict[str, int] = {"critical": 0, "warning": 0, "note": 0}
         if sarif is not None:
             for result in _iter_results(sarif):
+                # A result the tool marked suppressed in source (e.g. semgrep's
+                # `# nosemgrep`) is an audited, accepted finding: it stays in the
+                # merged document as a dismissed alert but is not a live item, so
+                # it neither shows as "worth a look" nor gates the build.
+                if is_suppressed(result):
+                    continue
                 # The level is attacker-influenced like the rest of the
                 # document: anything that is not a known SARIF level string
                 # (wrong type included) counts as the SARIF default, warning.

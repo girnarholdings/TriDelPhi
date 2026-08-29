@@ -30,6 +30,7 @@ from typing import Any
 
 from .ladder import SEMGREP_EXPOSURE, ExternalRun, run_tool
 from .orchestrate import merge_runs
+from .sarif import is_suppressed
 
 __all__ = ["ExposeFinding", "ExposureResult", "analyze_exposure"]
 
@@ -828,6 +829,8 @@ def _findings_from_semgrep(document: dict[str, Any]) -> list[ExposeFinding]:
         for result in run.get("results") or []:
             if not isinstance(result, dict):
                 continue
+            if is_suppressed(result):
+                continue  # audited & accepted in source (# nosemgrep)
             rule_id = str(result.get("ruleId", ""))
             cat, fix = _semgrep_category(rule_id)
             level = result.get("level")

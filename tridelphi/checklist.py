@@ -19,6 +19,7 @@ from typing import TextIO
 
 from .model import AnalysisResult
 from .render import SEVERITY_ORDER
+from .sarif import is_suppressed
 
 __all__ = [
     "ExternalStatus",
@@ -157,6 +158,8 @@ def items_from_sarif(sarif: dict) -> list[tuple[str, str, str]]:
         for result in run.get("results") or []:
             if not isinstance(result, dict):
                 continue
+            if is_suppressed(result):
+                continue  # audited & accepted in source; not a live item
             level = result.get("level")
             severity = _SARIF_LEVEL.get(level if isinstance(level, str) else "", "warning")
             message = result.get("message")
