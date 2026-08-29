@@ -15,8 +15,8 @@ import re
 from collections.abc import Iterator
 
 from .model import CapabilityHit, ExecutionContext
+from .steps import iter_steps, uses_name
 from .tables import Tables
-from .yamlnode import YamlNode
 
 __all__ = ["detect", "expression_paths", "matches_untrusted_path"]
 
@@ -55,20 +55,6 @@ def matches_untrusted_path(path: str, patterns: tuple[str, ...]) -> str | None:
     return None
 
 
-def _iter_steps(context: ExecutionContext) -> Iterator[YamlNode]:
-    steps = context.body.get("steps")
-    if steps is None:
-        return
-    for step in steps.seq():
-        if step.is_mapping():
-            yield step
-
-
-def _uses_name(step: YamlNode) -> str:
-    uses = step.get("uses")
-    return uses.text.split("@", 1)[0].strip() if uses is not None else ""
-
-
 def _reexpands(run_text: str, var_name: str, markers: tuple[str, ...]) -> bool:
     """Does this run block defeat the env-indirection mitigation?"""
     if any(marker in run_text for marker in markers):
@@ -95,7 +81,7 @@ def _scan_interpreter_sinks(
 
     gated = has_strong_association_gate(context)
 
-    for step in _iter_steps(context):
+    for step in iter_steps(context.body):
         run = step.get("run")
         if run is not None and run.text:
             for path in expression_paths(run.text):
@@ -135,7 +121,7 @@ def _scan_interpreter_sinks(
                         )
                         break
 
-        name = _uses_name(step)
+        name = uses_name(step)
         sink_inputs = sinks.get(name)
         if sink_inputs and isinstance(sink_inputs, list):
             with_node = step.get("with")
@@ -208,8 +194,8 @@ def _scan_upstream_consumption(
     if "workflow_run" not in context.triggers:
         return
     consumers = tables.tuple_of("egress", "upstream_consumers")
-    for step in _iter_steps(context):
-        name = _uses_name(step)
+    for step in iter_steps(context.body):
+        name = uses_name(step)
         if name and any(name == c or name.startswith(c) for c in consumers):
             yield CapabilityHit(
                 capability="U",

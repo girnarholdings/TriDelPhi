@@ -56,6 +56,7 @@ from urllib.parse import unquote, urlparse
 from .model import Diagnostic
 from .orchestrate import MAX_OUTPUT_BYTES, run_zizmor, sarif_shape_error
 from .sarif import is_suppressed
+from .severity import SARIF_LEVEL_TO_SEVERITY as _SARIF_LEVEL_TO_SEVERITY
 
 __all__ = [
     "LADDER",
@@ -66,8 +67,6 @@ __all__ = [
     "run_tool",
     "summarize_run",
 ]
-
-_SARIF_LEVEL_TO_SEVERITY = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
 
 
 @dataclass(frozen=True)
@@ -93,6 +92,11 @@ class ToolSpec:
     # (JSON on stdout, converted to SARIF by our adapter — observed live:
     # scorecard --local does not support --format sarif).
     output_format: str = "sarif-file"
+    # The command line after the binary; "{report}" becomes the path the tool
+    # writes its report to. Empty means the tool has a dedicated runner
+    # (zizmor delegates to run_zizmor so --with-zizmor and --level 3 share
+    # one code path). Adding a rung is now a spec, not a new elif.
+    argv: tuple[str, ...] = ()
 
 
 GITLEAKS = ToolSpec(
@@ -107,6 +111,9 @@ GITLEAKS = ToolSpec(
     ok_exit_codes=frozenset({0, 1}),  # 1 = leaks found, which is a successful scan
     timeout=300,
     severity_override="error",
+    # `dir` scans the working tree (not git history) with URIs relative to the
+    # scanned path, which is what code scanning wants.
+    argv=("dir", ".", "--no-banner", "--report-format", "sarif", "--report-path", "{report}"),
 )
 
 OSV_SCANNER = ToolSpec(
@@ -121,6 +128,7 @@ OSV_SCANNER = ToolSpec(
     ok_exit_codes=frozenset({0, 1}),  # 1 = vulnerabilities found
     timeout=300,
     no_targets_exit_codes=frozenset({128}),  # observed live: "No package sources found"
+    argv=("scan", "source", "--recursive", "--format", "sarif", "--output", "{report}", "."),
 )
 
 ZIZMOR = ToolSpec(
@@ -150,6 +158,9 @@ SCORECARD = ToolSpec(
     ok_exit_codes=frozenset({0}),
     timeout=300,
     output_format="scorecard-json",
+    # Local mode emits JSON on stdout only (no SARIF, no --output — both
+    # observed live); the scorecard adapter converts it.
+    argv=("--local", ".", "--format", "json"),
 )
 
 SEMGREP = ToolSpec(
@@ -163,6 +174,12 @@ SEMGREP = ToolSpec(
     network=True,  # fetches the p/security-audit ruleset from the registry
     ok_exit_codes=frozenset({0, 1}),
     timeout=600,
+    # A named public ruleset with metrics off: never `--config auto`, which
+    # uploads project metadata to the registry.
+    argv=(
+        "scan", "--config", "p/security-audit", "--sarif", "--output", "{report}",
+        "--metrics", "off", "--disable-version-check", "--quiet", ".",
+    ),
 )
 
 # Ordered by rung. TriDelPhi core is not in this list on purpose: it is the
@@ -187,6 +204,12 @@ SEMGREP_EXPOSURE = ToolSpec(
     network=False,  # local --config, --metrics off: no registry, no upload
     ok_exit_codes=frozenset({0, 1}),
     timeout=600,
+    # The exposure audit's code-pattern rung: our LOCAL bundled ruleset,
+    # metrics off, no registry — the offline-honest counterpart to L5.
+    argv=(
+        "scan", "--config", str(SEMGREP_EXPOSURE_RULES), "--sarif", "--output", "{report}",
+        "--metrics", "off", "--disable-version-check", "--quiet", ".",
+    ),
 )
 
 
@@ -277,54 +300,12 @@ def run_tool(
             "TriDelPhi's own findings are unaffected.",
         )
 
+    if not spec.argv:  # pragma: no cover - registry and runner out of sync
+        return _skip(spec, f"no runner wired for {spec.name}")
+
     with tempfile.TemporaryDirectory(prefix="tridelphi-") as tmp:
         report = Path(tmp) / f"{spec.name}.sarif"
-        if spec is GITLEAKS:
-            # `dir` scans the working tree (not git history) with URIs relative
-            # to the scanned path, which is what code scanning wants.
-            cmd = [
-                binary, "dir", ".",
-                "--no-banner",
-                "--report-format", "sarif",
-                "--report-path", str(report),
-            ]
-        elif spec is OSV_SCANNER:
-            cmd = [
-                binary, "scan", "source", "--recursive",
-                "--format", "sarif",
-                "--output", str(report),
-                ".",
-            ]
-        elif spec is SCORECARD:
-            # Local mode emits JSON on stdout only (no SARIF, no --output —
-            # both observed live); the adapter below converts it.
-            cmd = [binary, "--local", ".", "--format", "json"]
-        elif spec is SEMGREP:
-            # A named public ruleset with metrics off: never `--config auto`,
-            # which uploads project metadata to the registry.
-            cmd = [
-                binary, "scan",
-                "--config", "p/security-audit",
-                "--sarif", "--output", str(report),
-                "--metrics", "off",
-                "--disable-version-check",
-                "--quiet",
-                ".",
-            ]
-        elif spec is SEMGREP_EXPOSURE:
-            # The exposure audit's code-pattern rung: our LOCAL bundled ruleset,
-            # metrics off, no registry — the offline-honest counterpart to L5.
-            cmd = [
-                binary, "scan",
-                "--config", str(SEMGREP_EXPOSURE_RULES),
-                "--sarif", "--output", str(report),
-                "--metrics", "off",
-                "--disable-version-check",
-                "--quiet",
-                ".",
-            ]
-        else:  # pragma: no cover - registry and runner out of sync
-            return _skip(spec, f"no runner wired for {spec.name}")
+        cmd = [binary, *(arg.replace("{report}", str(report)) for arg in spec.argv)]
 
         try:
             completed = subprocess.run(

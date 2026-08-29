@@ -18,8 +18,10 @@ import re
 from typing import TextIO
 
 from .model import AnalysisResult
-from .render import SEVERITY_ORDER
+from .reportutil import compact_wheres as _compact_wheres
+from .reportutil import md_escape as _md_escape
 from .sarif import is_suppressed
+from .severity import SARIF_LEVEL_TO_SEVERITY, SEVERITY_ORDER
 
 __all__ = [
     "ExternalStatus",
@@ -109,7 +111,7 @@ class ExternalStatus:
         self.items = items or []
 
 
-_SARIF_LEVEL = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
+_SARIF_LEVEL = SARIF_LEVEL_TO_SEVERITY
 _UNPRINTABLE = re.compile("[^\\x20-\\x7e\\u00a0-\\uffff]")
 _ITEM_WIDTH = 96
 
@@ -124,14 +126,7 @@ def _sanitize(text: str, width: int = _ITEM_WIDTH) -> str:
 # notification), and GitHub renders it as HTML. A finding message, a path, or a
 # job id that a pull request author controls could otherwise inject a link, an
 # image beacon, an HTML tag, or a table break into that comment. `_sanitize`
-# already flattens and bounds the text; these two escape the markdown meaning.
-_MD_META = re.compile(r"([\\`*_{}\[\]<>|~])")
-
-
-def _md_escape(text: str) -> str:
-    """Backslash-escape the Markdown/HTML metacharacters in untrusted text so it
-    renders as the literal characters, never as markup, in the posted comment."""
-    return _MD_META.sub(r"\\\1", text)
+# already flattens and bounds the text; escaping lives in reportutil.
 
 
 def _md_code(text: str) -> str:
@@ -181,29 +176,6 @@ def items_from_sarif(sarif: dict) -> list[tuple[str, str, str]]:
             items.append((severity, where, body))
     items.sort(key=lambda it: SEVERITY_ORDER.get(it[0], 3))
     return items
-
-
-def _compact_wheres(wheres: list[str]) -> str:
-    """`a.yml:25, a.yml:41, b.yml:3` -> `a.yml lines 25, 41 · b.yml line 3`."""
-    by_file: dict[str, list[str]] = {}
-    file_order: list[str] = []
-    for where in wheres:
-        file, _sep, line = where.partition(":")
-        if file not in by_file:
-            by_file[file] = []
-            file_order.append(file)
-        if line:
-            by_file[file].append(line)
-    parts = []
-    for file in file_order:
-        lines = by_file[file]
-        if not lines:
-            parts.append(file)
-        elif len(lines) == 1:
-            parts.append(f"{file} line {lines[0]}")
-        else:
-            parts.append(f"{file} lines {', '.join(lines)}")
-    return " · ".join(parts)
 
 
 def _grouped(

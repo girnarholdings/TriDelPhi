@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from .model import CapabilityHit, ExecutionContext
+from .steps import iter_steps, uses_name
 from .tables import Tables
 from .yamlnode import YamlNode
 
@@ -50,21 +51,11 @@ class AgentStep:
         return False
 
 
-def _uses_name(step: YamlNode) -> str:
-    uses = step.get("uses")
-    return uses.text.split("@", 1)[0].strip() if uses is not None else ""
-
-
 def agent_steps(context: ExecutionContext, tables: Tables) -> Iterator[AgentStep]:
     agents = tables.section("agent_signals", "agents", []) or []
     invocations = tables.tuple_of("agent_signals", "run_invocations")
-    steps = context.body.get("steps")
-    if steps is None:
-        return
-    for step in steps.seq():
-        if not step.is_mapping():
-            continue
-        name = _uses_name(step)
+    for step in iter_steps(context.body):
+        name = uses_name(step)
         if name:
             for spec in agents:
                 for prefix in spec.get("uses_prefixes") or ():

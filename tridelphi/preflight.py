@@ -50,6 +50,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .sarif import simple_sarif
+from .severity import SEVERITY_ORDER as _SEVERITY_RANK
+
 __all__ = [
     "CATEGORIES",
     "PreflightFinding",
@@ -81,8 +84,6 @@ CATEGORIES: tuple[tuple[str, str, str], ...] = (
      "URLs, shorteners, and throwaway file hosts used as code sources."),
 )
 CATEGORY_ORDER = {letter: i for i, (letter, _q, _g) in enumerate(CATEGORIES)}
-
-_SEVERITY_RANK = {"critical": 0, "warning": 1, "note": 2}
 
 
 @dataclass(frozen=True, slots=True)
@@ -838,39 +839,17 @@ def extract_archive(archive: Path, dest: Path) -> Path:
 # SARIF + entry point
 # ---------------------------------------------------------------------------
 
-_SEV_TO_LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
 _HELP_URI = "https://girnarholdings.github.io/TriDelPhi/"
 
 
 def _to_sarif(findings: list[PreflightFinding], tool_version: str) -> dict[str, Any]:
-    rules: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    results: list[dict[str, Any]] = []
-    for f in sorted(findings, key=lambda x: (x.where, x.rule, x.message)):
-        rule_id = f"tridelphi-scan/{f.rule}"
-        if rule_id not in seen:
-            seen.add(rule_id)
-            rules.append({"id": rule_id, "name": f.rule.replace("-", ""),
-                          "shortDescription": {"text": f"Pre-install audit: {f.rule}"},
-                          "helpUri": _HELP_URI})
-        path, _sep, line = f.where.partition(":")
-        region = {"startLine": int(line)} if line.isdigit() else {"startLine": 1}
-        results.append({
-            "ruleId": rule_id,
-            "level": _SEV_TO_LEVEL.get(f.severity, "warning"),
-            "message": {"text": f.message},
-            "locations": [{"physicalLocation": {
-                "artifactLocation": {"uri": path or "README.md"},
-                "region": region}}],
-        })
-    return {
-        "version": "2.1.0",
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-        "runs": [{"tool": {"driver": {
-            "name": "tridelphi-scan", "version": tool_version,
-            "informationUri": _HELP_URI, "rules": rules}},
-            "results": results}],
-    }
+    return simple_sarif(
+        findings,
+        tool="tridelphi-scan",
+        audit_label="Pre-install audit",
+        tool_version=tool_version,
+        help_uri=_HELP_URI,
+    )
 
 
 def analyze_preflight(root: str | Path, *, tool_version: str = "0") -> PreflightResult:

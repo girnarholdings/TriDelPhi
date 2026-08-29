@@ -12,27 +12,11 @@ upload-artifact step" and mean it, instead of "your job has a shell".
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 from .model import CapabilityHit, ExecutionContext
+from .steps import iter_steps, uses_name
 from .tables import Tables
-from .yamlnode import YamlNode
 
 __all__ = ["detect", "highest_tier"]
-
-
-def _uses_name(step: YamlNode) -> str:
-    uses = step.get("uses")
-    return uses.text.split("@", 1)[0].strip() if uses is not None else ""
-
-
-def _iter_steps(context: ExecutionContext) -> Iterator[YamlNode]:
-    steps = context.body.get("steps")
-    if steps is None:
-        return
-    for step in steps.seq():
-        if step.is_mapping():
-            yield step
 
 
 def detect(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
@@ -42,7 +26,7 @@ def detect(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
     egress_actions = tables.tuple_of("egress", "egress_actions")
     read_only = tables.tuple_of("egress", "read_only_actions")
 
-    for step in _iter_steps(context):
+    for step in iter_steps(context.body):
         run = step.get("run")
         if run is not None and run.text:
             matched = False
@@ -73,7 +57,7 @@ def detect(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
                     )
                 )
 
-        name = _uses_name(step)
+        name = uses_name(step)
         if not name:
             continue
         if any(name == a or name.startswith(a) for a in egress_actions):

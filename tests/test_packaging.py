@@ -96,9 +96,15 @@ def test_network_capable_modules_are_imported_lazily():
     ladder) on demand inside their command branches, not at module top — so
     `import tridelphi.cli` pulls in no network-capable code."""
     cli_src = (ROOT / "tridelphi" / "cli.py").read_text()
-    top = cli_src.split("def main(", 1)[0]
-    assert "from .scan_cmd" not in top and "import scan_cmd" not in top, (
-        "scan_cmd must be imported lazily inside the scan branch, not at module top"
+    # A module-top import starts at column 0; an import inside a command
+    # handler is indented. Only the former defeats the laziness.
+    top_level_imports = [
+        line for line in cli_src.splitlines()
+        if line.startswith(("from .scan_cmd", "import tridelphi.scan_cmd"))
+    ]
+    assert not top_level_imports, (
+        "scan_cmd must be imported lazily inside its command handler, "
+        f"not at module top: {top_level_imports}"
     )
     import importlib
     import sys
