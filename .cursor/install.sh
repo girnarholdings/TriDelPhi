@@ -41,6 +41,17 @@ else
   echo "Everything else works; run scripts/install-privatize.sh once npm exists." >&2
 fi
 
+# Design tooling for agents working on site/: the Impeccable skill (design
+# playbooks + a deterministic anti-pattern detector). Machine-local by intent
+# (see .gitignore); advisory, so its absence never fails the install.
+step "Installing the Impeccable design skill (advisory)"
+if command -v npx >/dev/null 2>&1; then
+  npx -y impeccable install --providers=cursor --scope=project || \
+    echo "Impeccable install failed; design detector unavailable this session." >&2
+else
+  echo "npx is absent, so the Impeccable design skill was skipped." >&2
+fi
+
 # Persist PATH for every future login shell, idempotently.
 for rc in "$HOME/.bashrc" "$HOME/.profile"; do
   [ -f "$rc" ] || touch "$rc"

@@ -20,3 +20,11 @@ bot/package-lock.json
 # L6 scan artifacts
 tridelphi-evidence.json
 tridelphi.sarif
+
+# Impeccable design skill: installed per-machine by .cursor/install.sh, never
+# committed — this repo's own scanner treats third-party agent files as input
+# to audit, not something we vendor.
+.cursor/skills/impeccable/
+.cursor/agents/impeccable-*.md
+.cursor/hooks.json
+node_modules/
