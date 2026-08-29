@@ -92,11 +92,17 @@ p{margin:0}
 section{padding:72px 0;border-top:1px solid var(--line)}
 .sec-head{max-width:720px;margin:0 auto 40px;text-align:center}
 .sec-head h2{font-size:clamp(27px,4.2vw,39px)}
-.sec-kv{font-family:var(--mono);font-size:13px;color:var(--faint);margin-top:12px}
-.sec-kv b{color:var(--grn-ink);font-weight:600}
+.sec-kv{font-family:var(--mono);font-size:13px;color:var(--faint);margin-top:12px;
+  text-wrap:balance}
+.sec-kv b{color:var(--grn-ink);font-weight:600;white-space:nowrap}
 .sec-head .lede{margin:16px auto 0}
 .lede{font-size:clamp(17px,2vw,20px);color:var(--mute);max-width:62ch;line-height:1.6}
-.mono{font-family:var(--mono);font-size:.92em}
+.mono{font-family:var(--mono);font-size:.92em;white-space:nowrap}
+/* Grid tracks must be allowed to shrink below a child's min-content width,
+   or one long command line drags a whole single-column card past the
+   viewport edge on phones. */
+.doors>*,.cats>*,.startgrid>*,.split>*,.fixrow>*,.two>*,.climb>*,.gloss>*,
+.exits>*{min-width:0}
 .hl{color:var(--ink);font-weight:500}
 .note{font-size:15px;color:var(--faint);max-width:66ch}
 .cmd::-webkit-scrollbar,.term pre::-webkit-scrollbar{height:8px}

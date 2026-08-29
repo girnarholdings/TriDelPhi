@@ -69,6 +69,7 @@ header .wrap{display:flex;align-items:center;justify-content:space-between;gap:1
 .hero p{color:var(--mute);max-width:64ch;margin-top:12px}
 
 .studio{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:26px;padding:26px 0 40px;align-items:start}
+.studio>*{min-width:0}
 @media(max-width:860px){.studio{grid-template-columns:1fr}}
 
 .panel{background:var(--bg2);border:1px solid var(--line);border-radius:16px;padding:22px}
@@ -134,7 +135,8 @@ pre::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px}
   border-radius:10px;padding:14px 16px;background:var(--bg3)}
 .note b{color:var(--ink)}
 .note p{color:var(--mute);font-size:13px;margin:4px 0 0}
-.note code{font-family:var(--mono);font-size:13px;background:var(--bg2);padding:1px 5px;border-radius:5px}
+.note code{font-family:var(--mono);font-size:13px;background:var(--bg2);padding:1px 5px;border-radius:5px;
+  overflow-wrap:anywhere}
 .honest{color:var(--faint);font-size:13px;margin-top:26px;max-width:70ch}
 .honest b{color:var(--mute)}
 footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;padding:22px 0 40px;margin-top:20px}
