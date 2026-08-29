@@ -21,59 +21,60 @@
 :root{
   --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
   --line:#2a382e; --line2:#3a4d40;
-  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#7c8b7f;
   --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
   --u:#e8604a; --p:#e0a63a; --e:#4aa7c8;
-  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
   --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --sans:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme: light){
   :root:not([data-theme="dark"]){
     --bg:#f2f4ee; --bg2:#f8faf4; --bg3:#ffffff; --raise:#ffffff;
     --line:#dde2d6; --line2:#c7d1bd;
-    --ink:#172019; --mute:#586257; --faint:#8a948a;
+    --ink:#172019; --mute:#4d574d; --faint:#5d675d;
     --grn:#1f7a54; --grn-ink:#186145; --grn-soft:rgba(31,122,84,.10);
-    --u:#cc4028; --p:#a5741a; --e:#1a7d9c;
-    --shadow:0 26px 60px -34px rgba(30,40,30,.26);
+    --u:#bd3a22; --p:#7d5a15; --e:#14687f;
   }
 }
 :root[data-theme="dark"]{
   --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
   --line:#2a382e; --line2:#3a4d40;
-  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#7c8b7f;
   --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
   --u:#e8604a; --p:#e0a63a; --e:#4aa7c8;
-  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
   font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+.wrap{max-width:1120px;margin:0 auto;
+  padding-inline:max(20px,env(safe-area-inset-left),env(safe-area-inset-right))}
 a{color:var(--grn-ink);text-underline-offset:3px}
 h1,h2,h3{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-height:1.12;margin:0}
-.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--grn);font-weight:600}
+.pagemark{font-family:var(--mono);font-size:13px;color:var(--faint);margin:10px 0 0}
+::selection{background:var(--grn);color:var(--bg)}
 :focus-visible{outline:2px solid var(--grn);outline-offset:2px;border-radius:6px}
 
 header{border-bottom:1px solid var(--line);background:var(--bg2)}
 header .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:16px;padding-bottom:16px}
 .brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:-.01em;color:var(--ink);text-decoration:none;font-size:18px}
 .brand svg{width:26px;height:26px}
-.back{font-size:14px;color:var(--mute);text-decoration:none}
+.back{font-size:13px;color:var(--mute);text-decoration:none;padding:10px 0}
 .back:hover{color:var(--grn-ink)}
 
 .hero{padding:40px 0 8px}
-.hero h1{font-size:clamp(28px,4.4vw,42px)}
+.hero h1{font-size:42px}
+@media(max-width:640px){.hero h1{font-size:30px}}
 .hero p{color:var(--mute);max-width:64ch;margin-top:12px}
 
 .studio{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:26px;padding:26px 0 40px;align-items:start}
+.studio>*{min-width:0}
 @media(max-width:860px){.studio{grid-template-columns:1fr}}
 
-.panel{background:var(--bg2);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--shadow)}
-.panel h2{font-size:19px;margin-bottom:4px}
-.panel .sub{color:var(--faint);font-size:13.5px;margin-bottom:18px}
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:16px;padding:22px}
+.panel h2{font-size:20px;margin-bottom:4px}
+.panel .sub{color:var(--faint);font-size:13px;margin-bottom:18px}
 .field{margin:18px 0}
 /* The two doors show and hide whole groups of controls; `hidden` must win over
    any layout rule that happens to match one of them. */
@@ -85,9 +86,9 @@ header .wrap{display:flex;align-items:center;justify-content:space-between;gap:1
 .seg label{cursor:pointer}
 .seg input{position:absolute;opacity:0;width:0;height:0}
 .seg .pill{display:inline-flex;flex-direction:column;align-items:center;gap:2px;min-width:56px;
-  padding:8px 10px;border:1px solid var(--line2);border-radius:11px;background:var(--bg3);
+  padding:9px 12px;border:1px solid var(--line2);border-radius:11px;background:var(--bg3);
   font-size:13px;color:var(--mute);transition:.14s}
-.seg .pill b{font-family:var(--mono);font-size:14px;color:var(--ink)}
+.seg .pill b{font-family:var(--mono);font-size:13px;color:var(--ink)}
 .seg label:hover .pill{border-color:var(--grn)}
 .seg input:checked + .pill{border-color:var(--grn);background:var(--grn-soft);color:var(--ink)}
 .seg input:focus-visible + .pill{outline:2px solid var(--grn);outline-offset:2px}
@@ -98,25 +99,30 @@ header .wrap{display:flex;align-items:center;justify-content:space-between;gap:1
 .toggle .t b{display:block}
 .toggle .t span{color:var(--faint);font-size:13px}
 
-select{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radius:10px;
-  background:var(--bg3);color:var(--ink);font-family:var(--sans);font-size:15px}
-input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radius:10px;
-  background:var(--bg3);color:var(--ink);font-family:var(--mono);font-size:14px}
+select{width:100%;padding:11px 12px;border:1px solid var(--line2);border-radius:10px;
+  background:var(--bg3);color:var(--ink);font-family:var(--sans);font-size:16px}
+input[type=text]{width:100%;padding:11px 12px;border:1px solid var(--line2);border-radius:10px;
+  background:var(--bg3);color:var(--ink);font-family:var(--mono);font-size:16px;
+  caret-color:var(--grn)}
+input[type=text]::placeholder{color:var(--faint);opacity:1}
 
-.out h2{font-size:19px;margin-bottom:4px}
+.out h2{font-size:20px;margin-bottom:4px}
 .filebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  font-family:var(--mono);font-size:12.5px;color:var(--mute);
+  font-family:var(--mono);font-size:13px;color:var(--mute);
   background:var(--bg3);border:1px solid var(--line);border-bottom:none;
   border-radius:12px 12px 0 0;padding:9px 13px}
 pre{margin:0;background:#0c110e;border:1px solid var(--line);border-radius:0 0 12px 12px;
-  padding:16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55;color:#dfe7df}
+  padding:16px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.55;color:#dfe7df;
+  scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+pre::-webkit-scrollbar{height:8px}
+pre::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px}
 :root[data-theme="light"] pre, :root:not([data-theme="dark"]) pre{background:#0c110e}
 @media(prefers-color-scheme:light){:root:not([data-theme="dark"]) pre{background:#10160f}}
 .btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border-radius:11px;
-  font-weight:600;font-size:14.5px;text-decoration:none;cursor:pointer;border:1px solid var(--line2);
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:11px;
+  font-weight:600;font-size:16px;text-decoration:none;cursor:pointer;border:1px solid var(--line2);
   background:var(--bg3);color:var(--ink);font-family:var(--sans)}
-.btn.primary{background:var(--grn);border-color:var(--grn);color:#06110b}
+.btn.primary{background:var(--grn);border-color:var(--grn);color:var(--bg)}
 .btn.primary[aria-disabled="true"]{opacity:.5;pointer-events:none}
 .btn:hover{border-color:var(--grn)}
 .btn svg{width:16px;height:16px}
@@ -125,11 +131,12 @@ pre{margin:0;background:#0c110e;border:1px solid var(--line);border-radius:0 0 1
 
 .oneline{margin-top:22px}
 .oneline .filebar{border-radius:12px 12px 0 0}
-.note{margin-top:22px;border:1px solid var(--line);border-left:3px solid var(--e);
+.note{margin-top:22px;border:1px dashed var(--line2);
   border-radius:10px;padding:14px 16px;background:var(--bg3)}
 .note b{color:var(--ink)}
-.note p{color:var(--mute);font-size:13.5px;margin:4px 0 0}
-.note code{font-family:var(--mono);font-size:12.5px;background:var(--bg2);padding:1px 5px;border-radius:5px}
+.note p{color:var(--mute);font-size:13px;margin:4px 0 0}
+.note code{font-family:var(--mono);font-size:13px;background:var(--bg2);padding:1px 5px;border-radius:5px;
+  overflow-wrap:anywhere}
 .honest{color:var(--faint);font-size:13px;margin-top:26px;max-width:70ch}
 .honest b{color:var(--mute)}
 footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;padding:22px 0 40px;margin-top:20px}
@@ -148,9 +155,9 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
 
 <div class="wrap">
   <section class="hero">
-    <span class="eyebrow">Setup Studio</span>
     <h1>Pick what runs. Get a ready-to-commit workflow.</h1>
-    <p>Start with what you're actually worried about — the workflow updates live. Then copy it, or
+    <p class="pagemark">the TriDelPhi Setup Studio</p>
+    <p>Start with what you're actually worried about; the workflow updates live. Then copy it, or
       hit <b>Create this file on GitHub</b> to open the editor pre-filled and commit in one click.
       This page is fully static: your choices never leave your browser.</p>
   </section>
@@ -159,9 +166,9 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
     <!-- ─────────────────────────── CHOICES ─────────────────────────── -->
     <div class="panel">
       <h2>Choose what to run</h2>
-      <p class="sub">Two different questions. Pick the one you have. (The third door —
-        <a href="./#scan">checking code <em>before</em> you install it</a> — is
-        <span style="font-family:var(--mono)">tridelphi scan</span>, a local command that needs no
+      <p class="sub">Two different questions. Pick the one you have. (The third door,
+        <a href="./#scan">checking code <em>before</em> you install it</a>, is
+        <span style="font-family:var(--mono)">tridelphi scan</span>: a local command that needs no
         workflow at all.)</p>
 
       <!-- The door. This used to open on "Hardening ladder level", which is a
@@ -172,9 +179,9 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
         <label class="q" id="path-label">What are you checking?</label>
         <div class="seg" role="radiogroup" aria-labelledby="path-label" id="paths">
           <label><input type="radio" name="path" value="app" checked>
-            <span class="pill"><b>🔦</b>What I ship</span></label>
+            <span class="pill">What I ship</span></label>
           <label><input type="radio" name="path" value="ci">
-            <span class="pill"><b>🤖</b>My GitHub robots</span></label>
+            <span class="pill">My GitHub robots</span></label>
         </div>
         <p class="hint" id="path-hint"></p>
       </div>
@@ -189,8 +196,8 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
         <div class="field">
           <label class="q">Extras</label>
           <label class="toggle"><input type="checkbox" id="expose">
-            <span class="t"><b>Also audit what I ship — <code style="font-family:var(--mono)">expose</code></b>
-            <span>Also scan committed code/config for leaked secrets, an open database, or shipped source. Advisory — it uploads to the Security tab and never fails the build.</span></span></label>
+            <span class="t"><b>Also audit what I ship, <code style="font-family:var(--mono)">expose</code></b>
+            <span>Also scan committed code/config for leaked secrets, an open database, or shipped source. Advisory: it uploads to the Security tab and never fails the build.</span></span></label>
           <label class="toggle"><input type="checkbox" id="comment" checked>
             <span class="t"><b>Post a plain-language PR comment</b>
             <span>A sticky, jargon-free summary on each pull request.</span></span></label>
@@ -216,7 +223,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
 
       <div class="field">
         <label class="q" for="repo">Your repository <span style="color:var(--faint);font-weight:400">(for the one-click link)</span></label>
-        <input type="text" id="repo" placeholder="owner/name — e.g. octocat/hello-world" autocomplete="off" spellcheck="false">
+        <input type="text" id="repo" placeholder="owner/name, e.g. octocat/hello-world" autocomplete="off" spellcheck="false">
         <p class="hint">Only used to build the “Create this file on GitHub” link, in your browser.</p>
       </div>
     </div>
@@ -253,7 +260,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
           and it applies verified fixes).</p>
       </div>
 
-      <div class="note" style="border-left-color:var(--p)">
+      <div class="note">
         <b>Harden your shipped JavaScript — <code>tridelphi privatize</code></b>
         <p>Obfuscation mutates files and runs your build, so it’s a <i>local</i> command, not a CI step:
           <code>tridelphi privatize --smoke-cmd "npm start"</code>. It is <b>not security</b>, refuses if
@@ -264,7 +271,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
   </section>
 
   <p class="honest"><b>Honest by design.</b> TriDelPhi runs on the GitHub runner and uploads only a
-    SARIF report to your own Security tab — nothing is sent anywhere else. The exposure audit is a
+    SARIF report to your own Security tab; nothing is sent anywhere else. The exposure audit is a
     <i>static</i> read: a clean result isn’t a penetration test, and a browser can never keep a secret,
     so it always says rotate and move it server-side, never “hide it.”</p>
 </div>

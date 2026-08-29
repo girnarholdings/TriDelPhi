@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TriDelPhi — check code before you install it, before a stranger tricks your robots, and before you ship</title>
 <meta name="description" content="A free security checker with three doors: audit someone else's code BEFORE you install it, stop strangers from tricking your GitHub robots into leaking your keys, and audit what your app actually ships. Runs on your machine. Nothing is uploaded.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolygon points='16,4 30,28 2,28' fill='%23e8604a'/%3E%3Cpolygon points='16,12 24,26 8,26' fill='%230f1512'/%3E%3C/svg%3E">
@@ -22,111 +22,137 @@
 /* ============================================================= TOKENS
    Dark-first: the bare :root is the intended (dark, teal-ink) look.
    OS-light viewers who never stamped a choice get the marble palette
-   via the light media query; an explicit toggle wins over both. */
+   via the light media query; an explicit toggle wins over both.
+   Every text/background pair here clears WCAG AA (4.5:1). Depth comes
+   from the bg -> bg2 -> bg3 layering and committed 1px borders; there
+   are deliberately no drop shadows anywhere on the page. */
 :root{
   --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
   --line:#2a382e; --line2:#3a4d40;
-  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#7c8b7f;
   --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
   --u:#e8604a; --p:#e0a63a; --e:#4aa7c8; --safe:#57b98a; --crit:#e8604a;
   --u-soft:rgba(232,96,74,.14); --p-soft:rgba(224,166,58,.14); --e-soft:rgba(74,167,200,.14);
   --safe-soft:rgba(87,185,138,.15);
-  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
-  --shadow-lg:0 44px 100px -40px rgba(0,0,0,.82);
 }
 @media (prefers-color-scheme: light){
   :root:not([data-theme="dark"]){
     --bg:#f2f4ee; --bg2:#f8faf4; --bg3:#ffffff; --raise:#ffffff;
     --line:#dde2d6; --line2:#c7d1bd;
-    --ink:#172019; --mute:#586257; --faint:#8a948a;
+    --ink:#172019; --mute:#4d574d; --faint:#5d675d;
     --grn:#1f7a54; --grn-ink:#186145; --grn-soft:rgba(31,122,84,.10);
-    --u:#cc4028; --p:#a5741a; --e:#1a7d9c; --safe:#1f7a54; --crit:#cc4028;
-    --u-soft:rgba(204,64,40,.10); --p-soft:rgba(165,116,26,.10); --e-soft:rgba(26,125,156,.10);
+    --u:#bd3a22; --p:#7d5a15; --e:#14687f; --safe:#1f7a54; --crit:#bd3a22;
+    --u-soft:rgba(189,58,34,.10); --p-soft:rgba(125,90,21,.10); --e-soft:rgba(20,104,127,.10);
     --safe-soft:rgba(31,122,84,.12);
-    --shadow:0 26px 60px -34px rgba(30,40,30,.26);
-    --shadow-lg:0 40px 90px -44px rgba(30,40,30,.30);
   }
 }
 :root[data-theme="light"]{
   --bg:#f2f4ee; --bg2:#f8faf4; --bg3:#ffffff; --raise:#ffffff;
   --line:#dde2d6; --line2:#c7d1bd;
-  --ink:#172019; --mute:#586257; --faint:#8a948a;
+  --ink:#172019; --mute:#4d574d; --faint:#5d675d;
   --grn:#1f7a54; --grn-ink:#186145; --grn-soft:rgba(31,122,84,.10);
-  --u:#cc4028; --p:#a5741a; --e:#1a7d9c; --safe:#1f7a54; --crit:#cc4028;
-  --u-soft:rgba(204,64,40,.10); --p-soft:rgba(165,116,26,.10); --e-soft:rgba(26,125,156,.10);
+  --u:#bd3a22; --p:#7d5a15; --e:#14687f; --safe:#1f7a54; --crit:#bd3a22;
+  --u-soft:rgba(189,58,34,.10); --p-soft:rgba(125,90,21,.10); --e-soft:rgba(20,104,127,.10);
   --safe-soft:rgba(31,122,84,.12);
-  --shadow:0 26px 60px -34px rgba(30,40,30,.26);
-  --shadow-lg:0 40px 90px -44px rgba(30,40,30,.30);
 }
 :root[data-theme="dark"]{
   --bg:#0f1512; --bg2:#161d18; --bg3:#1e2721; --raise:#27342c;
   --line:#2a382e; --line2:#3a4d40;
-  --ink:#eef1ea; --mute:#9fb0a4; --faint:#6c7d71;
+  --ink:#eef1ea; --mute:#9fb0a4; --faint:#7c8b7f;
   --grn:#57b98a; --grn-ink:#74cfa0; --grn-soft:rgba(87,185,138,.14);
   --u:#e8604a; --p:#e0a63a; --e:#4aa7c8; --safe:#57b98a; --crit:#e8604a;
   --u-soft:rgba(232,96,74,.14); --p-soft:rgba(224,166,58,.14); --e-soft:rgba(74,167,200,.14);
   --safe-soft:rgba(87,185,138,.15);
-  --shadow:0 30px 70px -34px rgba(0,0,0,.72);
-  --shadow-lg:0 44px 100px -40px rgba(0,0,0,.82);
 }
 
-/* ============================================================= BASE */
+/* ============================================================= BASE
+   The display voice is the Palatino/Iowan system serif on purpose: this
+   page ships zero external requests, matching the product's "runs on
+   your machine, uploads nothing" promise. Type scale: 12 chip / 13 mono
+   / 15 small / 17 body / 21 card heads / clamped section+hero heads. */
 :root{
   --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --sans:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:76px}
+html{scroll-behavior:smooth;scroll-padding-top:74px}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
   font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;
   text-rendering:optimizeLegibility}
-.wrap{max-width:1060px;margin:0 auto;padding:0 24px}
+.wrap{max-width:1060px;margin:0 auto;
+  padding-inline:max(20px,env(safe-area-inset-left),env(safe-area-inset-right))}
 a{color:var(--grn-ink);text-underline-offset:3px;text-decoration-thickness:1px}
 a:hover{text-decoration-color:var(--grn)}
+::selection{background:var(--grn);color:var(--bg)}
 :focus-visible{outline:2px solid var(--grn);outline-offset:3px;border-radius:6px}
 h1,h2,h3{font-family:var(--serif);font-weight:600;text-wrap:balance;
   letter-spacing:-.012em;line-height:1.12;margin:0}
 p{margin:0}
-section{padding:64px 0;border-top:1px solid var(--line)}
-.sec-head{max-width:720px;margin:0 auto 36px;text-align:center}
-.sec-head h2{font-size:clamp(26px,4vw,38px);margin-top:12px}
+section{padding:72px 0;border-top:1px solid var(--line)}
+.sec-head{max-width:720px;margin:0 auto 40px;text-align:center}
+.sec-head h2{font-size:clamp(27px,4.2vw,39px)}
+.sec-kv{font-family:var(--mono);font-size:13px;color:var(--faint);margin-top:12px;
+  text-wrap:balance}
+.sec-kv b{color:var(--grn-ink);font-weight:600;white-space:nowrap}
 .sec-head .lede{margin:16px auto 0}
-.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;
-  text-transform:uppercase;color:var(--grn);font-weight:600}
-.lede{font-size:clamp(17px,2.1vw,20px);color:var(--mute);max-width:62ch;line-height:1.6}
-.mono{font-family:var(--mono);font-size:.92em}
+.lede{font-size:clamp(17px,2vw,20px);color:var(--mute);max-width:62ch;line-height:1.6}
+.mono{font-family:var(--mono);font-size:.92em;white-space:nowrap}
+/* Grid tracks must be allowed to shrink below a child's min-content width,
+   or one long command line drags a whole single-column card past the
+   viewport edge on phones. */
+.doors>*,.cats>*,.startgrid>*,.split>*,.fixrow>*,.two>*,.climb>*,.gloss>*,
+.exits>*{min-width:0}
 .hl{color:var(--ink);font-weight:500}
-.note{font-size:14px;color:var(--faint);max-width:66ch}
+.note{font-size:15px;color:var(--faint);max-width:66ch}
+.cmd::-webkit-scrollbar,.term pre::-webkit-scrollbar{height:8px}
+.cmd::-webkit-scrollbar-thumb,.term pre::-webkit-scrollbar-thumb{
+  background:var(--line2);border-radius:99px}
+.cmd,.term pre{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
 
 /* ============================================================= TOP BAR */
-.top{padding:14px 0;position:sticky;top:0;z-index:40;
-  background:color-mix(in srgb,var(--bg) 88%,transparent);
+.top{padding:12px 0;position:sticky;top:0;z-index:40;
+  background:color-mix(in srgb,var(--bg) 90%,transparent);
   backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-.top .wrap{display:flex;align-items:center;gap:18px}
+.top .wrap{display:flex;align-items:center;gap:16px}
 .brand{display:flex;align-items:center;gap:10px;font-family:var(--serif);
   font-weight:600;font-size:19px;letter-spacing:-.01em;color:var(--ink);
   white-space:nowrap;text-decoration:none}
 .brand svg{width:26px;height:26px;flex:none}
 .brand b{color:var(--grn)}
-.top nav{display:flex;align-items:center;gap:22px;font-size:14px;margin-left:auto;
-  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.top nav::-webkit-scrollbar{display:none}
-.top nav a{color:var(--mute);text-decoration:none;white-space:nowrap}
+.top nav{display:flex;align-items:center;gap:20px;font-size:15px;margin-left:auto}
+.top nav a{color:var(--mute);text-decoration:none;white-space:nowrap;
+  padding:8px 0}
 .top nav a:hover{color:var(--ink)}
-.themebtn{background:var(--bg2);border:1px solid var(--line);color:var(--mute);
-  width:34px;height:34px;border-radius:9px;cursor:pointer;display:grid;flex:none;
-  place-items:center;font-size:15px;line-height:1}
-.themebtn:hover{color:var(--ink);border-color:var(--line2)}
+.iconbtn{background:var(--bg2);border:1px solid var(--line);color:var(--mute);
+  width:40px;height:40px;border-radius:10px;cursor:pointer;display:grid;flex:none;
+  place-items:center;padding:0}
+.iconbtn svg{width:18px;height:18px}
+.iconbtn:hover{color:var(--ink);border-color:var(--line2)}
+.menubtn{display:none}
+.menubtn .i-close{display:none}
+@media(max-width:880px){
+  .menubtn{display:grid}
+  .themebtn{margin-left:auto}
+  body.nav-open .menubtn .i-burger{display:none}
+  body.nav-open .menubtn .i-close{display:block}
+  .top nav{position:absolute;left:0;right:0;top:100%;margin:0;padding:4px 0 10px;
+    background:var(--bg);border-bottom:1px solid var(--line);
+    display:none;flex-direction:column;align-items:stretch;gap:0}
+  body.nav-open .top nav{display:flex}
+  .top nav a{color:var(--ink);font-size:16px;
+    padding:13px max(20px,env(safe-area-inset-left));border-top:1px solid var(--line)}
+  .top nav a:first-child{border-top:none}
+}
 
 /* ============================================================= HERO */
 .hero{padding:64px 0 56px;text-align:center}
-.hero h1{font-size:clamp(32px,5.6vw,58px);margin:18px auto 0;max-width:20ch}
-.hero .lede{margin:22px auto 0;text-align:center}
-.hero-tri{width:88px;height:auto;margin:0 auto;display:block}
-.trust{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:30px auto 0}
-.trust span{font-family:var(--mono);font-size:12.5px;color:var(--mute);
-  border:1px solid var(--line);border-radius:999px;padding:7px 14px;background:var(--bg2)}
+.hero h1{font-size:clamp(31px,7.2vw,58px);margin:18px auto 0;max-width:20ch}
+.hero .lede{margin:20px auto 0;text-align:center}
+.hero-tri{width:clamp(56px,9vw,84px);height:auto;margin:0 auto;display:block}
+.trust{font-family:var(--mono);font-size:13px;color:var(--faint);margin:26px auto 0;
+  max-width:52ch;line-height:2}
+.trust b{color:var(--mute);font-weight:500;white-space:nowrap}
 
 /* ============================================================= COMMANDS / TERMINAL */
 .cmd{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:14px;
@@ -134,53 +160,51 @@ section{padding:64px 0;border-top:1px solid var(--line)}
   padding:11px 14px;text-align:left;overflow-x:auto;white-space:nowrap}
 .cmd .ps1{color:var(--faint);user-select:none}
 .cmd b{color:var(--grn-ink);font-weight:600}
-.term{background:#101613;border:1px solid var(--line);border-radius:14px;
-  box-shadow:var(--shadow);overflow:hidden;text-align:left}
-.term-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;
+.term{background:#101613;border:1px solid var(--line2);border-radius:14px;
+  overflow:hidden;text-align:left}
+.term-bar{display:flex;align-items:center;gap:8px;padding:9px 16px;
   border-bottom:1px solid var(--line);background:#141b16}
-.term-bar .dot{width:10px;height:10px;border-radius:50%;background:#3a4d40}
-.term-bar .lbl{font-family:var(--mono);font-size:12px;color:#6c7d71;margin-left:4px;
+.term-bar .lbl{font-family:var(--mono);font-size:13px;color:#7c8b7f;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.term-bar .lbl::before{content:"$ ";color:#57b98a}
 .term pre{margin:0;padding:16px 18px;font-family:var(--mono);font-size:13px;
   line-height:1.6;color:#cfd8cf;overflow-x:auto}
 .term .ok{color:#57b98a}.term .bad{color:#e8604a}.term .wrn{color:#e0a63a}
-.term .dim{color:#6c7d71}
+.term .dim{color:#8a998d}
 
 /* ============================================================= DOORS */
 .doors{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:8px}
-.door{position:relative;overflow:hidden;background:var(--bg2);border:1px solid var(--line);
-  border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:14px;
-  box-shadow:var(--shadow);transition:transform .25s,border-color .25s}
-.door:hover{transform:translateY(-4px);border-color:var(--line2)}
-.door::after{content:attr(data-n);position:absolute;right:12px;top:-4px;
-  font-family:var(--serif);font-size:74px;font-weight:700;opacity:.08;line-height:1.2;
-  pointer-events:none}
-.door.d1{border-top:3px solid var(--u)}
-.door.d2{border-top:3px solid var(--p)}
-.door.d3{border-top:3px solid var(--e)}
-.door .tag{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;
-  text-transform:uppercase;font-weight:600}
-.door.d1 .tag{color:var(--u)}.door.d2 .tag{color:var(--p)}.door.d3 .tag{color:var(--e)}
+.door{background:var(--bg2);border:1px solid var(--line);
+  border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:13px;
+  transition:transform .25s,border-color .25s}
 .door h3{font-size:21px}
-.door p{color:var(--mute);font-size:15.5px;flex:1}
+.door .meta{font-family:var(--mono);font-size:13px}
+.door.d1 .meta{color:var(--u)}.door.d2 .meta{color:var(--p)}.door.d3 .meta{color:var(--e)}
+.door p{color:var(--mute);font-size:15px;flex:1}
 .door .verdict{font-family:var(--mono);font-size:13px;color:var(--mute);
   border-top:1px dashed var(--line);padding-top:12px}
-.door .more{font-size:14px}
+.door .more{font-size:15px}
+@media(hover:hover){
+  .door:hover{transform:translateY(-3px);border-color:var(--line2)}
+}
 
 /* ============================================================= SCAN */
-.story{background:var(--bg2);border:1px solid var(--line);border-left:4px solid var(--u);
-  border-radius:12px;padding:20px 24px;max-width:760px;margin:0 auto 36px;
-  color:var(--mute);font-size:15.5px}
-.story .hl{display:block;margin-bottom:6px;font-size:16.5px}
+.story{background:var(--bg2);border:1px solid var(--line);
+  border-radius:12px;padding:22px 26px;max-width:760px;margin:0 auto 36px;
+  color:var(--mute);font-size:15px}
+.story .hl{display:block;margin-bottom:6px;font-size:17px;font-family:var(--serif);
+  font-style:italic}
 .cats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 .cat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;
   padding:18px 20px;transition:transform .2s,border-color .2s}
-.cat:hover{transform:translateY(-2px);border-color:var(--line2)}
+@media(hover:hover){
+  .cat:hover{transform:translateY(-2px);border-color:var(--line2)}
+}
 .cat .letter{font-family:var(--mono);font-weight:700;font-size:15px;color:var(--bg);
   background:var(--grn);width:28px;height:28px;border-radius:8px;display:grid;
   place-items:center;margin-bottom:10px}
-.cat h3{font-size:16.5px;font-family:var(--sans);font-weight:600;letter-spacing:0}
-.cat p{color:var(--mute);font-size:14px;margin-top:6px}
+.cat h3{font-size:17px;font-family:var(--sans);font-weight:600;letter-spacing:0}
+.cat p{color:var(--mute);font-size:15px;margin-top:6px}
 .targets{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:34px 0 0}
 .targets .t{font-family:var(--mono);font-size:13px;background:var(--bg2);
   border:1px solid var(--line);border-radius:10px;padding:9px 14px;color:var(--mute)}
@@ -192,7 +216,7 @@ section{padding:64px 0;border-top:1px solid var(--line)}
 /* ============================================================= RULE / TRIANGLE */
 .two{display:grid;grid-template-columns:1fr 1fr;gap:34px;align-items:center;margin-top:8px}
 .tri-card{background:var(--bg2);border:1px solid var(--line);border-radius:18px;
-  padding:18px;box-shadow:var(--shadow)}
+  padding:18px}
 .tri-stage svg{display:block;width:100%;height:auto}
 .tside{stroke-width:3;transition:stroke .25s,opacity .25s}
 .tnode{cursor:pointer}
@@ -206,19 +230,20 @@ section{padding:64px 0;border-top:1px solid var(--line)}
 .two-legend{margin-top:10px;text-align:center;font-size:13px;color:var(--faint)}
 .two-copy{display:flex;flex-direction:column;gap:20px}
 .two-copy .row{display:flex;gap:14px}
-.two-copy .k{flex:none;width:34px;height:34px;border-radius:9px;display:grid;
+.two-copy .k{flex:none;width:36px;height:36px;border-radius:10px;display:grid;
   place-items:center;font-family:var(--serif);font-weight:700;font-size:17px}
+.two-copy .k svg{width:19px;height:19px}
 .ku{background:var(--u-soft);color:var(--u)}
 .kp{background:var(--p-soft);color:var(--p)}
 .ke{background:var(--e-soft);color:var(--e)}
-.two-copy h3{font-size:17.5px;font-family:var(--sans);font-weight:600;letter-spacing:0}
+.two-copy h3{font-size:17px;font-family:var(--sans);font-weight:600;letter-spacing:0}
 .two-copy p{color:var(--mute);font-size:15px;margin-top:4px}
 .two-punch{margin-top:24px;padding:16px 20px;background:var(--grn-soft);
-  border-radius:12px;font-size:15.5px}
+  border-radius:12px;font-size:15px}
 .fixrow{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:36px}
 .fixcard{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:20px}
 .fixcard h3{font-size:17px;font-family:var(--sans);font-weight:600;letter-spacing:0}
-.fixcard p{color:var(--mute);font-size:14.5px;margin:8px 0 12px}
+.fixcard p{color:var(--mute);font-size:15px;margin:8px 0 12px}
 
 /* ============================================================= LADDER
    A literal ladder: two side rails, rungs you climb from L0 (the base, the
@@ -228,58 +253,61 @@ section{padding:64px 0;border-top:1px solid var(--line)}
    above it. */
 .climb{display:grid;grid-template-columns:1.15fr .85fr;gap:30px;align-items:start;
   max-width:1000px;margin:0 auto}
-.viz-cap{font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--faint);
+.viz-cap{font-family:var(--mono);font-size:13px;color:var(--faint);
   text-align:center;margin:0 0 12px}
 .viz-cap.bottom{margin:12px 0 0}
-.ladder-viz{display:flex;flex-direction:column-reverse;gap:22px;position:relative;
-  padding:14px 34px}
+.ladder-viz{display:flex;flex-direction:column-reverse;gap:20px;position:relative;
+  padding:14px 32px}
 .ladder-viz::before,.ladder-viz::after{content:"";position:absolute;top:-6px;bottom:-6px;
-  width:11px;border-radius:99px;z-index:0;border:1px solid var(--line2);
+  width:10px;border-radius:99px;z-index:0;
   background:linear-gradient(180deg,var(--line2) 0%,
     color-mix(in srgb,var(--line2) 55%,var(--grn)) 60%,var(--grn) 100%)}
 .ladder-viz::before{left:6px}
 .ladder-viz::after{right:6px}
 .rung{position:relative;z-index:1;display:grid;grid-template-columns:auto 1fr auto;
   gap:14px;align-items:center;background:var(--bg2);border:1px solid var(--line);
-  border-radius:12px;padding:13px 18px;cursor:pointer;
-  transition:transform .22s,border-color .22s,opacity .3s,box-shadow .22s}
-.rung::before,.rung::after{content:"";position:absolute;top:50%;height:11px;width:28px;
+  border-radius:12px;padding:12px 16px;cursor:pointer;
+  transition:transform .22s,border-color .22s,opacity .3s}
+.rung::before,.rung::after{content:"";position:absolute;top:50%;height:10px;width:26px;
   transform:translateY(-50%);background:var(--line2);border-radius:99px;
   transition:background .3s}
-.rung::before{left:-28px}
-.rung::after{right:-28px}
-.rung:hover{transform:translateY(-2px);border-color:var(--line2);box-shadow:var(--shadow)}
-.rung .lv{font-family:var(--mono);font-weight:700;font-size:13.5px;color:var(--grn-ink);
+.rung::before{left:-26px}
+.rung::after{right:-26px}
+@media(hover:hover){
+  .rung:hover{transform:translateY(-2px);border-color:var(--line2)}
+}
+.rung .lv{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--grn-ink);
   width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
   border:2px solid var(--line2);background:var(--bg3);transition:background .3s,
   border-color .3s,color .3s}
-.rung .what b{font-weight:600;font-size:15.5px}
-.rung .what span{color:var(--mute);font-size:14px}
-.rung .tool{font-family:var(--mono);font-size:12px;color:var(--faint);white-space:nowrap;
+.rung .what b{display:block;font-weight:600;font-size:16px;line-height:1.35}
+.rung .what span{display:block;color:var(--mute);font-size:15px;line-height:1.45}
+.rung .tool{font-family:var(--mono);font-size:13px;color:var(--faint);white-space:nowrap;
   justify-self:end}
-.rung .chip{display:inline-block;font-family:var(--mono);font-size:10.5px;
-  letter-spacing:.06em;color:var(--grn-ink);background:var(--grn-soft);
-  border:1px solid var(--grn);border-radius:999px;padding:1px 8px;margin-left:8px;
+.rung .chip{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:600;
+  color:var(--grn-ink);background:var(--grn-soft);
+  border:1px solid var(--grn);border-radius:999px;padding:0 8px;margin-left:8px;
   vertical-align:2px;white-space:nowrap}
 /* On the dial: rungs at or below the chosen level are "on". */
 .rung:not(.off)::before,.rung:not(.off)::after{background:var(--grn)}
 .rung:not(.off) .lv{border-color:var(--grn);color:var(--grn-ink);
-  box-shadow:0 0 0 4px var(--grn-soft)}
+  background:var(--grn-soft)}
 .rung.off{opacity:.55;border-style:dashed}
 .rung.off .lv{color:var(--faint)}
 /* The Rule of Two keeps its L0 place — it is simply unmistakable. */
-.rung.core{border:2px solid var(--grn);background:var(--grn-soft);cursor:pointer}
+.rung.core{border:2px solid var(--grn);background:var(--grn-soft)}
 .rung.core .lv{background:var(--grn);border-color:var(--grn);color:var(--bg)}
 .rung.core::before,.rung.core::after{background:var(--grn)}
 .dial-panel{position:sticky;top:86px;background:var(--bg2);border:1px solid var(--line);
-  border-radius:16px;padding:22px;box-shadow:var(--shadow)}
-.dial-panel .eyebrow{display:block;margin-bottom:14px}
+  border-radius:16px;padding:22px}
+.dial-panel h3{font-size:17px;font-family:var(--sans);font-weight:600;letter-spacing:0;
+  margin-bottom:14px}
 .dial-panel input[type="range"]{width:100%;accent-color:var(--grn);cursor:pointer;
-  margin:2px 0 4px}
+  margin:2px 0 4px;height:28px}
 .dial-ticks{display:flex;justify-content:space-between;font-family:var(--mono);
-  font-size:11.5px;color:var(--faint);padding:0 2px;margin-bottom:16px}
+  font-size:12px;color:var(--faint);padding:0 2px;margin-bottom:16px}
 .dial-panel .cmd{margin-bottom:14px}
-#lvl-desc{color:var(--mute);font-size:14px;min-height:3.4em;margin:0}
+#lvl-desc{color:var(--mute);font-size:15px;min-height:3.4em;margin:0}
 .dial-note{border-top:1px dashed var(--line);margin-top:16px;padding-top:14px}
 
 /* ============================================================= REPORTS */
@@ -291,50 +319,63 @@ section{padding:64px 0;border-top:1px solid var(--line)}
   margin:26px auto 0}
 .exit{background:var(--bg2);border:1px solid var(--line);border-radius:12px;
   padding:14px 18px;text-align:center}
-.exit .code{font-family:var(--mono);font-weight:700;font-size:22px}
-.exit p{color:var(--mute);font-size:13.5px;margin-top:4px}
+.exit .code{font-family:var(--mono);font-weight:700;font-size:21px}
+.exit p{color:var(--mute);font-size:13px;margin-top:4px}
 
 /* ============================================================= GLOSSARY */
 .gloss{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:860px;margin:0 auto}
 .g{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:16px 20px}
-.g dt{font-weight:600;font-size:15.5px}
-.g dd{margin:6px 0 0;color:var(--mute);font-size:14.5px}
+.g dt{font-weight:600;font-size:16px}
+.g dd{margin:6px 0 0;color:var(--mute);font-size:15px}
 
 /* ============================================================= START */
 .startgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:8px}
 .startcard{background:var(--bg2);border:1px solid var(--line);border-radius:16px;
   padding:22px;display:flex;flex-direction:column;gap:12px}
-.startcard h3{font-size:18px;font-family:var(--sans);font-weight:600;letter-spacing:0}
-.startcard p{color:var(--mute);font-size:14.5px;flex:1}
-.studio-cta{margin:38px auto 0;max-width:720px;text-align:center;background:var(--bg2);
-  border:1px solid var(--grn);border-radius:16px;padding:28px;box-shadow:var(--shadow)}
-.studio-cta h3{font-size:22px}
+.startcard h3{font-size:17px;font-family:var(--sans);font-weight:600;letter-spacing:0}
+.startcard p{color:var(--mute);font-size:15px;flex:1}
+.studio-cta{margin:38px auto 0;max-width:720px;text-align:center;background:var(--grn-soft);
+  border:1px solid var(--grn);border-radius:16px;padding:28px}
+.studio-cta h3{font-size:26px}
 .studio-cta p{color:var(--mute);margin:10px 0 18px}
 .btn{display:inline-block;background:var(--grn);color:var(--bg);font-weight:600;
-  font-size:15px;border-radius:10px;padding:12px 22px;text-decoration:none}
+  font-size:15px;border-radius:10px;padding:13px 24px;text-decoration:none}
 .btn:hover{filter:brightness(1.08)}
 
 /* ============================================================= FOOTER */
 footer{border-top:1px solid var(--line);padding:36px 0 48px;text-align:center;
-  color:var(--faint);font-size:14px}
+  color:var(--faint);font-size:15px}
 footer a{color:var(--mute)}
 
-/* ============================================================= RESPONSIVE */
+/* ============================================================= RESPONSIVE
+   Content-driven breaks: three-across grids pair up around 860 and stack
+   at 620; the ladder keeps its rails but slims them so a 360px viewport
+   spends its width on the words, not the chrome. */
 @media(max-width:860px){
   .doors,.cats,.startgrid{grid-template-columns:1fr 1fr}
   .two,.split,.fixrow,.climb{grid-template-columns:1fr}
   .dial-panel{position:static}
+  .tri-card{max-width:440px;margin:0 auto;width:100%}
 }
-@media(max-width:600px){
+@media(max-width:620px){
   .doors,.cats,.startgrid,.gloss,.exits{grid-template-columns:1fr}
-  section{padding:48px 0}
-  .ladder-viz{padding:10px 26px;gap:18px}
-  .ladder-viz::before{left:2px;width:9px}
-  .ladder-viz::after{right:2px;width:9px}
-  .rung{grid-template-columns:auto 1fr;padding:12px 14px}
-  .rung::before{left:-22px;width:22px;height:9px}
-  .rung::after{right:-22px;width:22px;height:9px}
+  section{padding:52px 0}
+  .sec-head{margin-bottom:30px;text-align:left}
+  .sec-head .lede{margin-left:0}
+  .hero{padding:44px 0 44px}
+  .story{padding:18px 20px}
+  .split{gap:20px}
+  .ladder-viz{padding:10px 22px;gap:14px}
+  .ladder-viz::before{left:2px;width:7px}
+  .ladder-viz::after{right:2px;width:7px}
+  .rung{grid-template-columns:auto 1fr;padding:12px 14px;gap:12px}
+  .rung::before{left:-18px;width:18px;height:8px}
+  .rung::after{right:-18px;width:18px;height:8px}
+  .rung .lv{width:34px;height:34px}
   .rung .tool{grid-column:2;justify-self:start}
+  .dial-panel{padding:18px}
+  .two-punch,.story,.honest{font-size:15px}
+  .term pre{padding:14px}
 }
 @media (prefers-reduced-motion: reduce){
   html{scroll-behavior:auto}
@@ -351,17 +392,25 @@ footer a{color:var(--mute)}
       <svg viewBox="0 0 32 32" aria-hidden="true"><polygon points="16,3 30,28 2,28" fill="var(--u)"/><polygon points="16,11 24,26 8,26" fill="var(--bg)"/></svg>
       Tri<b>Del</b>Phi
     </a>
-    <nav aria-label="Sections">
+    <nav id="nav" aria-label="Sections">
       <a href="#doors">Three doors</a>
       <a href="#scan">Before you install</a>
       <a href="#rule">The rule</a>
       <a href="#ladder">The ladder</a>
       <a href="#reports">Reports</a>
-      <a href="#words">Words</a>
+      <a href="#words">Glossary</a>
       <a href="setup.html">Setup Studio</a>
       <a href="https://github.com/girnarholdings/TriDelPhi">GitHub</a>
     </nav>
-    <button class="themebtn" id="theme" title="Switch light / dark" aria-label="Switch light or dark theme">◐</button>
+    <button class="iconbtn themebtn" id="theme" title="Switch light / dark" aria-label="Switch light or dark theme">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor"/></svg>
+    </button>
+    <button class="iconbtn menubtn" id="menubtn" aria-expanded="false" aria-controls="nav" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path class="i-burger" d="M4 7h16M4 12h16M4 17h16"/>
+        <path class="i-close" d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
   </div>
 </header>
 
@@ -374,54 +423,49 @@ footer a{color:var(--mute)}
   <h1>Three questions every project should be able to answer.</h1>
   <p class="lede"><span class="hl">Is this thing safe to install? Can a stranger trick my robots?
     Does my app leak what it shouldn't?</span> TriDelPhi is a free security checker that answers
-    all three — in plain English, on your machine, with nothing uploaded anywhere.</p>
-  <div class="trust">
-    <span>free &amp; open source</span>
-    <span>runs on your machine</span>
-    <span>nothing uploaded</span>
-    <span>plain-English reports</span>
-  </div>
+    all three, in plain English, on your machine. Nothing is uploaded anywhere.</p>
+  <p class="trust"><b>free &amp; open source</b> · <b>runs on your machine</b> ·
+    <b>uploads nothing</b> · <b>plain-English reports</b></p>
 </div>
 
 <!-- ========================================================= THREE DOORS -->
 <section id="doors">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">One tool · three doors</span>
       <h2>Pick the door that matches your worry.</h2>
-      <p class="lede">Each door is one command. Each command answers one question and tells you
-        exactly what to do about anything it finds.</p>
+      <p class="lede">One tool, three doors. Each door is one command; each command answers one
+        question and tells you exactly what to do about anything it finds.</p>
     </div>
     <div class="doors">
-      <div class="door d1" data-n="1">
-        <span class="tag">Door 1 · before you install</span>
+      <article class="door d1">
         <h3>Is this thing safe to install?</h3>
+        <p class="meta">door 1 · before you install</p>
         <p>A chat window hands you a package, a repo, a “paste this command”. <b>Read it before it
-          runs.</b> This scan checks someone else's code for install-time traps — without ever
+          runs.</b> This scan checks someone else's code for install-time traps without ever
           executing it.</p>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>scan</b> npm:that-package</div>
         <div class="verdict">🛑 DO NOT INSTALL THIS YET — 4 findings match known attack shapes.</div>
         <a class="more" href="#scan">What it looks for →</a>
-      </div>
-      <div class="door d2" data-n="2">
-        <span class="tag">Door 2 · your GitHub robots</span>
+      </article>
+      <article class="door d2">
         <h3>Can a stranger trick my robots?</h3>
+        <p class="meta">door 2 · your GitHub robots</p>
         <p>GitHub runs helper robots for your project. If one robot reads <b>stranger text</b>,
           holds <b>your keys</b>, and can reach <b>the internet</b>, a comment becomes a heist.
           This scan finds that robot.</p>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>.</b></div>
         <div class="verdict">🚫 1 job can be tricked into leaking your keys — here's the one-line fix.</div>
         <a class="more" href="#rule">The rule it checks →</a>
-      </div>
-      <div class="door d3" data-n="3">
-        <span class="tag">Door 3 · what you ship</span>
+      </article>
+      <article class="door d3">
         <h3>Does my app leak what it shouldn't?</h3>
+        <p class="meta">door 3 · what you ship</p>
         <p>Your product can betray you quietly: source maps, API keys baked into the bundle, weak
           password hashing, an open database. This audit reads what you actually ship.</p>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>expose</b> ./dist</div>
         <div class="verdict">⚠️ Your bundle ships a live secret and your original source code.</div>
         <a class="more" href="#ship">What it audits →</a>
-      </div>
+      </article>
     </div>
   </div>
 </section>
@@ -430,18 +474,18 @@ footer a{color:var(--mute)}
 <section id="scan">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">Door 1 · <span class="mono">tridelphi scan</span></span>
       <h2>Read someone else's code before the installer runs.</h2>
+      <p class="sec-kv">door 1 · <b>tridelphi scan</b></p>
       <p class="lede">The attack that is actually happening to people: an AI assistant hands you a
         download link it never verified, and the “style guide” it loads is executable instructions
-        in disguise. <span class="hl">scan reads the code first — it never executes it.</span></p>
+        in disguise. <span class="hl">scan reads the code first. It never executes it.</span></p>
     </div>
 
     <div class="story">
       <span class="hl">“The link came from inside a chat window.”</span>
       A real report: someone installing a transcription app pasted the command their assistant sent.
       It was a copycat site bundling malware. Restoring from backup, they found a poisoned
-      <span class="mono">SKILL.md</span> that looked exactly like their own style guide — with buried
+      <span class="mono">SKILL.md</span> that looked exactly like their own style guide, with buried
       instructions to silently re-download the malware every time the AI loaded it. That exact attack
       is reproduced in TriDelPhi's test suite, and every limb of it is caught.
     </div>
@@ -461,18 +505,18 @@ footer a{color:var(--mute)}
       <div class="cat"><div class="letter">O</div>
         <h3>Obfuscation</h3>
         <p>Base64 piped to a shell, <span class="mono">eval(atob())</span>, and
-          <b>invisible Unicode</b> — you read one thing, the interpreter reads another.</p>
+          <b>invisible Unicode</b>: you read one thing, the interpreter reads another.</p>
       </div>
       <div class="cat"><div class="letter">C</div>
         <h3>Credential reach</h3>
-        <p>Reads of <span class="mono">~/.ssh</span>, cloud credentials, browser logins, wallets —
+        <p>Reads of <span class="mono">~/.ssh</span>, cloud credentials, browser logins, wallets,
           graded up when the same file also phones home. A read plus a send is exfiltration's
           exact shape.</p>
       </div>
       <div class="cat"><div class="letter">A</div>
         <h3>Poisoned agent files</h3>
         <p><span class="mono">SKILL.md</span>, <span class="mono">CLAUDE.md</span>,
-          <span class="mono">.cursorrules</span>, <span class="mono">.mcp.json</span> — secrecy
+          <span class="mono">.cursorrules</span>, <span class="mono">.mcp.json</span>: secrecy
           instructions near an action, imperatives hidden in HTML comments.</p>
       </div>
       <div class="cat"><div class="letter">L</div>
@@ -484,15 +528,14 @@ footer a{color:var(--mute)}
 
     <div class="targets" aria-label="What scan can point at">
       <span class="t"><b>./a-directory/</b> a clone or unpacked download</span>
-      <span class="t"><b>./package.tgz</b> archives — .tgz .zip .whl</span>
-      <span class="t"><b>npm:</b>pkg — tarball fetched, no scripts run</span>
-      <span class="t"><b>pypi:</b>pkg — plain download, never pip</span>
+      <span class="t"><b>./package.tgz</b> archives: .tgz .zip .whl</span>
+      <span class="t"><b>npm:</b>pkg · tarball fetched, no scripts run</span>
+      <span class="t"><b>pypi:</b>pkg · plain download, never pip</span>
     </div>
 
     <div class="split">
       <div class="term">
-        <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="lbl">tridelphi scan ./that-download</span></div>
+        <div class="term-bar"><span class="lbl">tridelphi scan ./that-download</span></div>
         <pre>  🔺 TriDelPhi pre-install scan · that-download
 
   <span class="bad">🚫</span>  Does anything run the moment you install?   <span class="bad">1 to read first</span>
@@ -510,21 +553,21 @@ footer a{color:var(--mute)}
       <div>
         <p class="lede" style="font-size:17px">The same line means different things in different
           files, so <span class="hl">install context is the severity dial</span>:
-          <span class="mono">curl | bash</span> in a README is a warning — a README doesn't run
-          itself. The same line in a <span class="mono">postinstall</span> or an agent file is
-          critical.</p>
+          <span class="mono">curl | bash</span> in a README is a warning, because a README doesn't
+          run itself. The same line in a <span class="mono">postinstall</span> or an agent file
+          is critical.</p>
         <p class="note" style="margin-top:16px">Archives are extracted safely first: an archive
           built to escape its extraction directory is refused, and the refusal <em>is</em> the
           verdict. The registry forms (<span class="mono">npm:</span> /
-          <span class="mono">pypi:</span>) are the tool's only network use — download only,
+          <span class="mono">pypi:</span>) are the tool's only network use. Download only,
           announced before connecting, and never <span class="mono">pip download</span>, which can
           execute a hostile <span class="mono">setup.py</span> just to read metadata.</p>
       </div>
     </div>
 
     <div class="honest">A clean result means <span class="hl">no known-bad patterns in the source we
-      read</span> — never a certificate for a compiled binary or tomorrow's server response. The
-      report says so on every run.</div>
+      read</span>. It is never a certificate for a compiled binary or tomorrow's server response,
+      and the report says so on every run.</div>
   </div>
 </section>
 
@@ -532,10 +575,10 @@ footer a{color:var(--mute)}
 <section id="rule">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">Door 2 · <span class="mono">tridelphi .</span> · the Agents Rule of Two</span>
       <h2>Two powers is fine. All three together is a disaster.</h2>
+      <p class="sec-kv">door 2 · <b>tridelphi .</b> · the Agents Rule of Two</p>
       <p class="lede">Every GitHub robot can hold up to three powers. On their own, none is scary.
-        The trap is a single robot holding <span class="hl">all three at once</span> — that's the
+        The trap is a single robot holding <span class="hl">all three at once</span>: that's the
         recipe a stranger needs. Tap a power to switch it off and watch the danger vanish.</p>
     </div>
 
@@ -571,7 +614,7 @@ footer a{color:var(--mute)}
         <div class="two-copy">
           <div class="row"><div class="k ku">U</div><div>
             <h3>It reads words from strangers</h3>
-            <p>Anyone on the internet can leave a comment or suggest a change — and that text
+            <p>Anyone on the internet can leave a comment or suggest a change, and that text
               reaches the robot.</p>
           </div></div>
           <div class="row"><div class="k kp">P</div><div>
@@ -581,13 +624,13 @@ footer a{color:var(--mute)}
           </div></div>
           <div class="row"><div class="k ke">E</div><div>
             <h3>It can reach the internet</h3>
-            <p>So it can send things out — which is exactly how your keys would leave if it were
+            <p>So it can send things out, which is exactly how your keys would leave if it were
               tricked.</p>
           </div></div>
         </div>
         <p class="two-punch">Any two of these is a normal, safe robot. Put all three in one robot
           and a stranger's comment becomes a way to walk off with your keys. TriDelPhi finds those
-          robots — including the ones built from AI agents, where the “comment” becomes the agent's
+          robots, including the ones built from AI agents, where the “comment” becomes the agent's
           instructions. Removing <em>any one</em> power breaks the chain, and the report always
           names the cheapest one to remove.</p>
       </div>
@@ -595,17 +638,17 @@ footer a{color:var(--mute)}
 
     <div class="fixrow">
       <div class="fixcard">
-        <h3>From finding to fixed — without leaving the terminal</h3>
+        <h3>From finding to fixed, without leaving the terminal</h3>
         <p><span class="mono">tridelphi fix</span> prints the exact remediation plan;
           <span class="mono">tridelphi guard</span> walks each finding with you and applies the fix
-          when you say yes — every edit verified against a re-scan or rolled back.</p>
+          when you say yes. Every edit is verified against a re-scan or rolled back.</p>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>guard</b></div>
       </div>
       <div class="fixcard">
         <h3>No CI? No problem.</h3>
-        <p><span class="mono">init --local</span> installs a git <b>pre-push</b> hook (not
-          pre-commit — a scan people bypass is no scan) that runs the same checks on your machine
-          before every push. Zero GitHub Actions required.</p>
+        <p><span class="mono">init --local</span> installs a git <b>pre-push</b> hook that runs the
+          same checks on your machine before every push. (Not pre-commit: a scan people bypass is
+          no scan.) Zero GitHub Actions required.</p>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>init</b> --local</div>
       </div>
     </div>
@@ -616,10 +659,10 @@ footer a{color:var(--mute)}
 <section id="ladder">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">One dial · eight rungs</span>
       <h2>A whole security team, one <span class="mono">--level</span> at a time.</h2>
+      <p class="sec-kv">one dial · eight rungs · <b>tridelphi . --level N</b></p>
       <p class="lede">The core Rule-of-Two scan always runs. Each rung above it adds one respected
-        open-source scanner — pinned by version and checksum, its output contained and merged into
+        open-source scanner, pinned by version and checksum, its output contained and merged into
         one report. Climb when you're ready; every rung is optional.</p>
     </div>
 
@@ -629,61 +672,63 @@ footer a{color:var(--mute)}
         <div class="ladder-viz" id="lviz" aria-label="The hardening ladder, L0 at the base to L7 at the top. Click a rung to set the level.">
           <div class="rung core" data-lv="0" tabindex="0" role="button">
             <span class="lv">L0</span>
-            <span class="what"><b>The Rule of Two</b><span class="chip">always runs</span>
-              <span> — finds the robot a stranger can trick. Entirely offline; the base every
+            <span class="what"><b>The Rule of Two<span class="chip">always runs</span></b>
+              <span>finds the robot a stranger can trick. Entirely offline; the base every
               other rung stands on.</span></span>
             <span class="tool">tridelphi core</span></div>
           <div class="rung" data-lv="1" tabindex="0" role="button">
             <span class="lv">L1</span>
-            <span class="what"><b>Leaked passwords</b> <span>— secrets sitting in your files or
-              your git history.</span></span>
+            <span class="what"><b>Leaked passwords</b>
+              <span>secrets sitting in your files or your git history.</span></span>
             <span class="tool">gitleaks</span></div>
           <div class="rung" data-lv="2" tabindex="0" role="button">
             <span class="lv">L2</span>
-            <span class="what"><b>Known-broken building blocks</b> <span>— dependencies with
-              published vulnerabilities (asks osv.dev).</span></span>
+            <span class="what"><b>Known-broken building blocks</b>
+              <span>dependencies with published vulnerabilities (asks osv.dev).</span></span>
             <span class="tool">osv-scanner</span></div>
           <div class="rung" data-lv="3" tabindex="0" role="button">
             <span class="lv">L3</span>
-            <span class="what"><b>Workflow lint</b><span class="chip">CI default</span>
-              <span> — misconfigured GitHub Actions beyond the Rule of Two.</span></span>
+            <span class="what"><b>Workflow lint<span class="chip">CI default</span></b>
+              <span>misconfigured GitHub Actions beyond the Rule of Two.</span></span>
             <span class="tool">zizmor</span></div>
           <div class="rung" data-lv="4" tabindex="0" role="button">
             <span class="lv">L4</span>
-            <span class="what"><b>Repo posture</b> <span>— do your repository settings follow
-              safe defaults?</span></span>
+            <span class="what"><b>Repo posture</b>
+              <span>do your repository settings follow safe defaults?</span></span>
             <span class="tool">scorecard</span></div>
           <div class="rung" data-lv="5" tabindex="0" role="button">
             <span class="lv">L5</span>
-            <span class="what"><b>Risky code patterns</b> <span>— static analysis over your app
-              code itself.</span></span>
+            <span class="what"><b>Risky code patterns</b>
+              <span>static analysis over your app code itself.</span></span>
             <span class="tool">semgrep</span></div>
           <div class="rung" data-lv="6" tabindex="0" role="button">
             <span class="lv">L6</span>
-            <span class="what"><b>Attest &amp; gate</b> <span>— a signed evidence statement of
-              what scanned this commit, and a gate that re-checks it.</span></span>
+            <span class="what"><b>Attest &amp; gate</b>
+              <span>a signed evidence statement of what scanned this commit, and a gate that
+              re-checks it.</span></span>
             <span class="tool">native</span></div>
           <div class="rung" data-lv="7" tabindex="0" role="button">
             <span class="lv">L7</span>
-            <span class="what"><b>Trust-lock</b> <span>— did any trusted outside action quietly
-              get swapped? The pawl SHA-pinning can't provide.</span></span>
+            <span class="what"><b>Trust-lock</b>
+              <span>did any trusted outside action quietly get swapped? The pawl SHA-pinning
+              can't provide.</span></span>
             <span class="tool">tridelphi verify</span></div>
         </div>
-        <p class="viz-cap bottom">start here — the Rule of Two runs at every level</p>
+        <p class="viz-cap bottom">start here · the Rule of Two runs at every level</p>
       </div>
 
       <div class="dial-panel">
-        <span class="eyebrow">Try the dial</span>
+        <h3>Try the dial</h3>
         <input type="range" id="lvl" min="0" max="7" step="1" value="3"
           aria-label="Hardening ladder level, 0 to 7">
         <div class="dial-ticks" aria-hidden="true">
           <span>0</span><span>1</span><span>2</span><span>3</span>
           <span>4</span><span>5</span><span>6</span><span>7</span>
         </div>
-        <div class="cmd"><span class="ps1">$</span>tridelphi . --level <b id="lvl-n">3</b></div>
+        <div class="cmd"><span class="ps1">$</span>tridelphi <b>.</b> --level <b id="lvl-n">3</b></div>
         <p id="lvl-desc" aria-live="polite"></p>
         <p class="note dial-note">Every scanner is installed pinned and checksum-verified, and
-          its output is treated as untrusted input — contained, never executed.
+          its output is treated as untrusted input: contained, never executed.
           <span class="mono">--offline</span> skips the rungs that need the network. Full credit
           to the wrapped tools: <span class="mono">tridelphi --credits</span>.</p>
       </div>
@@ -695,25 +740,31 @@ footer a{color:var(--mute)}
 <section id="ship">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">Door 3 · <span class="mono">tridelphi expose</span></span>
       <h2>Your CI can be spotless while your product leaks.</h2>
-      <p class="lede">The exposure audit reads what you actually ship — the built bundle, the
-        config, the data files — and names what a stranger with a browser could take.</p>
+      <p class="sec-kv">door 3 · <b>tridelphi expose</b></p>
+      <p class="lede">The exposure audit reads what you actually ship: the built bundle, the
+        config, the data files. Then it names what a stranger with a browser could take.</p>
     </div>
     <div class="split">
       <div>
         <div class="two-copy">
-          <div class="row"><div class="k ku">🗺</div><div>
+          <div class="row"><div class="k ku" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8.5Z"/><path d="M13 3v5.5h5.5"/><path d="m10 12-2 2.5 2 2.5m4-5 2 2.5-2 2.5"/></svg>
+          </div><div>
             <h3>Shipped source maps &amp; client secrets</h3>
             <p>Your original source riding along with the minified bundle; API keys baked into
               JavaScript anyone can read.</p>
           </div></div>
-          <div class="row"><div class="k kp">🔑</div><div>
+          <div class="row"><div class="k kp" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><path d="m11 11 8.5-8.5M15 7l2.5 2.5M18 4l2 2"/></svg>
+          </div><div>
             <h3>Weak password hashing &amp; plaintext PII</h3>
             <p>MD5/SHA-1 where bcrypt belongs; personal data sitting unencrypted in shipped
               files.</p>
           </div></div>
-          <div class="row"><div class="k ke">🛢</div><div>
+          <div class="row"><div class="k ke" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7" ry="2.8"/><path d="M5 5.5v13c0 1.6 3.1 2.9 7 2.9s7-1.3 7-2.9v-13"/><path d="M5 12c0 1.6 3.1 2.9 7 2.9s7-1.3 7-2.9"/></svg>
+          </div><div>
             <h3>Open databases &amp; risky config</h3>
             <p>Firebase and Supabase rules that let anyone read; self-hosted databases listening
               to the world.</p>
@@ -721,12 +772,11 @@ footer a{color:var(--mute)}
         </div>
         <p class="two-punch" style="margin-top:22px">And when you have a reason to hide your
           shipped JavaScript, <span class="mono">tridelphi privatize</span> obfuscates it honestly:
-          opt-in, consent-gated, and every build verified afterwards — or the change is reverted.
+          opt-in, consent-gated, and every build verified afterwards, or the change is reverted.
           Obfuscation is a speed bump, not a safe; the report never pretends otherwise.</p>
       </div>
       <div class="term">
-        <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="lbl">tridelphi expose ./dist</span></div>
+        <div class="term-bar"><span class="lbl">tridelphi expose ./dist</span></div>
         <pre>  🔺 TriDelPhi exposure audit · dist
 
   <span class="bad">🚫</span>  Does your bundle ship secrets?               <span class="bad">1 to fix</span>
@@ -747,7 +797,6 @@ footer a{color:var(--mute)}
 <section id="reports">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">What you actually get</span>
       <h2>A verdict you can act on, not a wall of jargon.</h2>
       <p class="lede">At a terminal you get the plain-English checklist below. In CI the same scan
         posts one sticky PR comment, feeds the Security tab, and fails the build only at the
@@ -755,8 +804,7 @@ footer a{color:var(--mute)}
     </div>
     <div class="split">
       <div class="term">
-        <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="lbl">tridelphi .</span></div>
+        <div class="term-bar"><span class="lbl">tridelphi .</span></div>
         <pre>  🔺 TriDelPhi security checklist
   <span class="dim">your-repo · 4 jobs across 2 workflows · scanned in 0.1s
   ✓ Ran entirely on your machine. Nothing was uploaded.</span>
@@ -779,11 +827,11 @@ footer a{color:var(--mute)}
       </div>
       <div>
         <div class="formats" style="justify-content:flex-start">
-          <span><b>checklist</b> — plain English, the default at a terminal</span>
-          <span><b>text</b> — the U/P/E detail, for pipes and CI logs</span>
-          <span><b>sarif</b> — the machine contract, feeds code scanning</span>
-          <span><b>html</b> — a browsable report file</span>
-          <span><b>markdown</b> — what the PR bot posts</span>
+          <span><b>checklist</b> · plain English, the default at a terminal</span>
+          <span><b>text</b> · the U/P/E detail, for pipes and CI logs</span>
+          <span><b>sarif</b> · the machine contract, feeds code scanning</span>
+          <span><b>html</b> · a browsable report file</span>
+          <span><b>markdown</b> · what the PR bot posts</span>
         </div>
         <div class="exits" style="grid-template-columns:repeat(3,1fr);margin-top:22px">
           <div class="exit"><div class="code" style="color:var(--safe)">0</div><p>nothing at or
@@ -794,7 +842,7 @@ footer a{color:var(--mute)}
             couldn't run</p></div>
         </div>
         <p class="note" style="margin-top:22px">What you see (<span class="mono">--min-severity</span>)
-          and what breaks the build (<span class="mono">--fail-on</span>) are separate dials — you
+          and what breaks the build (<span class="mono">--fail-on</span>) are separate dials. You
           never have to choose between seeing near-misses and having a green build. A baseline file
           lets old findings age out without hiding new ones.</p>
       </div>
@@ -806,33 +854,32 @@ footer a{color:var(--mute)}
 <section id="words">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">No jargon left behind</span>
       <h2>Every technical word on this page, in one place.</h2>
     </div>
     <dl class="gloss">
-      <div class="g"><dt>Robot (workflow / action)</dt><dd>A helper GitHub runs for your project —
+      <div class="g"><dt>Robot (workflow / action)</dt><dd>A helper GitHub runs for your project:
         testing code, replying to comments, doing chores. Defined by files in
         <span class="mono">.github/workflows</span>.</dd></div>
-      <div class="g"><dt>CI</dt><dd>“Continuous integration” — the umbrella term for those robots
+      <div class="g"><dt>CI</dt><dd>“Continuous integration”, the umbrella term for those robots
         running automatically on every change.</dd></div>
       <div class="g"><dt>Keys / secrets</dt><dd>Passwords, API tokens and permissions your project
         holds. The thing every attack on this page is ultimately after.</dd></div>
       <div class="g"><dt>Prompt injection</dt><dd>Tricking an AI by hiding instructions in text it
-        reads — a comment, a README, a “style guide”. The AI can't tell your words from a
+        reads: a comment, a README, a “style guide”. The AI can't tell your words from a
         stranger's.</dd></div>
       <div class="g"><dt>Agent file</dt><dd>A file an AI assistant loads as instructions:
         <span class="mono">SKILL.md</span>, <span class="mono">CLAUDE.md</span>,
         <span class="mono">.cursorrules</span>, <span class="mono">.mcp.json</span>. Executable
         code wearing a markdown extension.</dd></div>
       <div class="g"><dt>Install hook</dt><dd>A script that runs automatically the moment you
-        install a package — npm's <span class="mono">postinstall</span>, Python's
+        install a package, like npm's <span class="mono">postinstall</span> or Python's
         <span class="mono">setup.py</span>. The most-used malware delivery slot.</dd></div>
       <div class="g"><dt>Supply-chain attack</dt><dd>Compromising you by compromising something you
         install or depend on, instead of attacking you directly.</dd></div>
-      <div class="g"><dt>RCE</dt><dd>“Remote code execution” — a stranger running their commands on
+      <div class="g"><dt>RCE</dt><dd>“Remote code execution”: a stranger running their commands on
         your machine. The worst case everything here works to prevent.</dd></div>
       <div class="g"><dt>PR (pull request)</dt><dd>A proposed change to a project. Anyone can open
-        one — which is exactly why robots that read them must be careful.</dd></div>
+        one, which is exactly why robots that read them must be careful.</dd></div>
       <div class="g"><dt>SARIF</dt><dd>The standard file format security tools use to report
         findings. It's how TriDelPhi feeds GitHub's Security tab.</dd></div>
     </dl>
@@ -843,27 +890,27 @@ footer a{color:var(--mute)}
 <section id="start">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">Two minutes, start to verdict</span>
       <h2>Install once. Open whichever door you need.</h2>
+      <p class="lede">Two minutes, start to verdict. No account, no API token.</p>
     </div>
     <div class="startgrid">
       <div class="startcard">
         <h3>1 · Install</h3>
-        <p>One tool, no account, no API token. <span class="mono">pipx</span> keeps it isolated;
+        <p>One tool. <span class="mono">pipx</span> keeps it isolated;
           plain <span class="mono">pip</span> works too.</p>
         <div class="cmd"><span class="ps1">$</span>pipx install git+https://github.com/girnarholdings/TriDelPhi</div>
       </div>
       <div class="startcard">
         <h3>2 · Ask your question</h3>
-        <p>Scan a download before installing it, check your own repo, or audit your built app —
-          each is one command with a plain-English verdict.</p>
+        <p>Scan a download before installing it, check your own repo, or audit your built app.
+          Each is one command with a plain-English verdict.</p>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>scan</b> npm:some-package</div>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>.</b></div>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>expose</b> ./dist</div>
       </div>
       <div class="startcard">
         <h3>3 · Make it automatic</h3>
-        <p>One line adds the scan to every future change — in CI with
+        <p>One line adds the scan to every future change: in CI with
           <span class="mono">init</span>, or with no CI at all via a local pre-push hook.</p>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>init</b></div>
         <div class="cmd"><span class="ps1">$</span>tridelphi <b>init</b> --local</div>
@@ -872,7 +919,7 @@ footer a{color:var(--mute)}
 
     <div class="studio-cta">
       <h3>Prefer clicking to typing?</h3>
-      <p>The Setup Studio builds your exact workflow — pick a door, pick a level, copy one file or
+      <p>The Setup Studio builds your exact workflow: pick a door, pick a level, copy one file or
         create it on GitHub directly.</p>
       <a class="btn" href="setup.html">Open the Setup Studio →</a>
     </div>
@@ -909,6 +956,27 @@ footer a{color:var(--mute)}
     var next = dark ? "light" : "dark";
     root.setAttribute("data-theme", next);
     try { localStorage.setItem("tridelphi-theme", next); } catch(e){}
+  });
+})();
+
+/* Mobile menu: one button, one dropdown, closes on pick or Escape. */
+(function(){
+  "use strict";
+  var btn = document.getElementById("menubtn"), nav = document.getElementById("nav");
+  if (!btn || !nav) return;
+  function set(open){
+    document.body.classList.toggle("nav-open", open);
+    btn.setAttribute("aria-expanded", String(open));
+    btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+  }
+  btn.addEventListener("click", function(){
+    set(!document.body.classList.contains("nav-open"));
+  });
+  nav.addEventListener("click", function(e){
+    if (e.target.closest("a")) set(false);
+  });
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape") set(false);
   });
 })();
 
