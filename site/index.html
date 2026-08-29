@@ -77,7 +77,7 @@
   --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
   font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;
   text-rendering:optimizeLegibility}
@@ -148,8 +148,16 @@ section{padding:64px 0;border-top:1px solid var(--line)}
 
 /* ============================================================= DOORS */
 .doors{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:8px}
-.door{background:var(--bg2);border:1px solid var(--line);border-radius:16px;
-  padding:24px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow)}
+.door{position:relative;overflow:hidden;background:var(--bg2);border:1px solid var(--line);
+  border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:14px;
+  box-shadow:var(--shadow);transition:transform .25s,border-color .25s}
+.door:hover{transform:translateY(-4px);border-color:var(--line2)}
+.door::after{content:attr(data-n);position:absolute;right:12px;top:-4px;
+  font-family:var(--serif);font-size:74px;font-weight:700;opacity:.08;line-height:1.2;
+  pointer-events:none}
+.door.d1{border-top:3px solid var(--u)}
+.door.d2{border-top:3px solid var(--p)}
+.door.d3{border-top:3px solid var(--e)}
 .door .tag{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;
   text-transform:uppercase;font-weight:600}
 .door.d1 .tag{color:var(--u)}.door.d2 .tag{color:var(--p)}.door.d3 .tag{color:var(--e)}
@@ -165,7 +173,9 @@ section{padding:64px 0;border-top:1px solid var(--line)}
   color:var(--mute);font-size:15.5px}
 .story .hl{display:block;margin-bottom:6px;font-size:16.5px}
 .cats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.cat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.cat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+  padding:18px 20px;transition:transform .2s,border-color .2s}
+.cat:hover{transform:translateY(-2px);border-color:var(--line2)}
 .cat .letter{font-family:var(--mono);font-weight:700;font-size:15px;color:var(--bg);
   background:var(--grn);width:28px;height:28px;border-radius:8px;display:grid;
   place-items:center;margin-bottom:10px}
@@ -210,16 +220,67 @@ section{padding:64px 0;border-top:1px solid var(--line)}
 .fixcard h3{font-size:17px;font-family:var(--sans);font-weight:600;letter-spacing:0}
 .fixcard p{color:var(--mute);font-size:14.5px;margin:8px 0 12px}
 
-/* ============================================================= LADDER */
-.ladder{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
-.rung{display:grid;grid-template-columns:52px 1fr auto;gap:16px;align-items:baseline;
-  background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:14px 20px}
-.rung.core{border-color:var(--grn);background:var(--grn-soft)}
-.rung .lv{font-family:var(--mono);font-weight:700;font-size:15px;color:var(--grn-ink)}
-.rung .what b{font-weight:600}
-.rung .what span{color:var(--mute);font-size:14.5px}
-.rung .tool{font-family:var(--mono);font-size:12.5px;color:var(--faint);white-space:nowrap}
-.dial{max-width:760px;margin:26px auto 0;text-align:center;color:var(--mute);font-size:15px}
+/* ============================================================= LADDER
+   A literal ladder: two side rails, rungs you climb from L0 (the base, the
+   Rule of Two — highlighted, always on) up to L7. DOM order stays L0→L7 for
+   readers and screen readers; column-reverse puts the first rung at the
+   bottom, where a ladder starts. The dial sets --level and dims the rungs
+   above it. */
+.climb{display:grid;grid-template-columns:1.15fr .85fr;gap:30px;align-items:start;
+  max-width:1000px;margin:0 auto}
+.viz-cap{font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--faint);
+  text-align:center;margin:0 0 12px}
+.viz-cap.bottom{margin:12px 0 0}
+.ladder-viz{display:flex;flex-direction:column-reverse;gap:22px;position:relative;
+  padding:14px 34px}
+.ladder-viz::before,.ladder-viz::after{content:"";position:absolute;top:-6px;bottom:-6px;
+  width:11px;border-radius:99px;z-index:0;border:1px solid var(--line2);
+  background:linear-gradient(180deg,var(--line2) 0%,
+    color-mix(in srgb,var(--line2) 55%,var(--grn)) 60%,var(--grn) 100%)}
+.ladder-viz::before{left:6px}
+.ladder-viz::after{right:6px}
+.rung{position:relative;z-index:1;display:grid;grid-template-columns:auto 1fr auto;
+  gap:14px;align-items:center;background:var(--bg2);border:1px solid var(--line);
+  border-radius:12px;padding:13px 18px;cursor:pointer;
+  transition:transform .22s,border-color .22s,opacity .3s,box-shadow .22s}
+.rung::before,.rung::after{content:"";position:absolute;top:50%;height:11px;width:28px;
+  transform:translateY(-50%);background:var(--line2);border-radius:99px;
+  transition:background .3s}
+.rung::before{left:-28px}
+.rung::after{right:-28px}
+.rung:hover{transform:translateY(-2px);border-color:var(--line2);box-shadow:var(--shadow)}
+.rung .lv{font-family:var(--mono);font-weight:700;font-size:13.5px;color:var(--grn-ink);
+  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
+  border:2px solid var(--line2);background:var(--bg3);transition:background .3s,
+  border-color .3s,color .3s}
+.rung .what b{font-weight:600;font-size:15.5px}
+.rung .what span{color:var(--mute);font-size:14px}
+.rung .tool{font-family:var(--mono);font-size:12px;color:var(--faint);white-space:nowrap;
+  justify-self:end}
+.rung .chip{display:inline-block;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.06em;color:var(--grn-ink);background:var(--grn-soft);
+  border:1px solid var(--grn);border-radius:999px;padding:1px 8px;margin-left:8px;
+  vertical-align:2px;white-space:nowrap}
+/* On the dial: rungs at or below the chosen level are "on". */
+.rung:not(.off)::before,.rung:not(.off)::after{background:var(--grn)}
+.rung:not(.off) .lv{border-color:var(--grn);color:var(--grn-ink);
+  box-shadow:0 0 0 4px var(--grn-soft)}
+.rung.off{opacity:.55;border-style:dashed}
+.rung.off .lv{color:var(--faint)}
+/* The Rule of Two keeps its L0 place — it is simply unmistakable. */
+.rung.core{border:2px solid var(--grn);background:var(--grn-soft);cursor:pointer}
+.rung.core .lv{background:var(--grn);border-color:var(--grn);color:var(--bg)}
+.rung.core::before,.rung.core::after{background:var(--grn)}
+.dial-panel{position:sticky;top:86px;background:var(--bg2);border:1px solid var(--line);
+  border-radius:16px;padding:22px;box-shadow:var(--shadow)}
+.dial-panel .eyebrow{display:block;margin-bottom:14px}
+.dial-panel input[type="range"]{width:100%;accent-color:var(--grn);cursor:pointer;
+  margin:2px 0 4px}
+.dial-ticks{display:flex;justify-content:space-between;font-family:var(--mono);
+  font-size:11.5px;color:var(--faint);padding:0 2px;margin-bottom:16px}
+.dial-panel .cmd{margin-bottom:14px}
+#lvl-desc{color:var(--mute);font-size:14px;min-height:3.4em;margin:0}
+.dial-note{border-top:1px dashed var(--line);margin-top:16px;padding-top:14px}
 
 /* ============================================================= REPORTS */
 .formats{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:26px}
@@ -261,13 +322,19 @@ footer a{color:var(--mute)}
 /* ============================================================= RESPONSIVE */
 @media(max-width:860px){
   .doors,.cats,.startgrid{grid-template-columns:1fr 1fr}
-  .two,.split,.fixrow{grid-template-columns:1fr}
+  .two,.split,.fixrow,.climb{grid-template-columns:1fr}
+  .dial-panel{position:static}
 }
 @media(max-width:600px){
   .doors,.cats,.startgrid,.gloss,.exits{grid-template-columns:1fr}
   section{padding:48px 0}
-  .rung{grid-template-columns:44px 1fr}
-  .rung .tool{grid-column:2}
+  .ladder-viz{padding:10px 26px;gap:18px}
+  .ladder-viz::before{left:2px;width:9px}
+  .ladder-viz::after{right:2px;width:9px}
+  .rung{grid-template-columns:auto 1fr;padding:12px 14px}
+  .rung::before{left:-22px;width:22px;height:9px}
+  .rung::after{right:-22px;width:22px;height:9px}
+  .rung .tool{grid-column:2;justify-self:start}
 }
 @media (prefers-reduced-motion: reduce){
   html{scroll-behavior:auto}
@@ -326,7 +393,7 @@ footer a{color:var(--mute)}
         exactly what to do about anything it finds.</p>
     </div>
     <div class="doors">
-      <div class="door d1">
+      <div class="door d1" data-n="1">
         <span class="tag">Door 1 · before you install</span>
         <h3>Is this thing safe to install?</h3>
         <p>A chat window hands you a package, a repo, a “paste this command”. <b>Read it before it
@@ -336,7 +403,7 @@ footer a{color:var(--mute)}
         <div class="verdict">🛑 DO NOT INSTALL THIS YET — 4 findings match known attack shapes.</div>
         <a class="more" href="#scan">What it looks for →</a>
       </div>
-      <div class="door d2">
+      <div class="door d2" data-n="2">
         <span class="tag">Door 2 · your GitHub robots</span>
         <h3>Can a stranger trick my robots?</h3>
         <p>GitHub runs helper robots for your project. If one robot reads <b>stranger text</b>,
@@ -346,7 +413,7 @@ footer a{color:var(--mute)}
         <div class="verdict">🚫 1 job can be tricked into leaking your keys — here's the one-line fix.</div>
         <a class="more" href="#rule">The rule it checks →</a>
       </div>
-      <div class="door d3">
+      <div class="door d3" data-n="3">
         <span class="tag">Door 3 · what you ship</span>
         <h3>Does my app leak what it shouldn't?</h3>
         <p>Your product can betray you quietly: source maps, API keys baked into the bundle, weak
@@ -556,47 +623,70 @@ footer a{color:var(--mute)}
         one report. Climb when you're ready; every rung is optional.</p>
     </div>
 
-    <div class="ladder">
-      <div class="rung core"><span class="lv">L0</span>
-        <span class="what"><b>The Rule of Two</b> <span>— finds the robot a stranger can trick.
-          Always runs, entirely offline.</span></span>
-        <span class="tool">tridelphi core</span></div>
-      <div class="rung"><span class="lv">L1</span>
-        <span class="what"><b>Leaked passwords</b> <span>— secrets sitting in your files or your
-          git history.</span></span>
-        <span class="tool">gitleaks</span></div>
-      <div class="rung"><span class="lv">L2</span>
-        <span class="what"><b>Known-broken building blocks</b> <span>— dependencies with published
-          vulnerabilities (asks osv.dev).</span></span>
-        <span class="tool">osv-scanner</span></div>
-      <div class="rung"><span class="lv">L3</span>
-        <span class="what"><b>Workflow lint</b> <span>— misconfigured GitHub Actions beyond the
-          Rule of Two. The GitHub Action's default level.</span></span>
-        <span class="tool">zizmor</span></div>
-      <div class="rung"><span class="lv">L4</span>
-        <span class="what"><b>Repo posture</b> <span>— do your repository settings follow safe
-          defaults?</span></span>
-        <span class="tool">scorecard</span></div>
-      <div class="rung"><span class="lv">L5</span>
-        <span class="what"><b>Risky code patterns</b> <span>— static analysis over your app code
-          itself.</span></span>
-        <span class="tool">semgrep</span></div>
-      <div class="rung"><span class="lv">L6</span>
-        <span class="what"><b>Attest &amp; gate</b> <span>— a signed evidence statement of what
-          scanned this commit, and a gate that re-checks it.</span></span>
-        <span class="tool">native</span></div>
-      <div class="rung"><span class="lv">L7</span>
-        <span class="what"><b>Trust-lock</b> <span>— did any trusted outside action quietly get
-          swapped? The pawl SHA-pinning can't provide.</span></span>
-        <span class="tool">tridelphi verify</span></div>
-    </div>
+    <div class="climb">
+      <div>
+        <p class="viz-cap">↑ climb as far as you like</p>
+        <div class="ladder-viz" id="lviz" aria-label="The hardening ladder, L0 at the base to L7 at the top. Click a rung to set the level.">
+          <div class="rung core" data-lv="0" tabindex="0" role="button">
+            <span class="lv">L0</span>
+            <span class="what"><b>The Rule of Two</b><span class="chip">always runs</span>
+              <span> — finds the robot a stranger can trick. Entirely offline; the base every
+              other rung stands on.</span></span>
+            <span class="tool">tridelphi core</span></div>
+          <div class="rung" data-lv="1" tabindex="0" role="button">
+            <span class="lv">L1</span>
+            <span class="what"><b>Leaked passwords</b> <span>— secrets sitting in your files or
+              your git history.</span></span>
+            <span class="tool">gitleaks</span></div>
+          <div class="rung" data-lv="2" tabindex="0" role="button">
+            <span class="lv">L2</span>
+            <span class="what"><b>Known-broken building blocks</b> <span>— dependencies with
+              published vulnerabilities (asks osv.dev).</span></span>
+            <span class="tool">osv-scanner</span></div>
+          <div class="rung" data-lv="3" tabindex="0" role="button">
+            <span class="lv">L3</span>
+            <span class="what"><b>Workflow lint</b><span class="chip">CI default</span>
+              <span> — misconfigured GitHub Actions beyond the Rule of Two.</span></span>
+            <span class="tool">zizmor</span></div>
+          <div class="rung" data-lv="4" tabindex="0" role="button">
+            <span class="lv">L4</span>
+            <span class="what"><b>Repo posture</b> <span>— do your repository settings follow
+              safe defaults?</span></span>
+            <span class="tool">scorecard</span></div>
+          <div class="rung" data-lv="5" tabindex="0" role="button">
+            <span class="lv">L5</span>
+            <span class="what"><b>Risky code patterns</b> <span>— static analysis over your app
+              code itself.</span></span>
+            <span class="tool">semgrep</span></div>
+          <div class="rung" data-lv="6" tabindex="0" role="button">
+            <span class="lv">L6</span>
+            <span class="what"><b>Attest &amp; gate</b> <span>— a signed evidence statement of
+              what scanned this commit, and a gate that re-checks it.</span></span>
+            <span class="tool">native</span></div>
+          <div class="rung" data-lv="7" tabindex="0" role="button">
+            <span class="lv">L7</span>
+            <span class="what"><b>Trust-lock</b> <span>— did any trusted outside action quietly
+              get swapped? The pawl SHA-pinning can't provide.</span></span>
+            <span class="tool">tridelphi verify</span></div>
+        </div>
+        <p class="viz-cap bottom">start here — the Rule of Two runs at every level</p>
+      </div>
 
-    <div class="dial">
-      <div class="cmd" style="display:inline-flex"><span class="ps1">$</span>tridelphi . <b>--level 7</b> --offline</div>
-      <p class="note" style="margin:14px auto 0;text-align:center">Every scanner is installed
-        pinned and checksum-verified, and its output is treated as untrusted input — contained,
-        never executed. <span class="mono">--offline</span> skips the rungs that need the network.
-        Full credit to the wrapped tools: run <span class="mono">tridelphi --credits</span>.</p>
+      <div class="dial-panel">
+        <span class="eyebrow">Try the dial</span>
+        <input type="range" id="lvl" min="0" max="7" step="1" value="3"
+          aria-label="Hardening ladder level, 0 to 7">
+        <div class="dial-ticks" aria-hidden="true">
+          <span>0</span><span>1</span><span>2</span><span>3</span>
+          <span>4</span><span>5</span><span>6</span><span>7</span>
+        </div>
+        <div class="cmd"><span class="ps1">$</span>tridelphi . --level <b id="lvl-n">3</b></div>
+        <p id="lvl-desc" aria-live="polite"></p>
+        <p class="note dial-note">Every scanner is installed pinned and checksum-verified, and
+          its output is treated as untrusted input — contained, never executed.
+          <span class="mono">--offline</span> skips the rungs that need the network. Full credit
+          to the wrapped tools: <span class="mono">tridelphi --credits</span>.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -860,6 +950,45 @@ footer a{color:var(--mute)}
       if (e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); }
     });
   });
+  paint();
+})();
+
+/* The ladder dial: pick a --level, watch the rungs light up to it. */
+(function(){
+  "use strict";
+  var dial = document.getElementById("lvl");
+  var readout = document.getElementById("lvl-n");
+  var desc = document.getElementById("lvl-desc");
+  var rungs = [].slice.call(document.querySelectorAll("#lviz .rung"));
+  if (!dial || !readout || !desc || !rungs.length) return;
+  var adds = [
+    "the Rule of Two",
+    "a gitleaks secret sweep",
+    "an osv-scanner dependency check",
+    "a zizmor workflow lint",
+    "a scorecard posture check",
+    "a semgrep pass over your code",
+    "a signed attest + gate",
+    "the trust-lock check"
+  ];
+  function paint(){
+    var v = +dial.value;
+    readout.textContent = String(v);
+    rungs.forEach(function(r){
+      r.classList.toggle("off", +r.getAttribute("data-lv") > v);
+    });
+    desc.textContent = v === 0
+      ? "Runs the always-on base alone: " + adds[0] + "."
+      : "One command, " + (v + 1) + " rungs: " + adds.slice(0, v + 1).join(" · ") + ".";
+  }
+  rungs.forEach(function(r){
+    function pick(){ dial.value = r.getAttribute("data-lv"); paint(); }
+    r.addEventListener("click", pick);
+    r.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === " "){ e.preventDefault(); pick(); }
+    });
+  });
+  dial.addEventListener("input", paint);
   paint();
 })();
 </script>
