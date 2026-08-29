@@ -31,12 +31,12 @@ from .html_report import render_html
 from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
 from .model import RULES
 from .orchestrate import merge_runs
-from .render import SEVERITY_ORDER, render_text
+from .render import render_text
 from .sarif import dumps, to_sarif
+from .severity import SARIF_LEVEL_TO_SEVERITY, should_fail
+from .severity import SEVERITIES as _SEVERITIES
 
 __all__ = ["build_parser", "main"]
-
-_SEVERITIES = ("critical", "warning", "note")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -487,7 +487,7 @@ def main(argv: list[str] | None = None) -> int:
             external_sarifs.append(verify_doc)
             trust_counts = {s: 0 for s in _SEVERITIES}
             for result_obj in verify_doc["runs"][0]["results"]:
-                sev = "critical" if result_obj.get("level") == "error" else "note"
+                sev = SARIF_LEVEL_TO_SEVERITY.get(result_obj.get("level"), "note")
                 external_counts[sev] += 1
                 trust_counts[sev] += 1
             external_status["trust"] = ChecklistStatus(
@@ -590,18 +590,14 @@ def main(argv: list[str] | None = None) -> int:
             newline="\n",
         )
 
-    if args.fail_on == "none":
-        return 0
-    threshold = SEVERITY_ORDER[args.fail_on]
-    if any(SEVERITY_ORDER[f.severity] <= threshold for f in gating):
+    if should_fail((f.severity for f in gating), args.fail_on):
         return 1
     # The gate covers the wrapped rungs too: a gitleaks secret or a zizmor error
     # fails the build under the same --fail-on threshold as a native finding.
     # External findings are not baselined — they come from tools whose output
     # has no stable fingerprint, and a committed secret should never be waived.
-    if any(
-        count and SEVERITY_ORDER[severity] <= threshold
-        for severity, count in external_counts.items()
+    if should_fail(
+        (severity for severity, count in external_counts.items() if count), args.fail_on
     ):
         return 1
     return 0

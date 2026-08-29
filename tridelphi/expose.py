@@ -31,6 +31,9 @@ from typing import Any
 from .ladder import SEMGREP_EXPOSURE, ExternalRun, run_tool
 from .orchestrate import merge_runs
 from .sarif import is_suppressed
+from .severity import SARIF_LEVEL_TO_SEVERITY as _LEVEL_TO_SEV
+from .severity import SEVERITY_ORDER
+from .severity import SEVERITY_TO_SARIF_LEVEL as _SEV_TO_LEVEL
 
 __all__ = ["ExposeFinding", "ExposureResult", "analyze_exposure"]
 
@@ -843,9 +846,6 @@ def _findings_from_semgrep(document: dict[str, Any]) -> list[ExposeFinding]:
     return out
 
 
-_LEVEL_TO_SEV = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
-
-
 def _first_location(result: dict[str, Any]) -> str:
     locs = result.get("locations")
     if isinstance(locs, list) and locs and isinstance(locs[0], dict):
@@ -868,7 +868,6 @@ def _clean(text: str) -> str:
 # SARIF assembly for the native findings
 # ---------------------------------------------------------------------------
 
-_SEV_TO_LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
 _HELP_URI = "https://girnarholdings.github.io/TriDelPhi/"
 
 
@@ -953,7 +952,7 @@ def analyze_exposure(root: str | Path, *, tool_version: str = "0", run_semgrep: 
             semgrep_note = ext.diagnostic.message
 
     findings.sort(key=lambda f: (CATEGORY_ORDER.get(f.category, 9),
-                                 {"critical": 0, "warning": 1, "note": 2}.get(f.severity, 3),
+                                 SEVERITY_ORDER.get(f.severity, 3),
                                  f.where, f.rule))
     return ExposureResult(
         findings=findings, sarif=document, semgrep_ran=semgrep_ran, semgrep_note=semgrep_note,

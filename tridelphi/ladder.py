@@ -56,6 +56,7 @@ from urllib.parse import unquote, urlparse
 from .model import Diagnostic
 from .orchestrate import MAX_OUTPUT_BYTES, run_zizmor, sarif_shape_error
 from .sarif import is_suppressed
+from .severity import SARIF_LEVEL_TO_SEVERITY as _SARIF_LEVEL_TO_SEVERITY
 
 __all__ = [
     "LADDER",
@@ -66,8 +67,6 @@ __all__ = [
     "run_tool",
     "summarize_run",
 ]
-
-_SARIF_LEVEL_TO_SEVERITY = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
 
 
 @dataclass(frozen=True)

@@ -21,12 +21,11 @@ from importlib import resources
 from typing import Any
 
 from .model import RULES, Diagnostic, Finding, rule_by_id
+from .severity import SEVERITY_TO_SARIF_LEVEL as _LEVEL
 
 __all__ = ["dumps", "fingerprint", "is_suppressed", "load_schema", "to_sarif", "validate_sarif"]
 
 SCHEMA_URI = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
-
-_LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
 
 
 def is_suppressed(result: dict[str, Any]) -> bool:

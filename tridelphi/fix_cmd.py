@@ -21,6 +21,7 @@ from typing import TextIO
 
 from .api import AnalysisError, analyze
 from .model import Finding
+from .severity import SEVERITY_ORDER as _SEVERITY_RANK
 
 __all__ = ["run_fix"]
 
@@ -37,7 +38,6 @@ _COST: dict[str, tuple[int, str]] = {
     "narrow-runner": (2, "restructure"),
 }
 _DEFAULT_COST = (1, "small change")
-_SEVERITY_RANK = {"critical": 0, "warning": 1, "note": 2}
 
 
 def _cost(finding: Finding) -> tuple[int, str]:

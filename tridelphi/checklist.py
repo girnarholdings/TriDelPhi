@@ -18,8 +18,8 @@ import re
 from typing import TextIO
 
 from .model import AnalysisResult
-from .render import SEVERITY_ORDER
 from .sarif import is_suppressed
+from .severity import SARIF_LEVEL_TO_SEVERITY, SEVERITY_ORDER
 
 __all__ = [
     "ExternalStatus",
@@ -109,7 +109,7 @@ class ExternalStatus:
         self.items = items or []
 
 
-_SARIF_LEVEL = {"error": "critical", "warning": "warning", "note": "note", "none": "note"}
+_SARIF_LEVEL = SARIF_LEVEL_TO_SEVERITY
 _UNPRINTABLE = re.compile("[^\\x20-\\x7e\\u00a0-\\uffff]")
 _ITEM_WIDTH = 96
 

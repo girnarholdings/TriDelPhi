@@ -13,10 +13,9 @@ import os
 from typing import TextIO
 
 from .model import AnalysisResult, Finding
+from .severity import SEVERITY_ORDER
 
 __all__ = ["SEVERITY_ORDER", "render_text"]
-
-SEVERITY_ORDER = {"critical": 0, "warning": 1, "note": 2}
 
 _RULE = "─" * 71
 

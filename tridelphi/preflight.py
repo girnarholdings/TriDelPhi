@@ -50,6 +50,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .severity import SEVERITY_ORDER as _SEVERITY_RANK
+from .severity import SEVERITY_TO_SARIF_LEVEL as _SEV_TO_LEVEL
+
 __all__ = [
     "CATEGORIES",
     "PreflightFinding",
@@ -81,8 +84,6 @@ CATEGORIES: tuple[tuple[str, str, str], ...] = (
      "URLs, shorteners, and throwaway file hosts used as code sources."),
 )
 CATEGORY_ORDER = {letter: i for i, (letter, _q, _g) in enumerate(CATEGORIES)}
-
-_SEVERITY_RANK = {"critical": 0, "warning": 1, "note": 2}
 
 
 @dataclass(frozen=True, slots=True)
@@ -838,7 +839,6 @@ def extract_archive(archive: Path, dest: Path) -> Path:
 # SARIF + entry point
 # ---------------------------------------------------------------------------
 
-_SEV_TO_LEVEL = {"critical": "error", "warning": "warning", "note": "note"}
 _HELP_URI = "https://girnarholdings.github.io/TriDelPhi/"
 
 

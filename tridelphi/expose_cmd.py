@@ -14,8 +14,8 @@ from typing import TextIO
 
 from .checklist import _compact_wheres, _md_escape
 from .expose import CATEGORIES, ExposeFinding, ExposureResult, analyze_exposure
-from .render import SEVERITY_ORDER
 from .sarif import dumps
+from .severity import should_fail
 
 __all__ = ["run_expose"]
 
@@ -280,9 +280,4 @@ def run_expose(
         Path(checklist_md_file).write_text(_render_markdown(result, repo),
                                            encoding="utf-8", newline="\n")
 
-    if fail_on == "none":
-        return 0
-    threshold = SEVERITY_ORDER.get(fail_on, 0)
-    if any(SEVERITY_ORDER[f.severity] <= threshold for f in result.findings):
-        return 1
-    return 0
+    return 1 if should_fail((f.severity for f in result.findings), fail_on) else 0
