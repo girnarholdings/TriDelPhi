@@ -51,13 +51,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "path", nargs="?", default=".",
         help=(
-            "repository root, or a command: `init` adds the scan workflow, `fix` "
-            "prints a remediation plan, `guard` fixes interactively, `expose` audits "
-            "shipped-asset/DB/data exposure, `privatize` obfuscates built JS (default: .)"
+            "repository root, or a command: `init` adds the scan workflow, `scan` "
+            "audits someone else's code BEFORE you install it (a dir, an archive, "
+            "npm:<pkg> or pypi:<pkg>), `fix` prints a remediation plan, `guard` "
+            "fixes interactively, `expose` audits shipped-asset/DB/data exposure, "
+            "`privatize` obfuscates built JS (default: .)"
         ),
     )
     parser.add_argument("command", nargs="?", default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--force", action="store_true", help="with init: overwrite an existing workflow")
+    parser.add_argument("--force", action="store_true", help="with init: overwrite an existing workflow or hook")
+    parser.add_argument(
+        "--local", action="store_true",
+        help="with init: no CI at all — install a git pre-push hook that runs the "
+             "same scans on this machine before every push",
+    )
     parser.add_argument(
         "--wizard", action="store_true",
         help="with init: click-through setup — choose level, expose, threshold, and write "
@@ -248,6 +255,29 @@ def main(argv: list[str] | None = None) -> int:
             wizard=args.wizard,
             app=args.app,
             from_source=args.from_source,
+            local=args.local,
+        )
+    if args.path == "scan":
+        # The pre-install trust audit: read someone else's code — install
+        # hooks, droppers, poisoned agent files, dishonest links — before the
+        # installer ever runs. A sibling of the repo scan, not a ladder rung.
+        from .scan_cmd import run_scan
+
+        if not args.command:
+            print(
+                "tridelphi: scan needs a target: a directory, an archive "
+                "(.tgz/.zip/.whl), npm:<package>, or pypi:<package>",
+                file=sys.stderr,
+            )
+            return 2
+        fmt = "markdown" if args.markdown else args.format
+        return run_scan(
+            args.command,
+            fmt=fmt,
+            sarif_file=args.sarif_file,
+            checklist_md_file=args.checklist_md_file,
+            fail_on=args.fail_on,
+            tool_version=__version__,
         )
     if args.path == "expose":
         # The exposure audit: shipped source maps + client secrets, DB config,

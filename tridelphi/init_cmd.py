@@ -20,6 +20,10 @@ people and guessing wrong wastes the one command they were willing to run:
     The long transparent workflow that installs the CLI and runs every step in
     the open. Auditable line by line; the right choice if you want to read
     exactly what runs, and the wrong first impression for everyone else.
+``tridelphi init --local``
+    No CI at all. Installs a git pre-push hook that runs the same scans on
+    this machine — for repos that never see GitHub Actions, private mirrors,
+    or people who simply want the guard where they work.
 
 Idempotent: it refuses to clobber an existing file unless `--force` is given,
 and it prints exactly what to do next.
@@ -35,6 +39,7 @@ from .release import ACTION_REF, install_command
 __all__ = [
     "APP_WORKFLOW",
     "FIX_WORKFLOW",
+    "LOCAL_HOOK",
     "WORKFLOW",
     "render_action_workflow",
     "run_init",
@@ -535,6 +540,38 @@ Next:
 Nothing else to configure. The scan reads only files on disk.
 """
 
+# The no-CI path. Everything TriDelPhi checks in a workflow it can check at a
+# git hook instead: same commands, same exit codes, zero GitHub involvement.
+# pre-push (not pre-commit) on purpose — a scan on every commit teaches people
+# to bypass hooks; a scan before code leaves the machine is the actual boundary.
+LOCAL_HOOK = """\
+#!/bin/sh
+# Added by `tridelphi init --local`. Runs TriDelPhi before every push — the
+# same checks the CI workflow would run, entirely on this machine.
+# Remove this file (or push with --no-verify) to bypass; edit it to tune.
+set -e
+
+echo "tridelphi: pre-push scan (local, offline)"
+tridelphi . --fail-on critical
+tridelphi expose . --fail-on critical
+"""
+
+_LOCAL_NEXT_STEPS = """\
+Done. TriDelPhi now guards this repo with no CI at all: every `git push` first
+runs the Rule-of-Two scan and the exposure audit on this machine, and a
+critical blocks the push.
+
+Notes:
+  1. Everything runs locally and offline. Nothing is uploaded anywhere.
+  2. Add rungs by editing .git/hooks/pre-push (e.g. `tridelphi . --level 3`).
+  3. Bypass once with `git push --no-verify`; remove the hook to uninstall.
+  4. Hooks don't travel with the repo — each collaborator runs
+     `tridelphi init --local` once. (That is a git property, not a choice:
+     a repo that could install hooks on clone would itself be an attack.)
+  5. Scanning something BEFORE you install it needs no setup at all:
+       tridelphi scan <dir | archive | npm:pkg | pypi:pkg>
+"""
+
 _APP_NEXT_STEPS = """\
 Done. Every pull request now builds your app and reports what the build ships —
 inlined keys, source maps, open database rules, committed credentials — as a
@@ -654,7 +691,7 @@ def _ask_wizard(stream, out) -> dict:
 
 def run_init(
     target: str = ".", *, force: bool = False, wizard: bool = False,
-    app: bool = False, from_source: bool = False,
+    app: bool = False, from_source: bool = False, local: bool = False,
     input_stream=None, out=None, err=None,
 ) -> int:
     out = out or sys.stdout
@@ -663,6 +700,28 @@ def run_init(
     if not root.is_dir():
         print(f"tridelphi: {root} is not a directory", file=err)
         return 2
+
+    if local:
+        # The no-CI path writes into .git/hooks, which only exists in a real
+        # repository — and must never clobber a hook someone already wrote.
+        hooks_dir = root / ".git" / "hooks"
+        if not (root / ".git").is_dir():
+            print(f"tridelphi: {root} is not a git repository (no .git); "
+                  "--local installs a git hook, so it needs one", file=err)
+            return 2
+        hook = hooks_dir / "pre-push"
+        if hook.exists() and not force:
+            print(f"tridelphi: {hook} already exists. Re-run with --force to "
+                  "overwrite, or add the two tridelphi lines to it by hand.",
+                  file=err)
+            return 1
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook.write_text(LOCAL_HOOK, encoding="utf-8", newline="\n")
+        hook.chmod(hook.stat().st_mode | 0o755)
+        print(f"wrote {hook}", file=out)
+        print(file=out)
+        print(_LOCAL_NEXT_STEPS, file=out)
+        return 0
 
     workflow_dir = root / ".github" / "workflows"
     next_steps = _NEXT_STEPS
