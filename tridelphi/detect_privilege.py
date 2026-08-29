@@ -71,18 +71,12 @@ def attacker_reachable_privilege(context: ExecutionContext, tables: Tables) -> b
     return bool(set(context.triggers) & privileged)
 
 
-def _fork_attacker_can_reach_secrets(context: ExecutionContext, tables: Tables) -> bool:
-    return attacker_reachable_privilege(context, tables)
-
-
 def _scan_secrets(context: ExecutionContext, tables: Tables) -> Iterator[CapabilityHit]:
     seen: set[str] = set()
     sources = [context.body]
     if context.workflow_env is not None:
         sources.append(context.workflow_env)
-    attacker_reachable = (
-        _fork_attacker_can_reach_secrets(context, tables) or not context.fork_reachable
-    )
+    attacker_reachable = attacker_reachable_privilege(context, tables)
     for source in sources:
         for scalar in _walk_scalars(source):
             for name in _secret_names(scalar.text):
@@ -165,18 +159,19 @@ def _scan_runner(context: ExecutionContext, tables: Tables) -> Iterator[Capabili
         return
     if any(label in hosted for label in labels):
         return
-    if "self-hosted" in labels or labels:
-        node = context.body.get("runs-on")
-        yield CapabilityHit(
-            capability="P",
-            kind="self-hosted-runner",
-            reason=(
-                f"the job runs on a self-hosted runner (`{', '.join(labels)}`); the "
-                "runner itself is the privileged asset, and compromise persists "
-                "across jobs"
-            ),
-            position=node.value_position() if node is not None else context.position,
-        )
+    # Any concrete label that is not a known hosted-runner label is treated as
+    # self-hosted — explicit `self-hosted` and bare custom labels alike.
+    node = context.body.get("runs-on")
+    yield CapabilityHit(
+        capability="P",
+        kind="self-hosted-runner",
+        reason=(
+            f"the job runs on a self-hosted runner (`{', '.join(labels)}`); the "
+            "runner itself is the privileged asset, and compromise persists "
+            "across jobs"
+        ),
+        position=node.value_position() if node is not None else context.position,
+    )
 
 
 def _scan_mcp(context: ExecutionContext, tables: Tables) -> Iterator[CapabilityHit]:
