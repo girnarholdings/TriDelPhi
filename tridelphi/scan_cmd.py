@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import TextIO
@@ -98,18 +99,53 @@ def _fetch_npm(spec: str, tmp: Path, err: TextIO) -> Path | None:
     return tarballs[-1] if tarballs else None
 
 
+# The only hosts this tool will fetch from. A scan target is untrusted by
+# definition, and the artifact URL in a PyPI response is attacker-influenceable
+# (a compromised index, a MITM, a typosquat's own metadata) — so the download
+# URL is validated against this set, not trusted because PyPI returned it.
+_PYPI_METADATA_HOST = "pypi.org"
+_PYPI_ARTIFACT_HOSTS = frozenset({"files.pythonhosted.org", "pypi.org"})
+
+
+def _open_https(url: str, *, timeout: int, allow_hosts: frozenset[str] | set[str]):
+    """Open ``url`` only if it is HTTPS on an allowed host.
+
+    ``urllib`` honours whatever scheme it is handed — `file://`, `ftp://`,
+    `gopher://` — so a dynamic URL that reaches `urlopen` unchecked can read a
+    local file or hit an internal service. This gate is the difference between
+    "download from PyPI" and "fetch whatever a hostile response names": the
+    scheme must be https and the host must be one we chose, or it does not open.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname not in allow_hosts:
+        raise ValueError(f"refusing a non-https or off-allowlist URL: {url[:80]}")
+    # Audited (semgrep dynamic-urllib-use): the two lines above ARE the mitigation
+    # this rule asks for — the scheme is pinned to https and the host to a caller-
+    # supplied allowlist, so a file:// or off-host URL never reaches urlopen. This
+    # is the sole urlopen in the tool, funnelled here so the check can't be bypassed.
+    # nosemgrep
+    return urllib.request.urlopen(url, timeout=timeout)
+
+
 def _fetch_pypi(spec: str, tmp: Path, err: TextIO) -> Path | None:
     """Download a PyPI artifact with a plain GET against the JSON API.
 
     Never `pip download`: resolving an sdist's metadata can execute its
-    setup.py, which is precisely the code we refuse to run before reading."""
+    setup.py, which is precisely the code we refuse to run before reading.
+
+    Every fetch is scheme- and host-validated (`_open_https`): the metadata URL
+    is built with the package name percent-encoded so it cannot break out of the
+    path, and the artifact URL PyPI hands back is checked against the
+    pythonhosted allowlist rather than trusted on sight."""
     name, _sep, version = spec.partition("==")
-    url = (f"https://pypi.org/pypi/{name}/{version}/json" if version
-           else f"https://pypi.org/pypi/{name}/json")
+    quoted_name = urllib.parse.quote(name, safe="")
+    quoted_version = urllib.parse.quote(version, safe="")
+    url = (f"https://pypi.org/pypi/{quoted_name}/{quoted_version}/json" if version
+           else f"https://pypi.org/pypi/{quoted_name}/json")
     print(f"tridelphi: fetching {spec} metadata from PyPI (network; download "
           "only, nothing executed)…", file=err)
     try:
-        with urllib.request.urlopen(url, timeout=60) as resp:
+        with _open_https(url, timeout=60, allow_hosts={_PYPI_METADATA_HOST}) as resp:
             meta = json.load(resp)
     except Exception as exc:
         print(f"tridelphi: PyPI lookup failed for {name}: {exc}", file=err)
@@ -120,12 +156,21 @@ def _fetch_pypi(spec: str, tmp: Path, err: TextIO) -> Path | None:
     if not chosen or not chosen.get("url"):
         print(f"tridelphi: PyPI lists no downloadable artifact for {spec}", file=err)
         return None
-    filename = chosen.get("filename") or "artifact"
+    # PyPI serves artifacts from files.pythonhosted.org; a URL pointing anywhere
+    # else — least of all a file:// or an internal host — is a red flag, not a
+    # download target.
+    artifact_url = str(chosen["url"])
+    filename = Path(str(chosen.get("filename") or "artifact")).name  # never a path
     target = tmp / filename
     try:
-        with urllib.request.urlopen(chosen["url"], timeout=180) as resp, \
+        with _open_https(artifact_url, timeout=180, allow_hosts=_PYPI_ARTIFACT_HOSTS) as resp, \
                 target.open("wb") as fh:
             shutil.copyfileobj(resp, fh, length=1 << 16)
+    except ValueError as exc:
+        print(f"tridelphi: {exc}", file=err)
+        print(f"tridelphi: PyPI returned an unexpected download host for {spec}; "
+              "refusing to fetch it.", file=err)
+        return None
     except Exception as exc:
         print(f"tridelphi: download failed: {exc}", file=err)
         return None
