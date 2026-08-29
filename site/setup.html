@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TriDelPhi Setup Studio — click, choose, one-click install</title>
 <meta name="description" content="Pick what TriDelPhi runs on your repo — the L1–L7 hardening ladder, the shipped-product exposure audit, your fail threshold and PR comments — and get a ready-to-commit GitHub Actions workflow, with a one-click 'create this file on GitHub' link. Fully static, nothing uploaded.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="TriDelPhi">
+<meta property="og:title" content="TriDelPhi Setup Studio — click, choose, one-click install">
+<meta property="og:description" content="Pick a door and a ladder level; get a ready-to-commit GitHub Actions workflow. Fully static — your choices never leave the browser.">
+<meta property="og:url" content="https://girnarholdings.github.io/TriDelPhi/setup.html">
+<meta property="og:image" content="https://girnarholdings.github.io/TriDelPhi/og-card.png">
+<meta property="og:image:alt" content="TriDelPhi — the Agents Rule of Two checker">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="TriDelPhi Setup Studio">
+<meta name="twitter:description" content="Click, choose, and commit the TriDelPhi workflow that matches your worry.">
+<meta name="twitter:image" content="https://girnarholdings.github.io/TriDelPhi/og-card.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpolygon points='20,5 35,32 5,32' fill='none' stroke='%2334a374' stroke-width='3' stroke-linejoin='round'/%3E%3Ccircle cx='20' cy='5' r='4' fill='%23f2604f'/%3E%3Ccircle cx='35' cy='32' r='4' fill='%2341bcc8'/%3E%3Ccircle cx='5' cy='32' r='4' fill='%23eaa63a'/%3E%3C/svg%3E">
 <style>
 :root{
@@ -148,7 +159,10 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;paddin
     <!-- ─────────────────────────── CHOICES ─────────────────────────── -->
     <div class="panel">
       <h2>Choose what to run</h2>
-      <p class="sub">Two different questions. Pick the one you have.</p>
+      <p class="sub">Two different questions. Pick the one you have. (The third door —
+        <a href="./#scan">checking code <em>before</em> you install it</a> — is
+        <span style="font-family:var(--mono)">tridelphi scan</span>, a local command that needs no
+        workflow at all.)</p>
 
       <!-- The door. This used to open on "Hardening ladder level", which is a
            purchasing decision, not onboarding: someone who arrived asking "is my
