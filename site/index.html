@@ -124,6 +124,10 @@ section{padding:72px 0;border-top:1px solid var(--line)}
 .top nav a{color:var(--mute);text-decoration:none;white-space:nowrap;
   padding:8px 0}
 .top nav a:hover{color:var(--ink)}
+.navcta{display:inline-flex;align-items:center;background:var(--grn);color:var(--bg);
+  font-weight:600;font-size:14px;padding:9px 14px;border-radius:10px;flex:none;
+  text-decoration:none;white-space:nowrap;border:1px solid var(--grn)}
+.navcta:hover{filter:brightness(1.06)}
 .iconbtn{background:var(--bg2);border:1px solid var(--line);color:var(--mute);
   width:40px;height:40px;border-radius:10px;cursor:pointer;display:grid;flex:none;
   place-items:center;padding:0}
@@ -131,9 +135,10 @@ section{padding:72px 0;border-top:1px solid var(--line)}
 .iconbtn:hover{color:var(--ink);border-color:var(--line2)}
 .menubtn{display:none}
 .menubtn .i-close{display:none}
-@media(max-width:880px){
+@media(max-width:960px){
+  .top .wrap{gap:10px}
   .menubtn{display:grid}
-  .themebtn{margin-left:auto}
+  .navcta{margin-left:auto;font-size:13px;padding:8px 12px}
   body.nav-open .menubtn .i-burger{display:none}
   body.nav-open .menubtn .i-close{display:block}
   .top nav{position:absolute;left:0;right:0;top:100%;margin:0;padding:4px 0 10px;
@@ -394,14 +399,14 @@ footer a{color:var(--mute)}
     </a>
     <nav id="nav" aria-label="Sections">
       <a href="#doors">Three doors</a>
-      <a href="#scan">Before you install</a>
+      <a href="#scan">Scan first</a>
       <a href="#rule">The rule</a>
       <a href="#ladder">The ladder</a>
       <a href="#reports">Reports</a>
       <a href="#words">Glossary</a>
-      <a href="setup.html">Setup Studio</a>
       <a href="https://github.com/girnarholdings/TriDelPhi">GitHub</a>
     </nav>
+    <a class="navcta" href="setup.html">Setup Studio</a>
     <button class="iconbtn themebtn" id="theme" title="Switch light / dark" aria-label="Switch light or dark theme">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor"/></svg>
     </button>
