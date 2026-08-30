@@ -94,35 +94,79 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 .hero p{color:var(--mute);max-width:60ch;margin:12px 0 0}
 
 /* ============================================================= STUDIO
-   Left: a numbered flow of choices, open on the page. Right: the one
-   artifact this page exists to produce, in the one card. */
-.studio{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);
-  gap:40px;padding:30px 0 44px;align-items:start}
+   The flow is a ladder you climb: twin rails on the left, one rung per
+   step. A rung's marker flips from its number to a tick when you have
+   answered it, the next rung swings open, and a folded rung keeps showing
+   the answer it holds. The right column is the one artifact this page
+   exists to produce. */
+.studio{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);
+  gap:36px;padding:30px 0 44px;align-items:start}
 .studio>*{min-width:0}
-.step{margin:0 0 30px}
-.step:last-child{margin-bottom:0}
-.step h2{font-size:16px;font-family:var(--sans);font-weight:600;letter-spacing:0;
-  display:flex;align-items:center;gap:10px;margin-bottom:12px}
-.step h2 .n{flex:none;width:26px;height:26px;border-radius:50%;display:grid;
+
+.climb{position:relative;padding-left:46px}
+.climb::before,.climb::after{content:"";position:absolute;top:14px;bottom:24px;
+  width:2px;background:var(--line2);border-radius:2px}
+.climb::before{left:11px}
+.climb::after{left:19px}
+
+.rung{position:relative;margin:0 0 16px;border:1px solid var(--line);
+  border-radius:14px;background:var(--bg2);transition:border-color .2s;
+  padding:13px 16px}
+.rung:last-child{margin-bottom:0}
+.rung::before{content:"";position:absolute;left:-26px;top:24px;width:26px;height:2px;
+  background:var(--line2)}
+.rung.open{border-color:var(--grn)}
+.mark{position:absolute;left:-46px;top:8px;width:32px;height:32px;border-radius:50%;
+  border:2px solid var(--line2);background:var(--bg);z-index:1;display:grid;
   place-items:center;font-family:var(--mono);font-size:13px;font-weight:700;
-  color:var(--grn-ink);border:2px solid var(--line2);background:var(--bg2)}
-.hint{color:var(--faint);font-size:13px;margin:8px 0 0}
+  color:var(--mute);transition:border-color .2s,background .2s}
+.mark svg{display:none;width:15px;height:15px;color:var(--grn-ink)}
+.rung.open .mark{border-color:var(--grn);color:var(--grn-ink)}
+.rung.done .mark{border-color:var(--grn);background:var(--grn-soft)}
+.rung.done .mark .num{display:none}
+.rung.done .mark svg{display:block;animation:pop .3s ease}
+@keyframes pop{0%{transform:scale(.3)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
+
+.rh-wrap{margin:0;font:inherit}
+.rung-h{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+  background:none;border:0;color:var(--ink);font-family:var(--sans);
+  padding:0;cursor:pointer;position:relative}
+/* The whole top edge of the card is the tap target, not just the text. */
+.rung-h::before{content:"";position:absolute;left:-16px;right:-16px;top:-13px;bottom:0}
+.rung-h .rt{min-width:0}
+.rung-h .rt b{display:block;font-size:16px;line-height:1.35}
+.rung-h .sum{display:none;color:var(--grn-ink);font-size:13px;font-family:var(--mono);
+  margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rung:not(.open) .rung-h .sum{display:block}
+.rung-h .chev{margin-left:auto;flex:none;width:16px;height:16px;color:var(--faint);
+  transition:transform .25s}
+.rung.open .rung-h .chev{transform:rotate(180deg)}
+
+/* Fold mechanics: a 0fr→1fr grid track, so height animates without JS math. */
+.rung-b{display:grid;grid-template-rows:0fr;opacity:0;
+  transition:grid-template-rows .3s ease,opacity .25s ease}
+.rung.open .rung-b{grid-template-rows:1fr;opacity:1}
+.rung-bi{overflow:hidden;min-height:0}
+.rung-bi>:first-child{margin-top:12px}
+
+.hint{color:var(--faint);font-size:13px;margin:10px 0 0}
 
 /* Step 1: two real choices, each carrying its own explanation. */
-.paths{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.paths{display:grid;gap:10px;margin-top:2px}
 .paths>*{min-width:0}
-.opt{cursor:pointer}
+.opt{cursor:pointer;position:relative}
 .opt input{position:absolute;opacity:0;width:0;height:0}
-.opt .card{display:block;height:100%;border:1px solid var(--line2);border-radius:12px;
-  background:var(--bg2);padding:14px 16px;transition:border-color .15s,background .15s}
-.opt .card b{display:block;font-size:16px;margin-bottom:4px}
+.opt .card{display:block;border:1px solid var(--line2);border-radius:12px;
+  background:var(--bg);padding:12px 14px;transition:border-color .15s,background .15s}
+.opt .card b{display:block;font-size:16px;margin-bottom:2px}
 .opt .card span{color:var(--mute);font-size:13px;line-height:1.5;display:block}
 .opt:hover .card{border-color:var(--grn)}
 .opt input:checked + .card{border:2px solid var(--grn);background:var(--grn-soft);
-  padding:13px 15px}
+  padding:11px 13px}
 .opt input:focus-visible + .card{outline:2px solid var(--grn);outline-offset:2px}
 
-/* Step 2 (robots): the same dial the overview's ladder teaches. */
+/* The dial: same control the overview's ladder teaches. */
+.dial{margin-top:4px}
 .dial input[type="range"]{width:100%;accent-color:var(--grn);cursor:pointer;
   margin:2px 0 4px;height:28px}
 .dial-ticks{display:flex;justify-content:space-between;font-family:var(--mono);
@@ -131,18 +175,18 @@ h1,h2{font-family:var(--serif);font-weight:600;letter-spacing:-.012em;line-heigh
 .lvl-line b{font-family:var(--mono);color:var(--grn-ink);white-space:nowrap;
   margin-right:6px}
 
-.toggle{display:flex;align-items:flex-start;gap:12px;padding:13px 14px;
-  border:1px solid var(--line);border-radius:12px;background:var(--bg2);
+.toggle{display:flex;align-items:flex-start;gap:12px;padding:12px 13px;
+  border:1px solid var(--line);border-radius:12px;background:var(--bg);
   margin:10px 0;cursor:pointer}
 .toggle input{margin-top:3px;width:18px;height:18px;accent-color:var(--grn);flex:0 0 auto}
 .toggle .t b{display:block;font-size:16px}
 .toggle .t span{color:var(--faint);font-size:13px}
-label.q{display:block;font-weight:600;margin:16px 0 8px}
+label.q{display:block;font-weight:600;margin:14px 0 8px}
 select{width:100%;padding:11px 12px;border:1px solid var(--line2);border-radius:10px;
-  background:var(--bg2);color:var(--ink);font-family:var(--sans);font-size:16px}
+  background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px}
 input[type=text]{width:100%;padding:11px 12px;border:1px solid var(--line2);
-  border-radius:10px;background:var(--bg2);color:var(--ink);font-family:var(--mono);
-  font-size:16px;caret-color:var(--grn)}
+  border-radius:10px;background:var(--bg);color:var(--ink);font-family:var(--mono);
+  font-size:16px;caret-color:var(--grn);margin-top:2px}
 input[type=text]::placeholder{color:var(--faint);opacity:1}
 code{font-family:var(--mono);font-size:13px;background:var(--bg2);
   padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
@@ -155,7 +199,8 @@ code{font-family:var(--mono);font-size:13px;background:var(--bg2);
 .filebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
   font-family:var(--mono);font-size:13px;color:var(--mute);
   background:var(--bg3);border:1px solid var(--line);border-bottom:none;
-  border-radius:12px 12px 0 0;padding:9px 13px}
+  border-radius:12px 12px 0 0;padding:9px 13px;transition:background .45s}
+.filebar.flash{background:var(--grn-soft);transition:background .1s}
 .filebar #lvl-tag{color:var(--grn-ink);white-space:nowrap}
 pre{margin:0;background:#0c110e;border:1px solid var(--line);border-radius:0 0 12px 12px;
   padding:16px;overflow:auto;max-height:380px;font-family:var(--mono);font-size:13px;
@@ -195,11 +240,15 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
 
 /* ============================================================= RESPONSIVE */
 @media(max-width:900px){
-  .studio{grid-template-columns:1fr;gap:34px;padding-top:24px}
+  .studio{grid-template-columns:1fr;gap:30px;padding-top:24px}
   .out{position:static}
 }
 @media(max-width:560px){
-  .paths{grid-template-columns:1fr}
+  .climb{padding-left:40px}
+  .climb::before{left:8px}
+  .climb::after{left:16px}
+  .mark{left:-40px;width:30px;height:30px}
+  .rung::before{left:-22px;width:22px}
   .out{padding:16px}
   pre{max-height:300px}
 }
@@ -225,46 +274,70 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
 <div class="wrap">
   <section class="hero">
     <h1>Pick what runs.<br>Get a <span style="white-space:nowrap">ready-to-commit</span> workflow.</h1>
-    <p>Your choices update the file live and never leave this browser. Copy it,
-      or open GitHub's editor pre-filled and commit in one click.</p>
+    <p>Climb the three rungs; the file updates live and never leaves this
+      browser. Copy it, or open GitHub's editor pre-filled and commit in one
+      click.</p>
   </section>
 
   <div class="studio">
-    <!-- ─────────────────────────── THE CHOICES ─────────────────────────── -->
-    <div class="flow">
-      <section class="step">
-        <h2 id="path-label"><span class="n">1</span>What are you checking?</h2>
-        <div class="paths" role="radiogroup" aria-labelledby="path-label" id="paths">
-          <label class="opt"><input type="radio" name="path" value="app" checked>
-            <span class="card"><b>What I ship</b>
-              <span>Builds your app, then reports what the build actually ships:
-                inlined keys, source maps, open database rules. Advisory — it
-                never fails your build.</span></span></label>
-          <label class="opt"><input type="radio" name="path" value="ci">
-            <span class="card"><b>My GitHub robots</b>
-              <span>Finds the job a stranger's comment could turn into code
-                execution with your secrets, plus whatever you pick below.</span></span></label>
-        </div>
-        <p class="hint">The third door, <a href="./#scan">checking code
-          <em>before</em> you install it</a>, is <code>tridelphi scan</code>:
-          a local command that needs no workflow at all.</p>
+    <!-- ─────────────────────────── THE CLIMB ─────────────────────────── -->
+    <div class="climb" id="climb">
+      <section class="rung open" id="r-path">
+        <span class="mark" aria-hidden="true"><span class="num">1</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 10 18 20 6"/></svg></span>
+        <h2 class="rh-wrap"><button class="rung-h" type="button" aria-expanded="true" aria-controls="b-path">
+          <span class="rt"><b>What are you checking?</b>
+            <span class="sum" id="sum-path"></span></span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button></h2>
+        <div class="rung-b" id="b-path"><div class="rung-bi">
+          <div class="paths" role="radiogroup" aria-label="What are you checking?" id="paths">
+            <label class="opt"><input type="radio" name="path" value="app" checked>
+              <span class="card"><b>What I ship</b>
+                <span>Builds your app, then reports what the build actually
+                  ships: inlined keys, source maps, open database rules.
+                  Advisory — it never fails your build.</span></span></label>
+            <label class="opt"><input type="radio" name="path" value="ci">
+              <span class="card"><b>My GitHub robots</b>
+                <span>Finds the job a stranger's comment could turn into code
+                  execution with your secrets, plus whatever you pick on the
+                  next rungs.</span></span></label>
+          </div>
+          <p class="hint">The third door, <a href="./#scan">checking code
+            <em>before</em> you install it</a>, is <code>tridelphi scan</code>:
+            a local command that needs no workflow at all.</p>
+        </div></div>
       </section>
 
-      <section class="step" id="app-only">
-        <h2><span class="n">2</span>How do you build your app?</h2>
-        <input type="text" id="buildcmd" value="npm ci &amp;&amp; npm run build" autocomplete="off" spellcheck="false" aria-label="Build command">
-        <p class="hint">The audit reads files on disk, so your built output has
-          to exist before it looks. Without a build it still catches committed
-          keys and open database rules; it just can't see inside a bundle that
-          was never built.</p>
+      <section class="rung" id="r-build" hidden>
+        <span class="mark" aria-hidden="true"><span class="num">2</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 10 18 20 6"/></svg></span>
+        <h2 class="rh-wrap"><button class="rung-h" type="button" aria-expanded="false" aria-controls="b-build">
+          <span class="rt"><b>How do you build your app?</b>
+            <span class="sum" id="sum-build"></span></span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button></h2>
+        <div class="rung-b" id="b-build"><div class="rung-bi">
+          <input type="text" id="buildcmd" value="npm ci &amp;&amp; npm run build" autocomplete="off" spellcheck="false" aria-label="Build command">
+          <p class="hint">The audit reads files on disk, so your built output
+            has to exist before it looks. Without a build it still catches
+            committed keys and open database rules; it just can't see inside a
+            bundle that was never built.</p>
+        </div></div>
       </section>
 
-      <div id="ci-only">
-        <section class="step">
-          <h2 id="lvl-label"><span class="n">2</span>How hard should it look?</h2>
+      <section class="rung" id="r-lvl" hidden>
+        <span class="mark" aria-hidden="true"><span class="num">2</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 10 18 20 6"/></svg></span>
+        <h2 class="rh-wrap"><button class="rung-h" type="button" aria-expanded="false" aria-controls="b-lvl">
+          <span class="rt"><b>How hard should it look?</b>
+            <span class="sum" id="sum-lvl"></span></span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button></h2>
+        <div class="rung-b" id="b-lvl"><div class="rung-bi">
           <div class="dial">
             <input type="range" id="lvl" min="0" max="7" step="1" value="3"
-              aria-labelledby="lvl-label">
+              aria-label="Hardening ladder level, 0 to 7">
             <div class="dial-ticks" aria-hidden="true">
               <span>0</span><span>1</span><span>2</span><span>3</span>
               <span>4</span><span>5</span><span>6</span><span>7</span>
@@ -275,10 +348,18 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
           <p class="hint">Same dial as <a href="./#ladder">the ladder on the
             overview</a>. The Rule-of-Two scan always runs; each level adds one
             pinned, checksum-verified scanner.</p>
-        </section>
+        </div></div>
+      </section>
 
-        <section class="step">
-          <h2><span class="n">3</span>Tune the report</h2>
+      <section class="rung" id="r-tune" hidden>
+        <span class="mark" aria-hidden="true"><span class="num">3</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 10 18 20 6"/></svg></span>
+        <h2 class="rh-wrap"><button class="rung-h" type="button" aria-expanded="false" aria-controls="b-tune">
+          <span class="rt"><b>Tune the report</b>
+            <span class="sum" id="sum-tune"></span></span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button></h2>
+        <div class="rung-b" id="b-tune"><div class="rung-bi">
           <label class="toggle"><input type="checkbox" id="expose">
             <span class="t"><b>Also audit what I ship</b>
             <span>Adds the <code>expose</code> audit: leaked secrets, an open
@@ -293,8 +374,8 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
             <option value="warning">a warning or worse (strict)</option>
             <option value="none">never — report only</option>
           </select>
-        </section>
-      </div>
+        </div></div>
+      </section>
     </div>
 
     <!-- ─────────────────────────── THE FILE ─────────────────────────── -->
@@ -302,7 +383,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
       <h2>Your workflow</h2>
       <p class="sub">Commit this as <code id="fname-sub">.github/workflows/tridelphi-app.yml</code>.</p>
 
-      <div class="filebar"><span id="fname-bar">.github/workflows/tridelphi-app.yml</span><span id="lvl-tag"></span></div>
+      <div class="filebar" id="filebar"><span id="fname-bar">.github/workflows/tridelphi-app.yml</span><span id="lvl-tag"></span></div>
       <pre id="yaml" tabindex="0" aria-label="Generated workflow file"></pre>
 
       <div class="repo-row">
@@ -406,17 +487,20 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
   var elComment = document.getElementById("comment");
   var elFail = document.getElementById("failon");
   var elRepo = document.getElementById("repo");
-  var elCiOnly = document.getElementById("ci-only");
-  var elAppOnly = document.getElementById("app-only");
   var elBuild = document.getElementById("buildcmd");
   var elFnameBar = document.getElementById("fname-bar");
   var elFnameSub = document.getElementById("fname-sub");
+  var elFilebar = document.getElementById("filebar");
   var elOnelineWrap = document.getElementById("oneline-wrap");
   var elYaml = document.getElementById("yaml");
   var elOne = document.getElementById("oneline");
   var elCreate = document.getElementById("createBtn");
   var elCopy = document.getElementById("copyBtn");
   var elCopied = document.getElementById("copied");
+  var rPath = document.getElementById("r-path");
+  var rBuild = document.getElementById("r-build");
+  var rLvl = document.getElementById("r-lvl");
+  var rTune = document.getElementById("r-tune");
 
   function level() { return elLvl.value; }
 
@@ -529,10 +613,59 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
       : ".github/workflows/tridelphi.yml";
   }
 
+  /* ── The climb ──────────────────────────────────────────────────────
+     A rung opens with an animated 0fr→1fr fold; answering it flips its
+     marker to a tick and swings the next rung open. Folded rungs keep a
+     one-line summary of the answer they hold, and any header re-opens. */
+  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  function setOpen(rung, open) {
+    rung.classList.toggle("open", open);
+    rung.querySelector(".rung-h").setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function markDone(rung) { rung.classList.add("done"); }
+
+  function advance(from, to, closeFrom) {
+    markDone(from);
+    if (closeFrom) setOpen(from, false);
+    if (to && !to.classList.contains("open")) {
+      setOpen(to, true);
+      if (!reducedMotion.matches) {
+        setTimeout(function () {
+          to.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }, 320);
+      }
+    }
+  }
+
+  [rPath, rBuild, rLvl, rTune].forEach(function (rung) {
+    rung.querySelector(".rung-h").addEventListener("click", function () {
+      setOpen(rung, !rung.classList.contains("open"));
+    });
+  });
+
+  // Both events on purpose: "click" advances even when the tapped door was
+  // already selected (a click on a checked radio fires no "change"), and
+  // "change" covers keyboard arrow-key selection, which fires no "click".
+  ["change", "click"].forEach(function (ev) {
+    document.getElementById("paths").addEventListener(ev, function (e) {
+      if (ev === "click" && !e.target.closest(".opt")) return;
+      advance(rPath, path() === "app" ? rBuild : rLvl, true);
+    });
+  });
+  elLvl.addEventListener("change", function () { advance(rLvl, rTune, false); });
+  elBuild.addEventListener("input", function () { markDone(rBuild); });
+  [elExpose, elComment, elFail].forEach(function (el) {
+    el.addEventListener("change", function () { markDone(rTune); });
+  });
+
+  var lastYaml = "";
   function render() {
     var isApp = path() === "app";
-    elCiOnly.hidden = isApp;
-    elAppOnly.hidden = !isApp;
+    rBuild.hidden = !isApp;
+    rLvl.hidden = isApp;
+    rTune.hidden = isApp;
     elOnelineWrap.hidden = isApp;
 
     var yaml = buildYaml();
@@ -540,15 +673,34 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
     var name = fileName();
     elFnameBar.textContent = name;
     elFnameSub.textContent = name;
+
+    var lv = LEVELS[parseInt(level(), 10)];
+    document.getElementById("sum-path").textContent =
+      isApp ? "What I ship" : "My GitHub robots";
+    document.getElementById("sum-build").textContent =
+      elBuild.value.trim() || "npm ci && npm run build";
+    document.getElementById("sum-lvl").textContent = "L" + lv[0] + " · " + lv[1];
+    document.getElementById("sum-tune").textContent =
+      "fails on " + elFail.value +
+      " · comment " + (elComment.checked ? "on" : "off") +
+      (elExpose.checked ? " · +expose" : "");
+
     if (isApp) {
       elTag.textContent = "advisory";
     } else {
       elOne.textContent = buildOneline();
-      var lv = LEVELS[parseInt(level(), 10)];
       elLvlName.textContent = "L" + lv[0] + " · " + lv[1];
       elLvlHint.textContent = lv[2];
       elTag.textContent = "level " + lv[0] + (elExpose.checked ? " · +expose" : "");
     }
+
+    // A brief green wash on the filename bar whenever the file itself changed,
+    // so cause and effect stay connected while you climb.
+    if (yaml !== lastYaml && lastYaml !== "") {
+      elFilebar.classList.add("flash");
+      setTimeout(function () { elFilebar.classList.remove("flash"); }, 150);
+    }
+    lastYaml = yaml;
 
     var repo = elRepo.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, "");
     if (/^[\w.-]+\/[\w.-]+$/.test(repo)) {
