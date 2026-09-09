@@ -9,8 +9,15 @@ Cloudflare **scan compute** is reserved for the future paid tier.
 **Current deployment target:** `https://scan.tridelphi.com`, with callback
 `https://scan.tridelphi.com/auth/callback`. The existing homepage at
 `https://tridelphi.com` remains on its current host (currently reported as GitHub
-Pages). App identity is configured; deployment and GitHub publication are blocked
-on credentials and DNS readiness. Follow [the deployment handoff](../docs/DEPLOYMENT_HANDOFF.md).
+Pages). App identity is configured and GitHub connector write access works.
+Deployment is on hold pending Cloudflare account/zone and billing verification,
+the App secret, and live acceptance checks.
+Follow [the deployment handoff](../docs/DEPLOYMENT_HANDOFF.md).
+
+**Operator rule:** never spend money on Cloudflare or any other service without
+the owner's explicit approval. Verify no-charge operation before deployment or
+test-machine creation; do not infer it from an included quota or budget alert.
+Never upgrade a plan or enable paid fallback automatically.
 
 ## What works in this implementation
 
@@ -92,10 +99,11 @@ for `https://scan.tridelphi.com`. `workers_dev` and preview URLs are
 disabled to avoid alternate authentication origins. The portal is not a Sites
 deployment and must not be put behind ChatGPT-only authentication.
 
-`SCANNER_REF` points to local release candidate
-`dba0783dc7873bb122b10b3731a080e138f3e576`, containing
-`.devcontainer/scan/devcontainer.json` and `tridelphi/audit.py`. **Publish that
-commit before launch**, and use a reviewed merged/release commit for production.
+`SCANNER_REF` points to published candidate
+`78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8`, containing
+`.devcontainer/scan/devcontainer.json` and `tridelphi/audit.py`.
+Review [PR #70](https://github.com/girnarholdings/TriDelPhi/pull/70)
+and use a reviewed merged/release commit for production.
 An unpublished local commit or moving `main` is not a released scanner. The
 devcontainer installs TriDelPhi from this trusted checkout, never target code.
 The base image is version-tagged, not digest-pinned: pin and test a vetted image
@@ -137,7 +145,9 @@ passes. Do not send secrets to cPanel or enable request-body logging there.
   Cloudflare/GitHub can still retain operational metadata. Do not advertise this
   as provider-wide “zero data retention.”
 - The rate limiter is an edge abuse control, **not a globally exact spending cap**.
-  Add account-level budgets/alerts and operational abuse controls before launch.
+  Verify a non-billable plan with enforced free limits, or obtain explicit owner
+  approval for costs before launch. Budgets/alerts and abuse controls do not
+  replace that approval or guarantee that charges stop.
 - Reviewed/redacted training donations remain a separate future opt-in feature.
   No examples are silently collected from scans or sign-ins.
 

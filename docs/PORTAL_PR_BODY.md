@@ -11,13 +11,13 @@
 
 No repository source, scan results or training examples are collected by this portal. Short-lived authentication credentials remain server-side; Codespaces storage is user-owned and persists until deletion/provider cleanup. This is not a provider-wide zero-retention claim.
 
-**Paid scanning is reserved but disabled**, including for pilot entitlements. No payment processor, isolated paid backend or embedded Codespace scanner UI is shipped here. Production launch remains gated on provider authentication, DNS readiness, the App secret and real GitHub/Codespaces acceptance tests.
+**Paid scanning is reserved but disabled**, including for pilot entitlements. No payment processor, isolated paid backend or embedded Codespace scanner UI is shipped here. Production launch remains gated on verified no-charge operation (or explicit owner cost approval), DNS/account readiness, the App secret and real GitHub/Codespaces acceptance tests. The owner's mandatory rule is to ask before spending money on any service; no Cloudflare resources or paid test machines were created in this publication pass.
 
 ## Validation
 
 - 862 Python tests passed; 13 optional-tool skips on local macOS/Python 3.12.
 - 32 portal authorization/billing/security tests passed.
-- 37 existing bot checks passed in the preceding validation pass; bot implementation unchanged.
+- 37 existing bot checks passed again in this publication pass.
 - Ruff and whitespace checks passed.
 - Wrangler 4.120.0 deployment dry-run passed; it is not a live deployment.
 - Cross-platform CI is configured; Windows/Linux execution remains to be confirmed by GitHub Actions.

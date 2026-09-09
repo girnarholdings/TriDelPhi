@@ -25,9 +25,9 @@ GITHUB_APP_ID = "4889186"
 GITHUB_APP_SLUG = "tridelphi-security"
 GITHUB_CLIENT_ID = "Iv23li3y8yo2DOaLlZ7K"
 SCANNER_REPO = "girnarholdings/TriDelPhi"
-# Reviewed local release candidate containing the scan devcontainer and audit.
-# Publish this commit before enabling the portal; see docs/DEPLOYMENT_HANDOFF.md.
-SCANNER_REF = "dba0783dc7873bb122b10b3731a080e138f3e576"
+# Published candidate containing the tested scan devcontainer and audit.
+# Review/merge and complete live acceptance before launch; see the handoff.
+SCANNER_REF = "78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8"
 # JSON mapping immutable GitHub user IDs to UTC expiry timestamps (milliseconds).
 # Operator-managed pilot entitlements only; NOT a payment processor.
 PAID_ENTITLEMENTS = "{}"

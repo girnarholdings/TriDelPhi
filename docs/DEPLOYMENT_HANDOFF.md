@@ -1,8 +1,21 @@
 # TriDelPhi deployment and GitHub publication handoff
 
 Updated: 2026-09-09. This is the current operational handoff, not a claim of a
-live service. **Deployment, push and PR creation did not complete.** No changes
-were made to the live homepage, DNS, nameservers, GitHub App settings or billing.
+live service. **Cloudflare deployment is on hold.** GitHub connector write access
+now works and [PR #70](https://github.com/girnarholdings/TriDelPhi/pull/70) is open.
+No agent changes were made to
+the live homepage, DNS, nameservers, GitHub App settings or billing.
+
+## Owner spending rule — mandatory for all future work
+
+**Never spend money on Cloudflare or anywhere else without asking the owner
+first and receiving explicit approval.** An instruction to deploy is not an
+approval to incur charges, enable a paid plan, start billable compute, purchase
+credits or increase a spending limit. Unknown billing status means stop before
+resource creation. Free-tier allowances and budget alerts are not proof of a
+hard spending cap on a paid account. Do not create even a test Codespace until
+its billing consequences are verified or separately approved. Keep paid scanning
+disabled and never introduce an automatic paid fallback.
 
 ## Decisions and configured identity
 
@@ -10,7 +23,8 @@ were made to the live homepage, DNS, nameservers, GitHub App settings or billing
 |---|---|
 | Local checkout | `/Users/kathanthakkar/VibeCode/TriDelPhi` |
 | Repository | `https://github.com/girnarholdings/TriDelPhi` |
-| Branch to publish | `codex/fortify-beginner-followups` |
+| Published branch | `codex/fortify-beginner-followups` |
+| Pull request | `https://github.com/girnarholdings/TriDelPhi/pull/70` |
 | PR base | `main` |
 | Homepage (leave intact) | `https://tridelphi.com` |
 | Portal (owner-approved) | `https://scan.tridelphi.com` |
@@ -21,7 +35,7 @@ were made to the live homepage, DNS, nameservers, GitHub App settings or billing
 | Client ID | `Iv23li3y8yo2DOaLlZ7K` |
 | Worker name | `tridelphi-scan-portal` |
 | Configuration | `portal/wrangler.toml` |
-| Pinned scanner candidate | `dba0783dc7873bb122b10b3731a080e138f3e576` |
+| Pinned scanner candidate | `78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8` |
 
 Public identifiers are committed. **No real client secret, private key, GitHub
 token or Cloudflare token is in this document or the configuration.**
@@ -30,31 +44,37 @@ The original idea of placing the portal at `/scan/` on the homepage was replaced
 with the owner-approved separate subdomain. Keep that separation: host-only
 portal session cookies must not be delivered to the homepage's hosting provider.
 
-## Exact blockers observed
+## Current access and remaining blockers
 
-1. `wrangler whoami` returned **“You are not authenticated. Please run wrangler
-   login.”** No `CLOUDFLARE_API_TOKEN` or account ID was available in the command
-   environment. A real noninteractive `wrangler deploy` attempt stopped with the
-   missing-API-token error. No deployment ID or live Worker URL was returned.
-   Do not use Wrangler's suggested `--temporary` account workaround.
+1. Cloudflare MCP authentication now works for account, zone and Worker reads.
+   The connected account is `1b5410140e248d8064f8ef81c8c52a1c`. It lists no
+   `tridelphi.com` zone and no `tridelphi-scan-portal` Worker. The subscriptions
+   endpoint returns API error `10000` (authentication/permission failure), so
+   the Workers billing plan cannot be verified. **Do not deploy until no-charge
+   operation is verified or the owner explicitly approves the potential cost.**
+   This is a billing/zone readiness blocker, not a blanket MCP login failure.
+   Earlier terminal Wrangler authentication was unavailable; MCP authorization
+   does not automatically authenticate the CLI. Do not use temporary accounts.
 2. The GitHub App **client secret** is not available in the environment, and
    `portal/.dev.vars` does not exist. The App ID/Client ID are not substitutes.
-   A secret already stored in Cloudflare could not be checked without Cloudflare
-   authentication. Check secret names after login; do not disclose values.
+   No portal Worker exists in the visible Cloudflare account. Check secret names
+   in the intended account after resolving ownership; do not disclose values.
+   The owner reports updating the callback; the live OAuth flow is not verified.
 3. Public DNS lookup returned Porkbun nameservers:
    `maceio.ns.porkbun.com`, `salvador.ns.porkbun.com`,
    `curitiba.ns.porkbun.com`, `fortaleza.ns.porkbun.com`.
-   The apex returned `185.199.108.153`; no A/CNAME answer was returned for `scan`.
+   The latest read still returned Porkbun nameservers after the owner's DNS
+   update. An earlier lookup returned no A/CNAME answer for `scan`.
    Cloudflare Custom Domains require an **active Cloudflare zone**; readiness
    cannot be established from this workspace. Nameserver changes were not made.
 4. Terminal Git push authentication failed with
    **“could not read Username for 'https://github.com': terminal prompts disabled.”**
    `gh` is not installed/on PATH in the agent environment.
-5. The GitHub connector can read repository metadata, which reports that the
-   owner's account has push/admin rights. However, an actual branch-creation
-   attempt returned **HTTP 403: Resource not accessible by integration**.
-   Account rights do not mean the connector token has write permission. No
-   remote branch was created by that attempt and no PR was opened.
+5. GitHub connector write access is now confirmed: creating the requested remote
+   branch succeeded after reauthentication. The previous integration 403 is
+   resolved. Terminal Git credentials remain separate; publication uses the
+   GitHub Git Data API, with complete tree-hash verification before updating the
+   branch. Do not force-push the old local history over the published API history.
 
 The TriDelPhi App authenticates portal visitors. It is **not** the Git credential
 used by Codex/the terminal to publish this repository. Do not broaden its runtime
@@ -73,7 +93,7 @@ Completed validation:
 - Python: **862 passed, 13 optional-tool skips** on local macOS/Python 3.12.
 - Portal: **32 passing tests**, covering identity, installation, PKCE/state,
   revocation, expiry, request boundaries, billing ownership and paid-tier denial.
-- Existing webhook bot: **37 passing checks** in the previous validation pass;
+- Existing webhook bot: **37 passing checks**, rerun in this publication pass;
   its implementation is unchanged by this deployment update.
 - `ruff check tridelphi/ tests/ scripts/` and `git diff --check` pass.
 - Wrangler 4.120.0 deployment **dry-run** bundles the Worker, 3 static files,
@@ -82,38 +102,33 @@ Completed validation:
 - The prior local workerd smoke test served the page with HTTP 200 and returned
   HTTP 503 for unconfigured authentication, with no-store and security headers.
 - Native static-scan acceptance CI is configured for macOS, Windows and Linux;
-  the remote jobs cannot run until the branch is published. Do not describe
+  the PR can now run remote jobs. Check its latest results; do not describe
   Windows/Linux runtime validation as already completed.
 
-## 1. Publish the branch and open the PR
+## 1. GitHub publication and local history
 
-On this Mac, use a normal terminal. If GitHub CLI is absent, install it from
-[cli.github.com](https://cli.github.com/) first, or use GitHub Desktop to publish
-the existing local branch. Do not re-clone over or reset the current checkout.
+The GitHub connection can publish without terminal Git authentication. Publication
+uses Git Data API trees and commits on `codex/fortify-beginner-followups`, based
+on `152507f801bb0f55af862c41d91ad92fd9915f61`. The initial published source tree
+was verified to exactly match local candidate `1258cca290d2221eb77380822affcbf457051527`
+(tree `01f81230e177448e493da8a4f9a9b3e4c8405d32`). A follow-up updates the
+scanner pin to the published candidate and records this handoff/spending rule.
+Published candidate commit: `78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8`.
+PR: https://github.com/girnarholdings/TriDelPhi/pull/70 (not merged).
 
-```bash
-cd /Users/kathanthakkar/VibeCode/TriDelPhi
-git status --short
-git branch --show-current
-gh auth login --hostname github.com --git-protocol https --web --scopes workflow
-gh auth setup-git
-gh auth status
-git fetch origin
-git log --oneline origin/main..HEAD
-git push -u origin codex/fortify-beginner-followups
-gh pr create --repo girnarholdings/TriDelPhi --base main \
-  --head codex/fortify-beginner-followups \
-  --title "Harden TriDelPhi and add GitHub-App-gated scan portal" \
-  --body-file docs/PORTAL_PR_BODY.md
-```
+API-created commits have different IDs from the original local commits. Preserve
+the original `codex/fortify-beginner-followups` local branch and the full-history
+backup at `outputs/tridelphi-ready-to-publish.bundle` in the Codex workspace.
+For continuing work, fetch the published branch and use a separate tracking
+branch, `codex/published-portal`, after verifying the working tree is clean.
+Do not force-push the original local branch over the API-published branch.
 
-The extra `workflow` scope is needed by a classic OAuth token because this branch
-modifies GitHub Actions workflow files. A fine-grained alternative must permit
-this repository's Contents write, Workflows write and Pull requests write.
-Use the normal credential manager, not a token in a remote URL or shell command.
-If a PR already exists for this branch, update it instead of creating a duplicate.
-Never force-push if the branch has changed on GitHub: inspect and reconcile first.
-If remote main advanced, review conflicts and rerun the tests before publishing.
+If terminal publishing is desired later, use normal GitHub CLI/Desktop login and
+the credential manager, never a token in a remote URL or shell command. Classic
+OAuth needs the `workflow` scope for workflow changes; fine-grained credentials
+need Contents, Workflows and Pull requests write for this repository.
+Update the existing PR rather than creating a duplicate. Refresh remote state,
+inspect conflicts and rerun affected tests before further publication.
 
 **Pinned scanner prerequisite:** verify that GitHub can retrieve the pinned
 commit and its devcontainer before deploying the portal. After review/merge,
@@ -161,7 +176,17 @@ If a DNS migration is not wanted, explicitly agree on a permanent workers.dev
 staging origin and change both App callback and `PUBLIC_ORIGIN`; do not silently
 enable alternate origins or temporary accounts. This config keeps them disabled.
 
-## 4. Authenticate, store the secret and deploy
+## 4. Verify no-charge operation, authenticate, store the secret and deploy
+
+**Stop before the write commands below unless the spending rule above is met.**
+Verify the correct account's Workers plan in the dashboard or through a
+read-authorized billing connection. Cloudflare documents SQLite Durable Objects
+on the Free plan with operations failing at free limits; paid plans can bill
+usage. Do not infer which plan this account uses from the availability of the
+API, an existing subscription, a Free DNS zone, or a successful dry-run.
+See [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
+Record the plan check before proceeding. Never upgrade automatically.
 
 Wrangler 4.120.0 dependencies already exist under `bot/node_modules` on this Mac.
 The bundled Node runtime is not on the default shell PATH. For this checkout:
@@ -239,7 +264,8 @@ storage mean this is not provider-wide zero retention. More architecture detail:
 
 Read this document and `portal/README.md`, inspect Git status, and preserve local
 commits. Do not restart the implementation or recreate the App. Verify GitHub and
-Cloudflare write access independently; the known 403 is not a code/build failure.
-Do not ask for secrets in chat. Complete publish → PR → DNS readiness → App secret
+Cloudflare write access independently; GitHub's earlier 403 is resolved. Respect
+the mandatory owner spending rule. Do not ask for secrets in chat. Complete
+publication verification → PR → billing/zone readiness → App secret
 → deploy → live verification, updating this handoff with actual PR/deployment
 URLs and failures. Never mark the service live on the strength of a dry-run.
