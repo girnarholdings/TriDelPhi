@@ -15,7 +15,10 @@ produced a specific fatal outcome in review:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from . import detect_agent_ingress, detect_egress, detect_guards, detect_privilege, detect_untrusted
 from .detect_untrusted import expression_paths, matches_untrusted_path
@@ -88,25 +91,133 @@ def _primary(u_hits: Sequence[CapabilityHit], context: ExecutionContext) -> Posi
 # ---------------------------------------------------------------------------
 
 
-def _tainted_outputs(context: ExecutionContext, u_hits: Sequence[CapabilityHit], tables: Tables) -> tuple[str, ...]:
-    """Job outputs whose values derive from attacker-controlled input."""
-    if not u_hits:
-        return ()
+@dataclass(frozen=True, slots=True)
+class ArtifactFlow:
+    """One uploaded artifact that may contain attacker-controlled files.
+
+    ``name=None`` means GitHub resolves the name dynamically. Unknown does not
+    mean safe: consumers with an unknown name must conservatively be joined.
+    """
+
+    name: str | None
+    position: Position
+
+
+@dataclass(frozen=True, slots=True)
+class JobProvenance:
+    """Typed summary of the only values allowed to cross a job boundary."""
+
+    context: ExecutionContext
+    outputs: tuple[str, ...]
+    artifacts: tuple[ArtifactFlow, ...]
+
+
+_STEP_OUTPUT_RE = re.compile(
+    r"\bsteps\.([A-Za-z_][A-Za-z0-9_-]*)\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\b"
+)
+_ENV_REF_RE = re.compile(r"(?:\benv\.([A-Za-z_][A-Za-z0-9_]*)\b|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*))")
+_BRACKET_KEY_RE = re.compile(r"\[['\"]([^'\"]+)['\"]\]")
+_REDIRECT_RE = re.compile(
+    r"(?<!\d)>>?\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s;&|]+))"
+)
+_TEE_RE = re.compile(r"\btee(?:\s+-a)?\s+(?:\"([^\"]+)\"|'([^']+)'|([^\s;&|]+))")
+_SHELL_ASSIGN_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+def _normalise_expression_notation(text: str) -> str:
+    """Turn GitHub bracket access into the equivalent dot access.
+
+    GitHub expressions permit both ``needs.a.outputs.x`` and
+    ``needs['a']['outputs']['x']``. Normalising once prevents a dot-only
+    substring check from becoming a bypass.
+    """
+
+    return _BRACKET_KEY_RE.sub(lambda match: f".{match.group(1)}", text)
+
+
+def _scalar_texts(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _scalar_texts(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _scalar_texts(item)
+
+
+def _contains_direct_untrusted(value: Any, patterns: tuple[str, ...]) -> bool:
+    for text in _scalar_texts(value):
+        if any(matches_untrusted_path(path, patterns) for path in expression_paths(text)):
+            return True
+    return False
+
+
+def _tainted_env_names(context: ExecutionContext, patterns: tuple[str, ...]) -> set[str]:
+    """Resolve direct workflow/job env aliases before inspecting outputs."""
+
+    tainted: set[str] = set()
+    for env_node in (context.workflow_env, context.body.get("env")):
+        if env_node is None or not env_node.is_mapping():
+            continue
+        for name, node in env_node.items():
+            if _contains_direct_untrusted(node.value, patterns):
+                tainted.add(str(name))
+    return tainted
+
+
+def _references_tainted_env(text: str, tainted: set[str]) -> bool:
+    for match in _ENV_REF_RE.finditer(_normalise_expression_notation(text)):
+        if next((group for group in match.groups() if group), "") in tainted:
+            return True
+    return False
+
+
+def _tainted_step_ids(context: ExecutionContext, patterns: tuple[str, ...]) -> set[str]:
+    """Identify the producing step, instead of tainting every step output.
+
+    A direct event expression taints only the step that consumes it. A shell
+    step running after an untrusted checkout is also tainted because it can
+    derive its output from attacker-authored files. This is intentionally
+    conservative without reviving the old "any U taints every output" rule.
+    """
+
+    tainted: set[str] = set()
+    inherited_env = _tainted_env_names(context, patterns)
+    for step in iter_steps(context.body):
+        step_id = step.get("id")
+        if step_id is None or not step_id.text:
+            continue
+        direct = _contains_direct_untrusted(step.value, patterns)
+        env_tainted = any(
+            _references_tainted_env(text, inherited_env) for text in _scalar_texts(step.value)
+        )
+        run = step.get("run")
+        worktree_derived = context.untrusted_worktree and run is not None
+        if direct or env_tainted or worktree_derived:
+            tainted.add(step_id.text)
+    return tainted
+
+
+def _tainted_outputs(context: ExecutionContext, tables: Tables) -> tuple[str, ...]:
+    """Job outputs whose values have a concrete attacker-controlled source."""
+
     outputs = context.body.get("outputs")
     if outputs is None or not outputs.is_mapping():
         return ()
     patterns = tables.tuple_of("untrusted_expressions", "paths")
+    tainted_steps = _tainted_step_ids(context, patterns)
+    tainted_env = _tainted_env_names(context, patterns)
     tainted = []
     for name, node in outputs.items():
         text = node.text
         if not text:
             continue
-        if any(matches_untrusted_path(p, patterns) for p in expression_paths(text)):
+        normalised = _normalise_expression_notation(text)
+        if _contains_direct_untrusted(text, patterns) or _references_tainted_env(text, tainted_env):
             tainted.append(str(name))
             continue
-        # `steps.<id>.outputs.<x>` referencing a step that consumed untrusted
-        # input in the same job.
-        if "steps." in text and u_hits:
+        if any(step_id in tainted_steps for step_id, _ in _STEP_OUTPUT_RE.findall(normalised)):
             tainted.append(str(name))
     return tuple(sorted(set(tainted)))
 
@@ -128,20 +239,119 @@ def _uses_position(context: ExecutionContext, markers: tuple[str, ...]) -> Posit
     return None
 
 
-def _tainted_artifact_upload(
-    context: ExecutionContext, u_hits: Sequence[CapabilityHit], tables: Tables
-) -> Position | None:
-    """If this job runs pull request code *and* uploads an artifact, return the
-    upload step's position. The artifact then carries attacker-authored files to
-    any downstream job that downloads it."""
-    if not any(h.kind in _WORKTREE_U_KINDS for h in u_hits):
+def _artifact_name(step: Any) -> str | None:
+    with_node = step.get("with")
+    if with_node is None or not with_node.is_mapping():
         return None
-    return _uses_position(context, tables.tuple_of("egress", "artifact_producers"))
+    name = with_node.get("name")
+    if name is None or not name.text:
+        return None
+    # Expressions and matrix values are intentionally unknown. We must not
+    # claim two dynamic names differ when GitHub may resolve them identically.
+    return None if "${{" in name.text else name.text.strip()
+
+
+def _literal_artifact_paths(step: Any) -> tuple[str, ...] | None:
+    with_node = step.get("with")
+    if with_node is None or not with_node.is_mapping():
+        return None
+    path = with_node.get("path")
+    if path is None or not path.text or "${{" in path.text:
+        return None
+    values = []
+    for line in path.text.splitlines():
+        clean = line.strip().replace("\\", "/").strip("'\"").rstrip("/")
+        if clean and not clean.startswith("!"):
+            values.append(clean.lstrip("./"))
+    return tuple(values)
+
+
+def _tainted_written_paths(context: ExecutionContext, tables: Tables) -> tuple[str, ...]:
+    """Literal files a directly tainted shell step writes before upload."""
+
+    patterns = tables.tuple_of("untrusted_expressions", "paths")
+    inherited_env = _tainted_env_names(context, patterns)
+    written: set[str] = set()
+    for step in iter_steps(context.body):
+        run = step.get("run")
+        if run is None or not run.text:
+            continue
+        tainted_env = set(inherited_env)
+        step_env = step.get("env")
+        if step_env is not None and step_env.is_mapping():
+            tainted_env.update(
+                str(name)
+                for name, node in step_env.items()
+                if _contains_direct_untrusted(node.value, patterns)
+            )
+        shell_tainted: set[str] = set()
+        for line in run.text.splitlines():
+            line_tainted = _contains_direct_untrusted(line, patterns) or _references_tainted_env(
+                line, tainted_env | shell_tainted
+            )
+            assignment = _SHELL_ASSIGN_RE.match(line)
+            if assignment and line_tainted:
+                shell_tainted.add(assignment.group(1))
+            if not line_tainted:
+                continue
+            for matcher in (_REDIRECT_RE, _TEE_RE):
+                for match in matcher.finditer(line):
+                    raw = next((group for group in match.groups() if group), "")
+                    clean = raw.replace("\\", "/").rstrip("/").lstrip("./")
+                    if clean and "$" not in clean and not clean.startswith(("/dev/", "-")):
+                        written.add(clean)
+    return tuple(sorted(written))
+
+
+def _path_channel_may_match(written: str, uploaded: str) -> bool:
+    return (
+        written == uploaded
+        or written.startswith(f"{uploaded}/")
+        or uploaded.startswith(f"{written}/")
+    )
+
+
+def _tainted_artifact_uploads(
+    context: ExecutionContext, u_hits: Sequence[CapabilityHit], tables: Tables
+) -> tuple[ArtifactFlow, ...]:
+    """Artifacts uploaded by a job whose worktree contains pull-request code."""
+    untrusted_worktree = any(h.kind in _WORKTREE_U_KINDS for h in u_hits)
+    tainted_paths = _tainted_written_paths(context, tables)
+    if not untrusted_worktree and not tainted_paths:
+        return ()
+    markers = tables.tuple_of("egress", "artifact_producers")
+    flows: list[ArtifactFlow] = []
+    for step in iter_steps(context.body):
+        action = uses_name(step)
+        if action and any(action == marker or action.startswith(marker) for marker in markers):
+            upload_paths = _literal_artifact_paths(step)
+            tainted = untrusted_worktree or upload_paths is None or any(
+                _path_channel_may_match(written, uploaded)
+                for written in tainted_paths
+                for uploaded in upload_paths
+            )
+            if tainted:
+                flows.append(ArtifactFlow(_artifact_name(step), step.position()))
+    return tuple(flows)
+
+
+def _artifact_downloads(context: ExecutionContext, tables: Tables) -> tuple[ArtifactFlow, ...]:
+    markers = tables.tuple_of("egress", "artifact_consumers")
+    flows: list[ArtifactFlow] = []
+    for step in iter_steps(context.body):
+        action = uses_name(step)
+        if action and any(action == marker or action.startswith(marker) for marker in markers):
+            flows.append(ArtifactFlow(_artifact_name(step), step.position()))
+    return tuple(flows)
+
+
+def _artifact_names_may_match(upload: ArtifactFlow, download: ArtifactFlow) -> bool:
+    return upload.name is None or download.name is None or upload.name == download.name
 
 
 def _cross_job_hits(
     context: ExecutionContext,
-    upstream: dict[str, tuple[ExecutionContext, tuple[str, ...], Position | None]],
+    upstream: dict[str, JobProvenance],
     tables: Tables,
 ) -> list[CapabilityHit]:
     """U inherited from a ``needs:`` dependency — through a tainted job output,
@@ -153,18 +363,19 @@ def _cross_job_hits(
     if not context.needs:
         return []
     hits: list[CapabilityHit] = []
-    body_text = _body_text(context)
-    download_pos: Position | None = None
-    download_checked = False
-    tainted_uploader: str | None = None
+    body_text = _normalise_expression_notation(_body_text(context))
+    downloads = _artifact_downloads(context, tables)
+    artifact_match: tuple[str, ArtifactFlow, ArtifactFlow] | None = None
     for dep in context.needs:
         entry = upstream.get(f"{context.workflow_file}::{dep}")
         if not entry:
             continue
-        _dep_ctx, tainted, artifact_pos = entry
-        for output in tainted:
+        for output in entry.outputs:
             reference = f"needs.{dep}.outputs.{output}"
-            if reference in body_text:
+            if re.search(
+                rf"(?<![A-Za-z0-9_-]){re.escape(reference)}(?![A-Za-z0-9_-])",
+                body_text,
+            ):
                 hits.append(
                     CapabilityHit(
                         capability="U",
@@ -177,25 +388,33 @@ def _cross_job_hits(
                         position=context.position,
                     )
                 )
-        # Artifact channel: the upstream job packed pull request code into an
-        # artifact. If this job downloads one, that code crosses the boundary.
-        if artifact_pos is not None and tainted_uploader is None:
-            if not download_checked:
-                download_pos = _uses_position(context, tables.tuple_of("egress", "artifact_consumers"))
-                download_checked = True
-            if download_pos is not None:
-                tainted_uploader = dep
-    if tainted_uploader is not None and download_pos is not None:
+        if artifact_match is None:
+            artifact_match = next(
+                (
+                    (dep, upload, download)
+                    for upload in entry.artifacts
+                    for download in downloads
+                    if _artifact_names_may_match(upload, download)
+                ),
+                None,
+            )
+    if artifact_match is not None:
+        tainted_uploader, upload, download = artifact_match
+        channel = (
+            f"artifact `{upload.name}`"
+            if upload.name is not None and download.name is not None
+            else "an artifact whose dynamic or omitted name cannot be resolved offline"
+        )
         hits.append(
             CapabilityHit(
                 capability="U",
                 kind="cross-job-artifact",
                 reason=(
-                    f"job `{tainted_uploader}` checked out pull request code and "
-                    f"uploaded an artifact; this job downloads that artifact, so "
+                    f"job `{tainted_uploader}` produced attacker-controlled files and "
+                    f"uploaded {channel}; this job downloads the same possible channel, so "
                     "attacker-authored files reach it across the job boundary"
                 ),
-                position=download_pos,
+                position=download.position,
             )
         )
     return hits
@@ -306,12 +525,14 @@ def _remediation(
                 f"Strip privilege. This job executes pull request code on a "
                 f"self-hosted runner at {_loc(runner.position)}. No `permissions:` "
                 "change helps — the runner itself is what the attacker gets. Either "
-                "move fork pull requests to a GitHub-hosted runner:\n"
-                "    runs-on: ${{ github.event.pull_request.head.repo.fork "
-                "&& 'ubuntu-latest' || 'self-hosted' }}\n"
-                "or require approval for outside contributors under Settings → "
-                "Actions → Fork pull request workflows. If the runner must stay, "
-                "make it ephemeral so compromise cannot persist between jobs."
+                "split this into two explicit jobs: a `pull_request` job on "
+                "`ubuntu-latest` with `permissions: contents: read`, and a separate "
+                "self-hosted job reachable only from trusted `push` or manual "
+                "`workflow_dispatch` events. Do not choose the runner with one dynamic "
+                "expression — missing event fields can route unexpectedly. Also require "
+                "approval for outside contributors under Settings → Actions → Fork pull "
+                "request workflows. If the runner must stay, make it ephemeral so "
+                "compromise cannot persist between jobs."
             ),
         )
 
@@ -469,7 +690,7 @@ def _workflow_has_secret(contexts: Iterable[ExecutionContext], workflow_file: st
 
 def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[Finding]:
     per_context: dict[str, tuple[list[CapabilityHit], list[CapabilityHit], list[CapabilityHit]]] = {}
-    upstream: dict[str, tuple[ExecutionContext, tuple[str, ...], Position | None]] = {}
+    upstream: dict[str, JobProvenance] = {}
 
     for ctx in contexts:
         u = detect_untrusted.detect(ctx, tables)
@@ -477,16 +698,49 @@ def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[F
         p = detect_privilege.detect(ctx, tables)
         e = detect_egress.detect(ctx, tables)
         per_context[ctx.label] = (u, p, e)
-        upstream[ctx.label] = (
-            ctx,
-            _tainted_outputs(ctx, u, tables),
-            _tainted_artifact_upload(ctx, u, tables),
+        upstream[ctx.label] = JobProvenance(
+            context=ctx,
+            outputs=_tainted_outputs(ctx, tables),
+            artifacts=_tainted_artifact_uploads(ctx, u, tables),
         )
 
     findings: list[Finding] = []
     for ctx in contexts:
         u, p, e = per_context[ctx.label]
         u = sorted(u + _cross_job_hits(ctx, upstream, tables), key=lambda h: h.sort_key)
+
+        unknown_agents = detect_agent_ingress.detect_unknown_semantics(ctx, tables)
+        if unknown_agents:
+            findings.append(
+                _make(
+                    "tridelphi/agent-semantics-unknown",
+                    "warning",
+                    ctx,
+                    tuple(unknown_agents),
+                    unknown_agents[0].position,
+                    (
+                        f"Job `{ctx.job_id}` invokes an AI-agent-like action whose "
+                        "working-tree and config restoration behavior TriDelPhi has "
+                        "not reviewed. This is unknown, not a pass."
+                    ),
+                    Remediation(
+                        strip="U",
+                        kind="pin-and-review-agent",
+                        target=_quoted_token(unknown_agents[0].reason),
+                        target_position=unknown_agents[0].position,
+                        breaks="nothing after the action is pinned and its security behavior is documented",
+                        rendered=(
+                            "Do not grant this action secrets or a self-hosted runner yet. "
+                            "Pin it to a full commit SHA, confirm from vendor documentation "
+                            "which instruction/config paths it restores from the trusted "
+                            "base branch, and add that reviewed behavior to "
+                            "`agent_signals.yml`. Until then, run it only in a read-only "
+                            "fork `pull_request` job."
+                        ),
+                        confidence="low",
+                    ),
+                )
+            )
 
         hooks = detect_agent_ingress.detect_hook_execution(ctx, tables)
         if hooks:
@@ -719,6 +973,24 @@ def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[F
                         f"Job `{ctx.job_id}` calls remote reusable workflow "
                         f"`{ctx.called_workflow}`. Its contents are not on disk, so any "
                         "capability inside it is invisible to an offline scan."
+                    ),
+                    None,
+                )
+            )
+
+        if ctx.semantic_unknowns:
+            details = "; ".join(ctx.semantic_unknowns)
+            findings.append(
+                _make(
+                    "tridelphi/unresolved-context",
+                    "note",
+                    ctx,
+                    (),
+                    ctx.position,
+                    (
+                        f"Job `{ctx.job_id}` contains GitHub behavior that cannot be "
+                        f"fully resolved from repository files: {details}. This is "
+                        "reported as unknown, not passed."
                     ),
                     None,
                 )

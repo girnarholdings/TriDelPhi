@@ -433,15 +433,10 @@ def test_gate_rejects_a_missing_path(tmp_path):
 
 @pytest.mark.parametrize(
     "level_literal",
-    ["null", "123", "3.5", '["nested"]', "{}", '"informational"', "true"],
+    ["null", '"informational"'],
 )
 def test_gate_non_standard_level_counts_as_warning_default(tmp_path, level_literal):
-    """Anything that is not one of the four real SARIF level strings --
-    including a non-string type -- must fall back to the SARIF default,
-    "warning", and never raise. Mirrors the same contract already proven for
-    the ladder's own ``ExternalRun`` severity accounting, but here at the
-    gate boundary where the SARIF arrives as an independent file, not
-    produced by ``run_tool`` in-process."""
+    """Missing or unknown textual levels use the explicit warning policy."""
     payload = (
         '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "x"}}, '
         f'"results": [{{"ruleId": "a", "level": {level_literal}}}]}}]}}'
@@ -452,6 +447,54 @@ def test_gate_non_standard_level_counts_as_warning_default(tmp_path, level_liter
     assert "1 warning" in out
     code_critical_only, _, _ = _gate(path, fail_on="critical")
     assert code_critical_only == 0  # not miscounted as critical
+
+
+@pytest.mark.parametrize("level_literal", ["123", "3.5", '["nested"]', "{}", "true"])
+def test_gate_rejects_non_text_levels_as_malformed_sarif(tmp_path, level_literal):
+    payload = (
+        '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "x"}}, '
+        f'"results": [{{"ruleId": "a", "level": {level_literal}}}]}}]}}'
+    )
+    path = _write(tmp_path / "s.sarif", payload)
+    code, _out, err = _gate(path, fail_on="warning")
+    assert code == 2
+    assert "non-text result level" in err
+
+
+def test_gate_and_attest_ignore_well_formed_suppressed_results(tmp_path):
+    result = {
+        "ruleId": "accepted",
+        "level": "error",
+        "suppressions": [{"kind": "inSource", "justification": "reviewed"}],
+    }
+    path = _write(tmp_path / "s.sarif", _sarif([("semgrep", [result])]))
+
+    code, out, _err = _gate(path, fail_on="critical")
+    assert code == 0
+    assert "semgrep: clean" in out
+
+    evidence = tmp_path / "evidence.json"
+    assert run_attest(str(path), evidence_path=str(evidence)) == 0
+    run = json.loads(evidence.read_text())["predicate"]["runs"][0]
+    assert run["results"] == 0
+    assert run["severities"] == {"critical": 0, "warning": 0, "note": 0}
+
+
+def test_malformed_suppression_never_hides_a_result(tmp_path):
+    result = {
+        "ruleId": "still-live",
+        "level": "error",
+        "suppressions": [{"kind": "inSource"}, "not-an-object"],
+    }
+    path = _write(tmp_path / "s.sarif", _sarif([("hostile", [result])]))
+    assert _gate(path, fail_on="critical")[0] == 1
+
+
+def test_gate_unknown_api_threshold_returns_controlled_error(tmp_path):
+    path = _write(tmp_path / "s.sarif", _sarif([]))
+    code, _out, err = _gate(path, fail_on="banana")
+    assert code == 2
+    assert "unknown fail threshold" in err
 
 
 # --- exit code matrix: 0 pass / 1 fail / 2 unreadable, across fail-on --------
@@ -615,6 +658,21 @@ def test_attest_predicate_type_and_scanner_block_are_present(tmp_path):
     assert stmt["predicateType"] == EVIDENCE_PREDICATE_TYPE
     assert stmt["predicate"]["scanner"]["name"] == "tridelphi"
     assert "no-timestamp" not in stmt["predicate"] and "timestamp" not in stmt["predicate"]
+
+
+def test_attest_output_error_is_controlled_and_leaves_no_temp_file(tmp_path):
+    sarif = _write(tmp_path / "s.sarif", _sarif([]))
+    evidence = tmp_path / "already-a-directory"
+    evidence.mkdir()
+    out, err = io.StringIO(), io.StringIO()
+
+    code = run_attest(
+        str(sarif), evidence_path=str(evidence), out=out, err=err
+    )
+
+    assert code == 2
+    assert "cannot write" in err.getvalue()
+    assert list(tmp_path.glob(".already-a-directory.*.tmp")) == []
 
 
 # =============================================================================

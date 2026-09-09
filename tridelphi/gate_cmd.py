@@ -32,8 +32,9 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .fsutil import atomic_write_text
 from .orchestrate import MAX_OUTPUT_BYTES, sarif_shape_error
-from .severity import SARIF_LEVEL_TO_SEVERITY as _LEVEL_TO_SEVERITY
+from .sarif import severity_counts
 from .severity import SEVERITY_ORDER as _SEVERITY_RANK
 
 __all__ = ["run_attest", "run_gate"]
@@ -41,25 +42,30 @@ __all__ = ["run_attest", "run_gate"]
 EVIDENCE_PREDICATE_TYPE = "https://girnarholdings.github.io/TriDelPhi/evidence/v1"
 
 
-def _load_sarif(path: str, err) -> dict | None:
-    """Read and structurally validate a SARIF file. None means unusable."""
+def _load_sarif(path: str, err) -> tuple[dict, bytes] | None:
+    """Read and structurally validate SARIF, retaining the exact parsed bytes."""
     target = Path(path)
-    if not target.is_file():
-        print(f"tridelphi: {path} is not a file", file=err)
-        return None
-    if target.stat().st_size > MAX_OUTPUT_BYTES:
-        print(f"tridelphi: {path} exceeds the size limit; refusing to parse", file=err)
-        return None
     try:
-        document = json.loads(target.read_text(encoding="utf-8", errors="replace"))
-    except ValueError:
+        if not target.is_file():
+            print(f"tridelphi: {path} is not a file", file=err)
+            return None
+        with target.open("rb") as handle:
+            raw = handle.read(MAX_OUTPUT_BYTES + 1)
+        if len(raw) > MAX_OUTPUT_BYTES:
+            print(f"tridelphi: {path} exceeds the size limit; refusing to parse", file=err)
+            return None
+        document = json.loads(raw.decode("utf-8"))
+    except OSError as exc:
+        print(f"tridelphi: cannot read {path}: {exc}", file=err)
+        return None
+    except (ValueError, RecursionError):
         print(f"tridelphi: {path} is not valid JSON", file=err)
         return None
     defect = sarif_shape_error(document)
     if defect is not None:
         print(f"tridelphi: {path}: {defect}", file=err)
         return None
-    return document
+    return document, raw
 
 
 def _run_summaries(document: dict) -> list[dict]:
@@ -67,12 +73,7 @@ def _run_summaries(document: dict) -> list[dict]:
     summaries = []
     for run in document["runs"]:
         driver = run["tool"]["driver"]
-        counts = {"critical": 0, "warning": 0, "note": 0}
-        for result in run.get("results", []):
-            level = result.get("level")
-            if not isinstance(level, str):
-                level = "warning"  # SARIF default
-            counts[_LEVEL_TO_SEVERITY.get(level, "warning")] += 1
+        counts = severity_counts(run.get("results", []))
         name = driver.get("name")
         version = driver.get("semanticVersion") or driver.get("version")
         summaries.append(
@@ -94,9 +95,13 @@ def run_gate(sarif_path: str, *, fail_on: str = "critical", out=None, err=None) 
     """
     out = out or sys.stdout
     err = err or sys.stderr
-    document = _load_sarif(sarif_path, err)
-    if document is None:
+    if fail_on not in {*_SEVERITY_RANK, "none"}:
+        print(f"tridelphi: unknown fail threshold: {fail_on}", file=err)
         return 2
+    loaded = _load_sarif(sarif_path, err)
+    if loaded is None:
+        return 2
+    document, _raw = loaded
 
     summaries = _run_summaries(document)
     total = {"critical": 0, "warning": 0, "note": 0}
@@ -137,11 +142,11 @@ def run_attest(
     """
     out = out or sys.stdout
     err = err or sys.stderr
-    document = _load_sarif(sarif_path, err)
-    if document is None:
+    loaded = _load_sarif(sarif_path, err)
+    if loaded is None:
         return 2
-
-    digest = hashlib.sha256(Path(sarif_path).read_bytes()).hexdigest()
+    document, raw = loaded
+    digest = hashlib.sha256(raw).hexdigest()
     statement = {
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [{"name": Path(sarif_path).name, "digest": {"sha256": digest}}],
@@ -157,11 +162,17 @@ def run_attest(
             },
         },
     }
-    Path(evidence_path).write_text(
-        json.dumps(statement, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    evidence = Path(evidence_path)
+    try:
+        atomic_write_text(
+            evidence,
+            json.dumps(statement, indent=2, sort_keys=True) + "\n",
+            create_parent=True,
+            mode=0o644,
+        )
+    except OSError as exc:
+        print(f"tridelphi: cannot write {evidence_path}: {exc}", file=err)
+        return 2
     print(f"wrote {evidence_path} (sha256:{digest[:12]}… over {Path(sarif_path).name})", file=out)
     print(
         "sign it: pass this file to actions/attest-build-provenance as subject-path",

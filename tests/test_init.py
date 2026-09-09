@@ -23,6 +23,25 @@ from tridelphi.init_cmd import (
 from tridelphi.release import ACTION_REF, install_command
 
 
+def test_read_only_scan_templates_do_not_persist_checkout_credentials():
+    from ruamel.yaml import YAML
+
+    for template in (WORKFLOW, APP_WORKFLOW, render_action_workflow()):
+        document = YAML(typ="safe").load(template)
+        for job in document["jobs"].values():
+            for step in job["steps"]:
+                if str(step.get("uses", "")).startswith("actions/checkout@"):
+                    assert step["with"]["persist-credentials"] is False
+
+
+def test_action_python_helpers_cannot_import_from_the_scanned_checkout(repo_root):
+    action = (repo_root / "action.yml").read_text(encoding="utf-8")
+    installer = (repo_root / "scripts/install-ladder.sh").read_text(encoding="utf-8")
+    assert "python3 -I - <<'PY'" in action
+    assert 'python3 -I -m pip install --quiet "$GITHUB_ACTION_PATH"' in action
+    assert "python3 -m pip" not in installer
+
+
 def test_init_writes_the_short_action_workflow_by_default(tmp_path):
     """The default has to be the file a first-time user will actually commit.
     The long transparent workflow is ~140 lines of pipx, harden-runner and
@@ -82,6 +101,8 @@ def test_fix_bot_holds_its_trust_boundary():
     for line in FIX_WORKFLOW.split("\n"):
         if "comment.body" in line:
             assert "contains(" in line, f"comment body outside the gate: {line!r}"
+    assert "getCollaboratorPermissionLevel" in FIX_WORKFLOW
+    assert "p.action === 'created'" not in FIX_WORKFLOW
 
 
 def test_fix_bot_checkbox_branch_is_edited_only():
@@ -107,6 +128,51 @@ def test_fix_bot_template_blocks_egress():
     assert "egress-policy: block" in FIX_WORKFLOW
     assert "egress-policy: audit" not in FIX_WORKFLOW
     assert "files.pythonhosted.org:443" in FIX_WORKFLOW
+
+
+def test_fix_bot_logs_cannot_inject_step_outputs_or_comments():
+    """Repository-controlled finding text stays data, never workflow protocol."""
+
+    assert "TRIDELPHI_EOF" not in FIX_WORKFLOW
+    assert "fix-log.txt" in FIX_WORKFLOW and "fs.openSync" in FIX_WORKFLOW
+    assert ".replaceAll('<', '&lt;')" in FIX_WORKFLOW
+    assert ".replaceAll('@', '&#64;')" in FIX_WORKFLOW
+    assert "relock-refused" in FIX_WORKFLOW and "push-changed" in FIX_WORKFLOW
+
+    dogfood = (Path(__file__).resolve().parents[1] / ".github/workflows/tridelphi-fix.yml").read_text()
+    assert "TRIDELPHI_EOF" not in dogfood
+    assert "fs.openSync" in dogfood and ".replaceAll('@', '&#64;')" in dogfood
+
+
+def test_scan_reports_never_cross_github_command_protocols():
+    """Repository-derived report text stays in private files and summaries.
+
+    It must never be a multiline step output, an environment value, or raw log
+    output: all three surfaces interpret control syntax rather than plain data.
+    """
+
+    action = (Path(__file__).resolve().parents[1] / "action.yml").read_text()
+    for body in (action, WORKFLOW, APP_WORKFLOW):
+        assert "TRIDELPHI_EOF" not in body
+        assert "REPORT_MD: ${{ steps." not in body
+        assert "cat report" not in body
+        assert "REPORT_FILE: ${{ runner.temp }}" in body
+        assert "fs.openSync" in body and "Buffer.alloc" in body
+        assert ".replaceAll('@', '&#64;')" in body
+
+    assert 'sarif_file: ${{ runner.temp }}/tridelphi.sarif' in action
+    assert "steps.scan.outputs.sarif_ready == 'true'" in action
+    assert 'sarif_file: ${{ runner.temp }}/tridelphi-expose.sarif' in action
+    assert "$RUNNER_TEMP/tridelphi-exit-code" in action
+
+
+def test_fork_pull_requests_scan_without_attempting_an_impossible_comment():
+    action = (Path(__file__).resolve().parents[1] / "action.yml").read_text()
+    guard = "github.event.pull_request.head.repo.full_name == github.repository"
+    assert guard in action
+    assert guard in WORKFLOW
+    assert guard in APP_WORKFLOW
+    assert "Fork pull_request tokens are read-only" in action
 
 
 def test_init_is_idempotent(tmp_path):
@@ -231,6 +297,22 @@ def test_render_action_workflow_omits_expose_by_default():
     step = _yaml(render_action_workflow())["jobs"]["harden"]["steps"][1]
     assert "expose" not in step["with"]
     assert step["with"]["level"] == "3"
+
+
+def test_comment_disabled_workflow_does_not_request_pr_write():
+    body = render_action_workflow(comment=False)
+    assert "pull-requests: write" not in body
+    assert "security-events: write" in body
+
+
+def test_l6_and_l7_workflows_receive_only_the_required_attestation_permissions():
+    for level in (6, 7):
+        body = render_action_workflow(level=level)
+        assert "id-token: write" in body
+        assert "attestations: write" in body
+    body = render_action_workflow(level=5)
+    assert "id-token: write" not in body
+    assert "attestations: write" not in body
 
 
 def test_wizard_writes_the_action_workflow_and_fix_bot(tmp_path):

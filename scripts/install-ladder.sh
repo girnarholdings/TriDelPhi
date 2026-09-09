@@ -104,7 +104,7 @@ fi
 if [ "$LEVEL" -ge 3 ]; then
   # --require-hashes: the wheel pip resolves must match one of the PyPI-published
   # digests in zizmor-requirements.txt, or the install hard-fails.
-  python3 -m pip install --quiet --require-hashes \
+  python3 -I -m pip install --quiet --require-hashes \
     -r "$(dirname "$0")/zizmor-requirements.txt"
   echo "installed zizmor v${ZIZMOR_VERSION} (verified)"
 fi
@@ -123,7 +123,7 @@ if [ "$LEVEL" -ge 4 ]; then
 fi
 
 if [ "$LEVEL" -ge 5 ]; then
-  python3 -m pip install --quiet --require-hashes \
+  python3 -I -m pip install --quiet --require-hashes \
     -r "$(dirname "$0")/semgrep-requirements.txt"
   echo "installed semgrep v${SEMGREP_VERSION} (verified)"
 fi

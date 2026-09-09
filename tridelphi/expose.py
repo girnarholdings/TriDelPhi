@@ -22,8 +22,10 @@ of it is funneled through the same SARIF containment gate as every wrapped tool.
 from __future__ import annotations
 
 import json
+import os
 import re
-from collections.abc import Iterable
+import stat
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,8 +35,9 @@ from .orchestrate import merge_runs
 from .sarif import is_suppressed, simple_sarif
 from .severity import SARIF_LEVEL_TO_SEVERITY as _LEVEL_TO_SEV
 from .severity import SEVERITY_ORDER
+from .structure import structure_error
 
-__all__ = ["ExposeFinding", "ExposureResult", "analyze_exposure"]
+__all__ = ["ExposeFinding", "ExposureCoverage", "ExposureLimits", "ExposureResult", "analyze_exposure"]
 
 # Categories, in report order. Each has a plain question and a one-line "what
 # these items are" gloss; the guided fix is per finding.
@@ -62,7 +65,10 @@ _SKIP_DIRS = frozenset({
     ".pytest_cache", ".ruff_cache", ".tox", ".idea", ".vscode",
 })
 # Where a web app's shipped output tends to live.
-_ASSET_DIRS = ("dist", "build", "out", "public", ".next")
+_ASSET_DIRS = (
+    "dist", "build", "out", "public", ".next", "www", "static",
+    "storybook-static", ".output/public", ".vercel/output/static",
+)
 _COMPOSE_RE = re.compile(r"(docker-)?compose.*\.ya?ml$", re.IGNORECASE)
 _DB_CONF_NAMES = frozenset({"redis.conf", "mongod.conf", "postgresql.conf", "my.cnf"})
 
@@ -81,6 +87,53 @@ _CRED_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
 # neither hang the audit nor blow memory. Mirrors ladder.py's MAX_OUTPUT_BYTES
 # discipline for external tools.
 _MAX_READ_BYTES = 8 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class ExposureLimits:
+    """Resource ceilings for repositories whose contents are untrusted."""
+
+    max_files: int = 100_000
+    max_entries: int = 200_000
+    max_total_bytes: int = 1_000_000_000
+    max_file_bytes: int = _MAX_READ_BYTES
+    max_seconds: float = 30.0
+
+
+@dataclass(slots=True)
+class ExposureCoverage:
+    entries_seen: int = 0
+    files_seen: int = 0
+    bytes_seen: int = 0
+    files_read: int = 0
+    truncated_files: int = 0
+    skipped_symlinks: int = 0
+    unreadable_entries: int = 0
+    incomplete_reasons: list[str] = field(default_factory=list)
+    asset_roots: tuple[str, ...] = ()
+    deadline: float = field(default=0.0, repr=False)
+
+    @property
+    def complete(self) -> bool:
+        return not self.incomplete_reasons and self.truncated_files == 0
+
+    def mark_incomplete(self, reason: str) -> None:
+        if reason not in self.incomplete_reasons:
+            self.incomplete_reasons.append(reason)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "complete": self.complete,
+            "entriesSeen": self.entries_seen,
+            "filesSeen": self.files_seen,
+            "bytesSeen": self.bytes_seen,
+            "filesRead": self.files_read,
+            "truncatedFiles": self.truncated_files,
+            "skippedSymlinks": self.skipped_symlinks,
+            "unreadableEntries": self.unreadable_entries,
+            "incompleteReasons": list(self.incomplete_reasons),
+            "assetRoots": list(self.asset_roots),
+        }
 
 # High-confidence secret shapes. Provider-prefixed keys are near-zero false
 # positive, so they gate (critical); a JWT can legitimately be public, so it is
@@ -172,7 +225,7 @@ def _supabase_role(jwt_token: str) -> str | None:
     payload = parts[1] + "=" * (-len(parts[1]) % 4)  # pad base64url
     try:
         data = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8", "replace"))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         return None
     role = data.get("role") if isinstance(data, dict) else None
     return role if role in ("service_role", "anon") else None
@@ -218,6 +271,7 @@ class ExposureResult:
     sarif: dict[str, Any] | None = None
     semgrep_ran: bool = False
     semgrep_note: str | None = None
+    coverage: ExposureCoverage = field(default_factory=ExposureCoverage)
 
     def gating(self) -> list[ExposeFinding]:
         return [f for f in self.findings if f.severity == "critical"]
@@ -228,26 +282,117 @@ class ExposureResult:
 # ---------------------------------------------------------------------------
 
 
-def _walk(root: Path) -> Iterable[Path]:
-    """Every file under root, sorted, skipping vendored/VCS dirs. Defensive:
-    an unreadable directory is skipped, never fatal."""
+def _walk(root: Path, limits: ExposureLimits, coverage: ExposureCoverage) -> list[Path]:
+    """Bounded discovery; use no-follow directory handles where supported.
+
+    Windows lacks directory-fd traversal. Its fallback refuses reparse points
+    (including junctions) and is for quiescent trees, not a hostile live writer.
+    """
+    use_fd = os.scandir in os.supports_fd and os.stat in os.supports_dir_fd
     stack = [root]
     out: list[Path] = []
     while stack:
+        if coverage.deadline and time.monotonic() > coverage.deadline:
+            coverage.mark_incomplete(f"file discovery exceeded {limits.max_seconds:g} seconds")
+            break
         current = stack.pop()
+        directory_fd = -1
         try:
-            entries = sorted(current.iterdir())
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            if use_fd:
+                directory_fd = os.open(current, flags)
+            else:
+                _reject_redirects(current)
+            names: list[str] = []
+            with os.scandir(directory_fd if use_fd else current) as entries:
+                for entry in entries:
+                    coverage.entries_seen += 1
+                    if coverage.entries_seen > limits.max_entries:
+                        coverage.mark_incomplete(
+                            f"filesystem entry count exceeded {limits.max_entries:,}"
+                        )
+                        stack.clear()
+                        if directory_fd >= 0:
+                            os.close(directory_fd)
+                        return sorted(out)
+                    if coverage.deadline and time.monotonic() > coverage.deadline:
+                        coverage.mark_incomplete(
+                            f"file discovery exceeded {limits.max_seconds:g} seconds"
+                        )
+                        stack.clear()
+                        if directory_fd >= 0:
+                            os.close(directory_fd)
+                        return sorted(out)
+                    names.append(entry.name)
+            names.sort()
         except OSError:
+            if directory_fd >= 0:
+                os.close(directory_fd)
+            coverage.unreadable_entries += 1
+            coverage.mark_incomplete("one or more directories could not be read")
             continue
-        for entry in entries:
-            if entry.is_symlink():
-                continue
-            if entry.is_dir():
-                if entry.name not in _SKIP_DIRS:
-                    stack.append(entry)
-            elif entry.is_file():
-                out.append(entry)
+        try:
+            for name in names:
+                entry = current / name
+                try:
+                    if use_fd:
+                        info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    else:
+                        _reject_redirects(current)
+                        info = entry.lstat()
+                except OSError:
+                    coverage.unreadable_entries += 1
+                    coverage.mark_incomplete(
+                        "one or more filesystem entries could not be inspected"
+                    )
+                    continue
+                if _is_redirect(info):
+                    coverage.skipped_symlinks += 1
+                    if name.lower() not in _SKIP_DIRS:
+                        coverage.mark_incomplete(
+                            "one or more symlinked entries were not followed"
+                        )
+                    continue
+                if stat.S_ISDIR(info.st_mode):
+                    if name.lower() not in _SKIP_DIRS:
+                        stack.append(entry)
+                elif stat.S_ISREG(info.st_mode):
+                    if coverage.files_seen >= limits.max_files:
+                        coverage.mark_incomplete(f"file count exceeded {limits.max_files:,}")
+                        stack.clear()
+                        break
+                    if coverage.bytes_seen + info.st_size > limits.max_total_bytes:
+                        coverage.mark_incomplete(
+                            f"discovered files exceeded {limits.max_total_bytes:,} bytes"
+                        )
+                        stack.clear()
+                        break
+                    coverage.files_seen += 1
+                    coverage.bytes_seen += info.st_size
+                    out.append(entry)
+        finally:
+            if directory_fd >= 0:
+                os.close(directory_fd)
     return sorted(out)
+
+
+def _is_redirect(info: os.stat_result) -> bool:
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _reject_redirects(path: Path) -> None:
+    current = Path(path.absolute().anchor)
+    for part in path.absolute().parts[1:]:
+        current = current / part
+        if _is_redirect(current.lstat()):
+            raise OSError("refusing to follow a symlink or Windows reparse point")
 
 
 @dataclass
@@ -263,8 +408,35 @@ class _Surface:
     has_bundler: bool = False
 
 
-def _in_asset_dir(rel: Path) -> bool:
-    return any(part in _ASSET_DIRS for part in rel.parts[:-1])
+def _normalise_asset_roots(extra: tuple[str, ...]) -> tuple[str, ...]:
+    roots: list[str] = []
+    for raw in (*_ASSET_DIRS, *extra):
+        candidate = Path(str(raw).replace("\\", "/"))
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValueError(f"asset root must stay inside the repository: {raw}")
+        clean = candidate.as_posix().strip("/").lower()
+        if clean and clean not in roots:
+            roots.append(clean)
+    return tuple(roots)
+
+
+def _in_asset_dir(rel: Path, roots: tuple[str, ...]) -> bool:
+    parent = tuple(part.lower() for part in rel.parts[:-1])
+    for root in roots:
+        parts = tuple(root.split("/"))
+        for index in range(len(parent) - len(parts) + 1):
+            if parent[index : index + len(parts)] == parts:
+                return True
+    return False
+
+
+def _root_bundle(rel: Path, *, has_bundler: bool) -> bool:
+    if not has_bundler or len(rel.parts) != 1 or rel.suffix.lower() not in (".js", ".mjs", ".cjs"):
+        return False
+    name = rel.name.lower()
+    return name.endswith(".min.js") or rel.stem.lower() in {
+        "app", "main", "bundle", "index", "client",
+    }
 
 
 def _is_cred_file(rel: Path, name: str) -> bool:
@@ -282,10 +454,21 @@ def _is_cred_file(rel: Path, name: str) -> bool:
         h in name for h in ("serviceaccount", "service-account", "adminsdk"))
 
 
-def _discover(root: Path) -> _Surface:
+def _discover(
+    root: Path,
+    limits: ExposureLimits,
+    coverage: ExposureCoverage,
+    asset_roots: tuple[str, ...],
+) -> _Surface:
     s = _Surface()
     bundler_markers = ("vite.config", "next.config", "webpack.config", "rollup.config")
-    for path in _walk(root):
+    files = _walk(root, limits, coverage)
+    s.has_bundler = any(
+        path.name.lower() == "package.json"
+        or any(path.name.lower().startswith(marker) for marker in bundler_markers)
+        for path in files
+    )
+    for path in files:
         rel = path.relative_to(root)
         name = path.name.lower()
         if _COMPOSE_RE.search(name):
@@ -295,9 +478,11 @@ def _discover(root: Path) -> _Surface:
             s.env.append(path)
         elif name in _DB_CONF_NAMES:
             s.db_conf.append(path)
-        elif _in_asset_dir(rel) and path.suffix == ".map":
+        elif _in_asset_dir(rel, asset_roots) and path.suffix.lower() == ".map":
             s.maps.append(path)
-        elif _in_asset_dir(rel) and path.suffix in (".js", ".mjs", ".cjs"):
+        elif (
+            _in_asset_dir(rel, asset_roots) or _root_bundle(rel, has_bundler=s.has_bundler)
+        ) and path.suffix.lower() in (".js", ".mjs", ".cjs"):
             s.bundles.append(path)
         elif path.suffix in (".csv", ".sql", ".ndjson") or (
             path.suffix == ".json" and name.startswith("seed")):
@@ -306,19 +491,50 @@ def _discover(root: Path) -> _Surface:
             s.cred_files.append(path)
         if name.endswith((".rules", ".tf", ".tf.json")):
             s.cloud_rules.append(path)
-        if name == "package.json" or any(name.startswith(m) for m in bundler_markers):
-            s.has_bundler = True
     return s
 
 
-def _read_text(path: Path, cap: int = _MAX_READ_BYTES) -> str | None:
+def _read_text(
+    path: Path,
+    cap: int = _MAX_READ_BYTES,
+    *,
+    coverage: ExposureCoverage | None = None,
+) -> str | None:
+    """Read at most ``cap`` bytes without ever following a symlink."""
+
+    fd = -1
     try:
-        if path.stat().st_size > cap:
-            with path.open("rb") as fh:
-                return fh.read(cap).decode("utf-8", errors="replace")
-        return path.read_text(encoding="utf-8", errors="replace")
+        if coverage is not None and coverage.deadline and time.monotonic() > coverage.deadline:
+            coverage.mark_incomplete("exposure analysis exceeded its time budget")
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        if not hasattr(os, "O_NOFOLLOW"):
+            _reject_redirects(path)
+        fd = os.open(path, flags)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            if coverage is not None:
+                coverage.unreadable_entries += 1
+            return None
+        with os.fdopen(fd, "rb", closefd=True) as handle:
+            fd = -1
+            data = handle.read(cap + 1)
+        if coverage is not None:
+            coverage.files_read += 1
+        if len(data) > cap:
+            data = data[:cap]
+            if coverage is not None:
+                coverage.truncated_files += 1
+                coverage.mark_incomplete(f"one or more files exceeded the {cap:,}-byte read cap")
+        return data.decode("utf-8", errors="replace")
     except OSError:
+        if coverage is not None:
+            coverage.unreadable_entries += 1
+            coverage.mark_incomplete("one or more selected files could not be read safely")
         return None
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 # ---------------------------------------------------------------------------
@@ -333,16 +549,18 @@ _FIX_A_SECRET = ("rotate this key now (assume it is compromised — it shipped t
                  "keep a secret.")
 
 
-def _detect_maps_and_secrets(root: Path, surface: _Surface) -> list[ExposeFinding]:
+def _detect_maps_and_secrets(
+    root: Path, surface: _Surface, coverage: ExposureCoverage, max_read: int
+) -> list[ExposeFinding]:
     out: list[ExposeFinding] = []
     for path in surface.maps:
         where = str(path.relative_to(root))
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         try:
             doc = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):
             out.append(ExposeFinding("A", "source-map-shipped", "warning", where,
                 "A source map is deployed alongside your bundle. Even without full "
                 "source, it maps minified code back to your structure.", _FIX_A_MAP))
@@ -360,7 +578,7 @@ def _detect_maps_and_secrets(root: Path, surface: _Surface) -> list[ExposeFindin
                 "back to your original structure.", _FIX_A_MAP))
 
     for path in surface.bundles:
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         where = str(path.relative_to(root))
@@ -420,7 +638,9 @@ _FIX_PUBLIC_ENV = ("give it a non-public name (drop the NEXT_PUBLIC_/VITE_/… p
 _FIREBASE_ENV_NAME = re.compile(r"(?i)firebase")
 
 
-def _detect_public_env(root: Path, surface: _Surface) -> list[ExposeFinding]:
+def _detect_public_env(
+    root: Path, surface: _Surface, coverage: ExposureCoverage, max_read: int
+) -> list[ExposeFinding]:
     """A secret behind a framework 'public' env prefix — it ships to the browser.
 
     Distinct from the committed-secret case (category F): here the *prefix* is the
@@ -435,7 +655,7 @@ def _detect_public_env(root: Path, surface: _Surface) -> list[ExposeFinding]:
     """
     out: list[ExposeFinding] = []
     for path in surface.env:
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         where_file = str(path.relative_to(root))
@@ -528,7 +748,9 @@ def _port_is_public(entry: Any) -> bool:
     return ":" in text or text.strip().isdigit()
 
 
-def _detect_db_misconfig(root: Path, surface: _Surface) -> list[ExposeFinding]:
+def _detect_db_misconfig(
+    root: Path, surface: _Surface, coverage: ExposureCoverage, max_read: int
+) -> list[ExposeFinding]:
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError
 
@@ -536,13 +758,17 @@ def _detect_db_misconfig(root: Path, surface: _Surface) -> list[ExposeFinding]:
     yaml = YAML(typ="rt")
 
     for path in surface.compose:
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         where_file = str(path.relative_to(root))
         try:
             doc = yaml.load(raw)
-        except (YAMLError, ValueError, TypeError):
+        except (YAMLError, ValueError, TypeError, RecursionError):
+            coverage.mark_incomplete(f"could not parse compose file {where_file}")
+            continue
+        if defect := structure_error(doc, max_nodes=200_000, max_collection_items=50_000):
+            coverage.mark_incomplete(f"compose file {where_file} was refused: {defect}")
             continue
         if not isinstance(doc, dict):
             continue
@@ -603,7 +829,7 @@ def _detect_db_misconfig(root: Path, surface: _Surface) -> list[ExposeFinding]:
                     "disabled. Set a strong password from a secret.", _FIX_D))
 
     for path in surface.env:
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         where_file = str(path.relative_to(root))
@@ -634,7 +860,9 @@ def _looks_minified(text: str) -> bool:
     return longest > 500 or (longest > 200 and ws < 0.15)
 
 
-def _detect_minification(root: Path, surface: _Surface) -> list[ExposeFinding]:
+def _detect_minification(
+    root: Path, surface: _Surface, coverage: ExposureCoverage, max_read: int
+) -> list[ExposeFinding]:
     if not surface.bundles:
         return []
     # Look at the largest few bundles for a representative verdict.
@@ -642,7 +870,7 @@ def _detect_minification(root: Path, surface: _Surface) -> list[ExposeFinding]:
     checked = 0
     minified = 0
     for path in ranked[:5]:
-        raw = _read_text(path, cap=1_000_000)
+        raw = _read_text(path, cap=min(1_000_000, max_read), coverage=coverage)
         if raw is None:
             continue
         checked += 1
@@ -673,10 +901,12 @@ _FIX_C_DATA = ("don't commit real user data; if this is a fixture, use fake valu
                "and never store passwords/PII in plaintext.")
 
 
-def _detect_committed_pii(root: Path, surface: _Surface) -> list[ExposeFinding]:
+def _detect_committed_pii(
+    root: Path, surface: _Surface, coverage: ExposureCoverage, max_read: int
+) -> list[ExposeFinding]:
     out: list[ExposeFinding] = []
     for path in surface.data_files:
-        raw = _read_text(path, cap=1_000_000)
+        raw = _read_text(path, cap=min(1_000_000, max_read), coverage=coverage)
         if raw is None:
             continue
         head = raw[:8192]
@@ -698,13 +928,15 @@ _FIX_CRED = ("remove it from the repo, rotate the credential (assume it is compr
              "it is in your git history) and load it from a secret at runtime instead.")
 
 
-def _detect_committed_credentials(root: Path, surface: _Surface) -> list[ExposeFinding]:
+def _detect_committed_credentials(
+    root: Path, surface: _Surface, coverage: ExposureCoverage, max_read: int
+) -> list[ExposeFinding]:
     """Confirm, by content, which discovered credential-shaped files actually hold
     a secret. A public certificate or a keyless `.key` config file produces nothing.
     Overlaps L1 gitleaks in CI on purpose — this rung is offline and needs no tool."""
     out: list[ExposeFinding] = []
     for path in surface.cred_files:
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         where = str(path.relative_to(root))
@@ -741,7 +973,7 @@ def _detect_committed_credentials(root: Path, surface: _Surface) -> list[ExposeF
     # classic vibe-coder mistake (`OPENAI_API_KEY=sk-…` checked in). The DB-URL case
     # is category D; this is the raw-secret case.
     for path in surface.env:
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         where_file = str(path.relative_to(root))
@@ -777,14 +1009,16 @@ _FIX_G_BUCKET = ("remove the world-readable/writable grant; scope access to spec
                  "and use signed URLs for anything that must be shared.")
 
 
-def _detect_open_cloud_rules(root: Path, surface: _Surface) -> list[ExposeFinding]:
+def _detect_open_cloud_rules(
+    root: Path, surface: _Surface, coverage: ExposureCoverage, max_read: int
+) -> list[ExposeFinding]:
     """Open Firebase Security Rules (`allow …: if true`) and world-open bucket ACLs.
 
     This completes the Firebase story: the public-key note tells you to lock down
     Security Rules — here we flag when they are wide open."""
     out: list[ExposeFinding] = []
     for path in surface.cloud_rules:
-        raw = _read_text(path)
+        raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
         where = str(path.relative_to(root))
@@ -885,7 +1119,14 @@ def _native_sarif(findings: list[ExposeFinding], tool_version: str) -> dict[str,
 # ---------------------------------------------------------------------------
 
 
-def analyze_exposure(root: str | Path, *, tool_version: str = "0", run_semgrep: bool = True) -> ExposureResult:
+def analyze_exposure(
+    root: str | Path,
+    *,
+    tool_version: str = "0",
+    run_semgrep: bool = True,
+    limits: ExposureLimits | None = None,
+    asset_roots: tuple[str, ...] = (),
+) -> ExposureResult:
     """Audit ``root`` for shipped-asset, DB-config, and data-hygiene exposure.
 
     Native detectors are pure file reads (no subprocess, no network). The
@@ -893,22 +1134,34 @@ def analyze_exposure(root: str | Path, *, tool_version: str = "0", run_semgrep: 
     is on PATH and ``run_semgrep`` is set; if it is absent, the audit still
     produces every native finding and notes that the code rung was skipped.
     """
-    root = Path(root)
-    surface = _discover(root)
+    supplied_root = Path(root)
+    if supplied_root.is_symlink():
+        raise ValueError("exposure root must not be a symlink")
+    root = supplied_root.resolve()
+    limits = limits or ExposureLimits()
+    if min(limits.max_files, limits.max_total_bytes, limits.max_file_bytes) <= 0:
+        raise ValueError("exposure limits must be positive")
+    if limits.max_seconds <= 0:
+        raise ValueError("exposure time limit must be positive")
+    roots = _normalise_asset_roots(asset_roots)
+    coverage = ExposureCoverage(
+        deadline=time.monotonic() + limits.max_seconds,
+        asset_roots=roots,
+    )
+    surface = _discover(root, limits, coverage, roots)
 
     findings: list[ExposeFinding] = []
-    findings += _detect_maps_and_secrets(root, surface)
-    findings += _detect_public_env(root, surface)
-    findings += _detect_db_misconfig(root, surface)
-    findings += _detect_committed_pii(root, surface)
-    findings += _detect_committed_credentials(root, surface)
-    findings += _detect_open_cloud_rules(root, surface)
-    findings += _detect_minification(root, surface)
+    findings += _detect_maps_and_secrets(root, surface, coverage, limits.max_file_bytes)
+    findings += _detect_public_env(root, surface, coverage, limits.max_file_bytes)
+    findings += _detect_db_misconfig(root, surface, coverage, limits.max_file_bytes)
+    findings += _detect_committed_pii(root, surface, coverage, limits.max_file_bytes)
+    findings += _detect_committed_credentials(root, surface, coverage, limits.max_file_bytes)
+    findings += _detect_open_cloud_rules(root, surface, coverage, limits.max_file_bytes)
+    findings += _detect_minification(root, surface, coverage, limits.max_file_bytes)
 
     semgrep_ran = False
     semgrep_note: str | None = None
     document = _native_sarif(findings, tool_version)
-
     if run_semgrep:
         ext: ExternalRun = run_tool(SEMGREP_EXPOSURE, str(root))
         if ext.sarif is not None:
@@ -918,9 +1171,24 @@ def analyze_exposure(root: str | Path, *, tool_version: str = "0", run_semgrep: 
         elif ext.diagnostic is not None:
             semgrep_note = ext.diagnostic.message
 
+    coverage_metadata = coverage.as_dict()
+    coverage_metadata["semgrep"] = (
+        "ran" if semgrep_ran else "skipped" if run_semgrep else "not-requested"
+    )
+    if semgrep_note:
+        coverage_metadata["semgrepDiagnostic"] = " ".join(semgrep_note.split())[:500]
+    if document.get("runs") and isinstance(document["runs"][0], dict):
+        document["runs"][0].setdefault("properties", {})[
+            "tridelphiCoverage"
+        ] = coverage_metadata
+
     findings.sort(key=lambda f: (CATEGORY_ORDER.get(f.category, 9),
                                  SEVERITY_ORDER.get(f.severity, 3),
                                  f.where, f.rule))
     return ExposureResult(
-        findings=findings, sarif=document, semgrep_ran=semgrep_ran, semgrep_note=semgrep_note,
+        findings=findings,
+        sarif=document,
+        semgrep_ran=semgrep_ran,
+        semgrep_note=semgrep_note,
+        coverage=coverage,
     )

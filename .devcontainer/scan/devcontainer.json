@@ -1,0 +1,15 @@
+{
+  "name": "TriDelPhi — static scan workspace",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+  "remoteUser": "vscode",
+  "postCreateCommand": "python -m pip install .",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "security.workspace.trust.enabled": true,
+        "task.allowAutomaticTasks": "off",
+        "terminal.integrated.enablePersistentSessions": false
+      }
+    }
+  }
+}

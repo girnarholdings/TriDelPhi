@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Scan with TriDelPhi using your own GitHub Codespace. Your code stays out of the TriDelPhi website.">
+  <title>Scan your project · TriDelPhi</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body><main>
+  <header><span class="brand">TriDelPhi</span><span class="label">STATIC SECURITY CHECKS</span></header>
+  <h1>Check code before you trust it.</h1>
+  <p>Use your own GitHub Codespace: a temporary development computer in your browser. TriDelPhi does not charge for this option. GitHub usage limits and charges still apply.</p>
+  <p id="status" role="status" aria-live="polite">Checking sign-in…</p>
+  <section aria-labelledby="signin-title" id="signin">
+    <h2 id="signin-title">1. Connect GitHub</h2>
+    <p>Install the TriDelPhi GitHub App, then sign in with it. Installing the App and signing in are separate steps.</p>
+    <a id="install" hidden>Install GitHub App</a>
+    <a class="button" href="/auth/login">Sign in with GitHub</a>
+  </section>
+  <section aria-labelledby="free-title">
+    <h2 id="free-title">2. Open your scanning workspace</h2>
+    <p>We check that GitHub allows Codespaces for the trusted scanner repository and that your account would pay. GitHub makes the final availability and billing decision.</p>
+    <label><input id="billing" type="checkbox" disabled> I understand this uses my GitHub compute and storage allowance, and may cost money beyond it. I will check the payer shown by GitHub before creating the Codespace.</label>
+    <button id="codespaces" disabled>Continue to GitHub Codespaces</button>
+    <a id="launch" class="button" hidden rel="noreferrer">Review and create on GitHub</a>
+    <p class="small">No automatic creation. No fallback to paid Cloudflare scanning. Delete your Codespace when finished; stopping it does not delete its stored files.</p>
+  </section>
+  <section aria-labelledby="scan-title">
+    <h2 id="scan-title">3. Scan inside the Codespace</h2>
+    <p>Upload a ZIP or library archive into the trusted workspace, then run:</p>
+    <pre><code>python -m tridelphi.audit ./your-project.zip</code></pre>
+    <p>For a private GitHub repository, download its ZIP while signed into GitHub and upload it there. Do not open the untrusted target as a Codespace or run its installer.</p>
+    <p>The report stays in your Codespace. These are static checks, not antivirus or proof that code is safe.</p>
+  </section>
+  <section aria-labelledby="paid-title">
+    <h2 id="paid-title">Cloudflare scanning · Paid tier</h2>
+    <p>Reserved for authenticated paid accounts. Not launched yet; uploads are disabled for everyone until the isolated service is ready.</p>
+  </section>
+  <footer>
+    <p>No repository source or scan reports are received by this portal. Sign-in credentials are held server-side for up to 30 minutes. We do not collect training examples here.</p>
+    <p>Prefer no cloud? Install TriDelPhi locally on macOS, Windows or Linux and use the same command. Check the project documentation for platform coverage.</p>
+    <button id="logout" hidden>Sign out</button>
+  </footer>
+</main></body>
+</html>

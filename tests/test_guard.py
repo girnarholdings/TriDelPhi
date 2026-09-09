@@ -85,6 +85,21 @@ def test_weak_actor_gate_does_not_clear(tmp_path):
     )
 
 
+def test_role_word_outside_association_allowlist_does_not_clear(tmp_path):
+    root = _clone(tmp_path, "comment-and-control")
+    gate = (
+        "if: contains(fromJSON('[\"CONTRIBUTOR\"]'), "
+        "github.event.comment.author_association) && github.actor == 'OWNER'"
+    )
+    _with_job_line(root, "assist.yml", "assist", gate)
+    result = analyze(root)
+    assert [f for f in result.findings if f.severity == "critical"]
+    assert [
+        f for f in result.findings
+        if f.rule_id == "tridelphi/weak-actor-guard"
+    ]
+
+
 @pytest.mark.parametrize(
     "gate",
     [
@@ -116,7 +131,9 @@ def test_env_indirect_fix_hoists_every_injected_expression(tmp_path):
     # Quoted idiomatically: inside an open string the var is bare.
     assert 'echo "Triaging: $ISSUE_TITLE"' in text
     assert './scripts/triage.sh "$ISSUE_BODY"' in text
-    assert not [f for f in analyze(root).findings if f.severity == "critical"]
+    fresh = analyze(root)
+    assert not fresh.diagnostics
+    assert not [f for f in fresh.findings if f.severity == "critical"]
 
 
 def test_drop_ref_fix_removes_head_checkout(tmp_path):
@@ -167,6 +184,76 @@ def test_failed_fix_rolls_back_to_exact_bytes(tmp_path, monkeypatch):
     result = apply_action(root, _critical(root), "fix")
     assert result.status == "failed"
     assert _snapshot(root) == before
+
+
+def test_fix_that_breaks_yaml_is_rejected_and_rolled_back(tmp_path, monkeypatch):
+    """Making the original finding disappear via a parse error is not a fix."""
+    from tridelphi import apply as apply_module
+
+    root = _clone(tmp_path, "issue-to-write-token")
+    finding = _critical(root)
+    before = _snapshot(root)
+    monkeypatch.setitem(
+        apply_module._TRANSFORMS,
+        "env-indirect",
+        lambda *_args: "name: broken\non: [\n",
+    )
+    result = apply_action(root, finding, "fix")
+    assert result.status == "failed"
+    assert _snapshot(root) == before
+
+
+def test_drop_ref_fix_never_edits_multiple_steps_at_once(tmp_path):
+    """A finding may cover multiple unsafe checkouts; one consented fix edits
+    one step, then verification rolls back because another remains."""
+    root = _clone(tmp_path, "pwn-request-target")
+    workflow = root / ".github/workflows/integration.yml"
+    text = workflow.read_text()
+    checkout = """\
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+"""
+    assert checkout in text
+    workflow.write_text(text.replace(checkout, checkout + checkout))
+    before = workflow.read_bytes()
+    result = apply_action(root, _critical(root), "fix")
+    assert result.status == "failed"
+    assert workflow.read_bytes() == before
+
+
+def test_disable_refuses_to_overwrite_existing_backup(tmp_path):
+    root = _clone(tmp_path, "pwn-request-target")
+    finding = _critical(root)
+    workflow = root / ".github/workflows/integration.yml"
+    disabled = workflow.with_name(workflow.name + ".disabled")
+    disabled.write_text("existing backup\n")
+    original = workflow.read_bytes()
+
+    result = apply_action(root, finding, "disable")
+
+    assert result.status == "unavailable"
+    assert workflow.read_bytes() == original
+    assert disabled.read_text() == "existing backup\n"
+
+
+def test_fixer_refuses_a_workflow_directory_swapped_to_a_symlink(tmp_path):
+    root = _clone(tmp_path, "pwn-request-target")
+    finding = _critical(root)
+    workflow_dir = root / ".github" / "workflows"
+    original_dir = root / ".github" / "workflows-original"
+    workflow_dir.rename(original_dir)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_file = outside / "integration.yml"
+    outside_file.write_text("do not edit\n", encoding="utf-8")
+    workflow_dir.symlink_to(outside, target_is_directory=True)
+
+    result = apply_action(root, finding, "fix")
+
+    assert result.status == "unavailable"
+    assert outside_file.read_text(encoding="utf-8") == "do not edit\n"
 
 
 def test_failed_disable_rolls_back(tmp_path, monkeypatch):
@@ -285,14 +372,14 @@ def test_guard_is_silent_when_every_tool_is_present(tmp_path, monkeypatch):
 
 
 def test_guard_never_installs_without_an_explicit_yes(tmp_path, monkeypatch):
-    """Declining must leave the machine untouched — and say what that costs."""
+    """Even an affirmative input cannot run scripts from the scanned project."""
     calls = []
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a) or None)
-    out = _guard_tools(tmp_path, monkeypatch, present={"zizmor"}, answer="n\n")
-    assert not calls, "declining must not run an installer"
-    assert "Left alone" in out
+    out = _guard_tools(tmp_path, monkeypatch, present={"zizmor"}, answer="y\n")
+    assert not calls, "a target repository must never supply an installer"
+    assert "never runs installer scripts from the project" in out
 
 
 def test_dash_y_does_not_authorise_downloading_binaries(tmp_path, monkeypatch):
@@ -304,12 +391,11 @@ def test_dash_y_does_not_authorise_downloading_binaries(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a) or None)
     out = _guard_tools(tmp_path, monkeypatch, present=set(), yes=True)
     assert not calls, "-y must never trigger an install"
-    assert "-y covers applying fixes, not downloading tools" in out
+    assert "-y` only authorizes verified code fixes" in out
 
 
-def test_guard_does_not_offer_what_it_cannot_run(tmp_path, monkeypatch):
-    """The wheel does not ship scripts/, so the offer only appears where the
-    installers actually exist."""
+def test_guard_never_offers_target_repo_installers(tmp_path, monkeypatch):
+    """Target-owned installer names never become executable authority."""
     out = _guard_tools(tmp_path, monkeypatch, present={"zizmor"}, scripts=False)
     assert "Install them now?" not in out
-    assert "checksum-verified scripts" in out
+    assert "official" in out and "checksum-verified installer" in out

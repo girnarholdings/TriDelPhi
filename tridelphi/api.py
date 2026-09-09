@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -32,6 +33,7 @@ __all__ = ["AnalysisError", "analyze", "analyze_to_sarif"]
 _SUPPRESS = re.compile(
     r"#\s*tridelphi:\s*ignore\s+(?P<rule>[\w/-]+)\s*[—–-]{1,2}\s*(?P<reason>\S.*)$"  # noqa: RUF001
 )
+_MAX_SUPPRESSION_SOURCE_BYTES = 8 * 1024 * 1024
 
 
 class AnalysisError(Exception):
@@ -48,7 +50,26 @@ def _suppressions(root: Path, workflow_files: Sequence[str]) -> dict[str, list[t
     for rel in workflow_files:
         path = root / rel
         try:
-            text = path.read_text("utf-8", errors="replace")
+            current = root
+            for part in Path(rel).parts:
+                current = current / part
+                if current.is_symlink():
+                    raise OSError(f"refusing suppression read through symlink: {current}")
+            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(path, flags)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_SUPPRESSION_SOURCE_BYTES:
+                    continue
+                with os.fdopen(fd, "rb", closefd=False) as handle:
+                    raw = handle.read(_MAX_SUPPRESSION_SOURCE_BYTES + 1)
+                if len(raw) > _MAX_SUPPRESSION_SOURCE_BYTES:
+                    continue
+                text = raw.decode("utf-8", errors="replace")
+            finally:
+                os.close(fd)
         except OSError:
             continue
         entries: list[tuple[int, str]] = []
@@ -84,7 +105,7 @@ def analyze(
     root = Path(repo_root)
     if not root.exists():
         raise AnalysisError(f"path does not exist: {root}")
-    if not root.is_dir():
+    if root.is_symlink() or not root.is_dir():
         raise AnalysisError(f"not a directory: {root}")
 
     tables = tables or load_tables()

@@ -465,6 +465,9 @@ def _weak_actor_guard_cases() -> Iterator[Case]:
         "github.actor != 'dependabot[bot]'",
         "contains(github.actor, 'admin')",
         "github.triggering_actor == 'maintainer'",
+        "github.actor == 'OWNER'",
+        "github.actor == 'MEMBER'",
+        "github.actor == 'COLLABORATOR'",
     ):
         yield Case(
             name=f"weak-actor-guard({guard})",

@@ -1,5 +1,5 @@
 {
-  "_comment": "TriDelPhi L7 trust-lock. Legitimate pre-attack identity of tj-actions/changed-files; the workflow now pins the CVE-2025-30066 malicious commit.",
+  "_comment": "TriDelPhi L7 fixture. The reviewed source pin differs from the workflow's CVE-2025-30066 commit; this proves source-diff gating, not remote tag-movement detection.",
   "actions": {
     "actions/checkout": { "owner": "actions", "sha": "11d5960a326750d5838078e36cf38b85af677262" },
     "tj-actions/changed-files": { "owner": "tj-actions", "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" }

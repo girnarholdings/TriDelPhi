@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TriDelPhi Setup Studio — click, choose, one-click install</title>
-<meta name="description" content="Pick what TriDelPhi runs on your repo — the L1–L7 hardening ladder, the shipped-product exposure audit, your fail threshold and PR comments — and get a ready-to-commit GitHub Actions workflow, with a one-click 'create this file on GitHub' link. Fully static, nothing uploaded.">
+<meta name="description" content="Pick what TriDelPhi runs on your repo and get a ready-to-commit GitHub Actions workflow. The page is static; clicking Create opens GitHub with the generated workflow in the URL.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="TriDelPhi">
 <meta property="og:title" content="TriDelPhi Setup Studio — click, choose, one-click install">
-<meta property="og:description" content="Pick a door and a ladder level; get a ready-to-commit GitHub Actions workflow. Fully static — your choices never leave the browser.">
+<meta property="og:description" content="Pick a door and a ladder level; get a ready-to-commit GitHub Actions workflow. No account or setup service required.">
 <meta property="og:url" content="https://girnarholdings.github.io/TriDelPhi/setup.html">
 <meta property="og:image" content="https://girnarholdings.github.io/TriDelPhi/og-card.png">
 <meta property="og:image:alt" content="TriDelPhi — the Agents Rule of Two checker">
@@ -274,9 +274,9 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
 <div class="wrap">
   <section class="hero">
     <h1>Pick what runs.<br>Get a <span style="white-space:nowrap">ready-to-commit</span> workflow.</h1>
-    <p>Climb the three rungs; the file updates live and never leaves this
-      browser. Copy it, or open GitHub's editor pre-filled and commit in one
-      click.</p>
+    <p>Climb the three rungs; the file is generated locally in this browser.
+      Copy it, or choose the GitHub button to send the generated text in a
+      pre-filled GitHub editor URL and commit in one click.</p>
   </section>
 
   <div class="studio">
@@ -346,8 +346,8 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
               <span id="lvl-hint"></span></p>
           </div>
           <p class="hint">Same dial as <a href="./#ladder">the ladder on the
-            overview</a>. The Rule-of-Two scan always runs; each level adds one
-            pinned, checksum-verified scanner.</p>
+            overview</a>. The core scan always runs. Levels 1–5 add pinned scanners;
+            levels 6–7 add evidence and trust-lock checks.</p>
         </div></div>
       </section>
 
@@ -367,7 +367,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
               never fails the build.</span></span></label>
           <label class="toggle"><input type="checkbox" id="comment" checked>
             <span class="t"><b>Post a plain-language PR comment</b>
-            <span>A sticky, jargon-free summary on each pull request.</span></span></label>
+            <span>A jargon-free summary on same-repository pull requests. Fork reports appear in the job Summary.</span></span></label>
           <label class="q" for="failon">Fail the build when it finds…</label>
           <select id="failon">
             <option value="critical" selected>a critical (recommended)</option>
@@ -388,7 +388,9 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
 
       <div class="repo-row">
         <label for="repo">Your repository <span>(unlocks one-click create)</span></label>
-        <input type="text" id="repo" placeholder="owner/name, e.g. octocat/hello-world" autocomplete="off" spellcheck="false">
+        <input type="text" id="repo" placeholder="owner/name, e.g. octocat/hello-world"
+          autocomplete="off" spellcheck="false" aria-describedby="repo-status">
+        <span id="repo-status" role="status" aria-live="polite"></span>
       </div>
 
       <div class="btns">
@@ -428,8 +430,10 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
     </div>
   </div>
 
-  <p class="honest"><b>Honest by design.</b> TriDelPhi runs on the GitHub runner and uploads only a
-    SARIF report to your own Security tab; nothing is sent anywhere else. The exposure audit is a
+  <p class="honest"><b>Honest by design.</b> The core scan reads files on your GitHub runner and
+    uploads only a SARIF report to your own Security tab. Ladder levels can download scanners;
+    dependency/posture levels query the public databases they name. Your source is not uploaded.
+    The exposure audit is a
     <i>static</i> read: a clean result isn’t a penetration test, and a browser can never keep a secret,
     so it always says rotate and move it server-side, never “hide it.”</p>
 </div>
@@ -438,6 +442,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
   <div class="wrap">TriDelPhi · <a href="./">overview</a> · <a href="https://github.com/girnarholdings/TriDelPhi">GitHub</a> · Apache-2.0 · offline by default</div>
 </footer>
 
+<script src="release.js"></script>
 <script>
 /* Theme toggle: shared key with the overview, explicit choice wins. */
 (function () {
@@ -462,13 +467,14 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
   "use strict";
   // Kept identical to the pins in tridelphi/init_cmd.py — this page and
   // `tridelphi init` generate the same workflows, so they must agree.
+  var RELEASE = window.TRIDELPHI_RELEASE;
+  if (!RELEASE) throw new Error("release metadata did not load");
   var CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1";
   var SETUP_PYTHON = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0";
   // Pinned on purpose: an unpinned install inside a job holding a repository
   // token is the supply-chain shape this tool exists to flag. Mirrors
   // tridelphi/release.py — install_command(pinned=True).
-  var INSTALL_PINNED = "pipx install git+https://github.com/girnarholdings/TriDelPhi" +
-    "@d5c01388c21de9c1d12159087890d12d2d917990";
+  var INSTALL_PINNED = RELEASE.installPinned;
   var LEVELS = [
     ["0", "core", "Rule-of-Two capability scan only"],
     ["1", "+secrets", "adds gitleaks — keys committed in the open"],
@@ -477,7 +483,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
     ["4", "+posture", "adds OSSF Scorecard — repo safety habits"],
     ["5", "+SAST", "adds semgrep — risky patterns in your app code"],
     ["6", "+attest", "adds a signed evidence receipt + policy gate"],
-    ["7", "+trust", "adds the trust-lock — catches a swapped dependency"]
+    ["7", "+trust", "checks a reviewed trust-lock — first create it with tridelphi verify --write-trust-lock"]
   ];
   var elLvl = document.getElementById("lvl");
   var elLvlName = document.getElementById("lvl-name");
@@ -487,6 +493,7 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
   var elComment = document.getElementById("comment");
   var elFail = document.getElementById("failon");
   var elRepo = document.getElementById("repo");
+  var elRepoStatus = document.getElementById("repo-status");
   var elBuild = document.getElementById("buildcmd");
   var elFnameBar = document.getElementById("fname-bar");
   var elFnameSub = document.getElementById("fname-sub");
@@ -503,6 +510,11 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
   var rTune = document.getElementById("r-tune");
 
   function level() { return elLvl.value; }
+
+  function yamlBlock(value, indent) {
+    return String(value).replace(/\r\n?/g, "\n").split("\n")
+      .map(function (line) { return indent + line; }).join("\n");
+  }
 
   function path() {
     var r = document.querySelector('input[name="path"]:checked');
@@ -528,7 +540,6 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
       "",
       "permissions:",
       "  contents: read",
-      "  pull-requests: write",
       "",
       "jobs:",
       "  audit:",
@@ -536,11 +547,14 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
       "    runs-on: ubuntu-latest",
       "    steps:",
       "      - uses: " + CHECKOUT,
+      "        with:",
+      "          persist-credentials: false",
       "",
       "      # The audit reads files on disk, so build first or it can't see inside",
       "      # your bundle. Edit this to match how you build.",
       "      - name: Build",
-      "        run: " + (elBuild.value.trim() || "npm ci && npm run build"),
+      "        run: |",
+      yamlBlock(elBuild.value.trim() || "npm ci && npm run build", "          "),
       "",
       "      - uses: " + SETUP_PYTHON,
       "        with:",
@@ -549,7 +563,19 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
       "        run: " + INSTALL_PINNED,
       "",
       "      - name: Audit what we ship",
-      "        run: tridelphi expose . --fail-on none | tee -a \"$GITHUB_STEP_SUMMARY\""
+      "        run: |",
+      "          REPORT_MD=\"$RUNNER_TEMP/tridelphi-expose.md\"",
+      "          REPORT_TEXT=\"$RUNNER_TEMP/tridelphi-expose.txt\"",
+      "          rm -f -- \"$REPORT_MD\" \"$REPORT_TEXT\"",
+      "          tridelphi expose . --format checklist --checklist-md-file \"$REPORT_MD\" \\",
+      "            --fail-on none > \"$REPORT_TEXT\" 2>&1 || true",
+      "          if [ -f \"$REPORT_MD\" ]; then",
+      "            cat \"$REPORT_MD\" >> \"$GITHUB_STEP_SUMMARY\"",
+      "          else",
+      "            echo \"TriDelPhi could not produce the exposure report. Rerun this step.\" \\",
+      "              >> \"$GITHUB_STEP_SUMMARY\"",
+      "          fi",
+      "          echo \"TriDelPhi finished. Open the job Summary for the plain-language report.\""
     ].join("\n") + "\n";
   }
 
@@ -569,7 +595,6 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
       "permissions:",
       "  contents: read",
       "  security-events: write",
-      "  pull-requests: write",
       "",
       "concurrency:",
       "  group: tridelphi-${{ github.ref }}",
@@ -581,19 +606,29 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
       "    runs-on: ubuntu-latest",
       "    steps:",
       "      - uses: " + CHECKOUT,
-      "      - uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1",
+      "        with:",
+      "          persist-credentials: false",
+      "      - uses: " + RELEASE.actionUses,
       "        with:",
       "          level: '" + level() + "'",
       "          fail-on: " + elFail.value,
       "          comment: '" + (elComment.checked ? "true" : "false") + "'"
     ];
+    if (elComment.checked) {
+      lines.splice(lines.indexOf("  security-events: write") + 1, 0, "  pull-requests: write");
+    }
+    if (Number(level()) >= 6) {
+      var afterPermissions = lines.indexOf("  security-events: write") + 1;
+      if (elComment.checked) afterPermissions += 1;
+      lines.splice(afterPermissions, 0, "  id-token: write", "  attestations: write");
+    }
     if (elExpose.checked) lines.push("          expose: 'true'");
     return lines.join("\n") + "\n";
   }
 
   function buildOneline() {
     var lines = [
-      "- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1",
+      "- uses: " + RELEASE.actionUses,
       "  with:",
       "    level: '" + level() + "'",
       "    fail-on: " + elFail.value,
@@ -702,30 +737,47 @@ footer{border-top:1px solid var(--line);color:var(--faint);font-size:13px;
     }
     lastYaml = yaml;
 
-    var repo = elRepo.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, "");
-    if (/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+    var repo = elRepo.value.trim().replace(/^https:\/\/github\.com\//i, "").replace(/\/+$/, "");
+    var ownerPart = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?";
+    var repoPart = "[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?";
+    var validRepo = new RegExp("^" + ownerPart + "/" + repoPart + "$").test(repo);
+    if (validRepo) {
       var url = "https://github.com/" + repo + "/new/main?filename=" +
         encodeURIComponent(name) +
         "&value=" + encodeURIComponent(yaml);
       elCreate.setAttribute("href", url);
       elCreate.setAttribute("aria-disabled", "false");
+      elRepo.setAttribute("aria-invalid", "false");
+      elRepoStatus.textContent = "Ready to create in " + repo + ".";
     } else {
       elCreate.removeAttribute("href");
       elCreate.setAttribute("aria-disabled", "true");
+      elRepo.setAttribute("aria-invalid", elRepo.value.trim() ? "true" : "false");
+      elRepoStatus.textContent = elRepo.value.trim()
+        ? "Use exactly owner/repository with ordinary GitHub name characters."
+        : "";
     }
   }
 
   elCopy.addEventListener("click", function () {
     var text = buildYaml();
-    var done = function () { elCopied.classList.add("show"); setTimeout(function () { elCopied.classList.remove("show"); }, 1600); };
+    var announce = function (message) {
+      elCopied.textContent = message;
+      elCopied.classList.add("show");
+      setTimeout(function () { elCopied.classList.remove("show"); }, 2400);
+    };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, done);
+      navigator.clipboard.writeText(text).then(
+        function () { announce("Copied ✓"); },
+        function () { announce("Copy failed — select the workflow text instead."); }
+      );
     } else {
       elYaml.focus();
       var r = document.createRange(); r.selectNodeContents(elYaml);
       var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-      try { document.execCommand("copy"); } catch (e) {}
-      done();
+      var copied = false;
+      try { copied = document.execCommand("copy"); } catch (e) {}
+      announce(copied ? "Copied ✓" : "Copy failed — select the workflow text instead.");
     }
   });
 

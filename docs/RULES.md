@@ -13,6 +13,7 @@ in the result's property bag alongside `adrTechniques`.
 | [`tridelphi/agent-prompt-injection`](#agent-prompt-injection) | `error` | Agentic Control-Flow Hijacking, Indirect Prompt Injection | Attacker-controlled text is interpolated into a privileged agent's prompt |
 | [`tridelphi/agent-overbroad-tools`](#agent-overbroad-tools) | `warning` | Exploitation of Excessive Tool Permissions, Abuse of Agent's Code Interpreter | Agent step grants more capability than any task needs |
 | [`tridelphi/agent-hook-execution`](#agent-hook-execution) | `error` | Abuse of Agent's Code Interpreter, Exploitation of Excessive Tool Permissions | Agent hook configuration executes shell from an untrusted checkout |
+| [`tridelphi/agent-semantics-unknown`](#agent-semantics-unknown) | `warning` | Indirect Prompt Injection, Unvetted MCP Server Connection | AI-agent action behavior is not modeled, so safety is unknown |
 | [`tridelphi/untrusted-checkout-privileged-egress`](#untrusted-checkout-privileged-egress) | `error` | Abuse of Agent's Code Interpreter | Privileged job checks out and runs attacker-controlled code |
 | [`tridelphi/expression-injection-privileged`](#expression-injection-privileged) | `error` | Insecure Output Handling | Attacker-controlled expression reaches an interpreter in a privileged job |
 | [`tridelphi/env-file-injection`](#env-file-injection) | `error` | Insecure Output Handling, Agentic Control-Flow Hijacking | Attacker text is written into a GitHub environment file in a privileged job |
@@ -65,6 +66,21 @@ ADR threat techniques: *Exploitation of Excessive Tool Permissions*, *Abuse of A
 A .claude/settings.json hook runs a shell command whenever the agent reaches a lifecycle event. When the working tree comes from an untrusted ref, a pull request can add or edit that hook and obtain direct command execution with no language model in the loop. This is not prompt injection and no prompt hardening mitigates it.
 
 ADR threat techniques: *Abuse of Agent's Code Interpreter*, *Exploitation of Excessive Tool Permissions*
+
+## agent-semantics-unknown
+
+`tridelphi/agent-semantics-unknown` · default level `warning`
+
+**AI-agent action behavior is not modeled, so safety is unknown**
+
+The action name strongly suggests an AI coding agent, but TriDelPhi has no
+reviewed record of which pull-request-controlled instruction, MCP and hook files
+it restores from the trusted base branch. Unknown is not shown as passed. Keep
+the action on a read-only hosted runner, pin it to a full commit SHA, review the
+vendor's security behavior, then update `agent_signals.yml` with evidence and a
+review date.
+
+ADR threat techniques: *Indirect Prompt Injection*, *Unvetted MCP Server Connection*
 
 ## untrusted-checkout-privileged-egress
 
@@ -173,4 +189,3 @@ The job delegates to a remote reusable workflow. Its contents are not on disk, s
 **A workflow file could not be parsed**
 
 The file is not valid YAML, or is not shaped like a workflow. It was skipped. Reported as a finding because a file the scanner cannot read is a blind spot, and anyone able to choke the parser would otherwise become invisible.
-

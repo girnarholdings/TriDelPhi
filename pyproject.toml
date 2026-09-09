@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Static Agents Rule of Two checker for GitHub Actions"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 keywords = ["github-actions", "security", "sarif", "static-analysis", "ai-agents"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -37,6 +37,7 @@ Homepage = "https://github.com/girnarholdings/TriDelPhi"
 
 [tool.setuptools]
 packages = ["tridelphi"]
+include-package-data = false
 
 [tool.setuptools.package-data]
 tridelphi = ["data/*.yml", "data/*.json", "data/*.md", "data/semgrep-exposure/*.yml", "py.typed"]

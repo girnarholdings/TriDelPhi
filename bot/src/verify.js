@@ -8,17 +8,13 @@
 
 const encoder = new TextEncoder();
 
-// Constant-time comparison. A byte-by-byte `===` on the hex digests leaks timing
-// and is itself a bypass primitive; compare fixed-length buffers with XOR.
-function timingSafeEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-function toHex(buffer) {
-  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+function bodyBytes(rawBody) {
+  if (typeof rawBody === "string") return encoder.encode(rawBody);
+  if (rawBody instanceof ArrayBuffer) return new Uint8Array(rawBody);
+  if (ArrayBuffer.isView(rawBody)) {
+    return new Uint8Array(rawBody.buffer, rawBody.byteOffset, rawBody.byteLength);
+  }
+  return null;
 }
 
 // Verify `X-Hub-Signature-256` against the raw request body. `rawBody` must be
@@ -26,19 +22,20 @@ function toHex(buffer) {
 // whitespace and key order changes will break the digest.
 export async function verifySignature(secret, rawBody, signatureHeader) {
   if (!secret || !signatureHeader) return false;
-  const [scheme, provided] = String(signatureHeader).split("=");
-  if (scheme !== "sha256" || !provided) return false;
+  if (typeof signatureHeader !== "string" || signatureHeader.length !== 71 || !/^sha256=[0-9a-fA-F]{64}$/.test(signatureHeader)) return false;
+  const provided = signatureHeader.slice(7);
+  const bytes = bodyBytes(rawBody);
+  if (!bytes) return false;
 
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["sign"],
+    ["verify"],
   );
-  const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(rawBody));
-  const expected = toHex(mac);
-  return timingSafeEqual(expected, provided.toLowerCase());
+  const signature = Uint8Array.from(provided.match(/../g), (pair) => parseInt(pair, 16));
+  // Delegate authentication to WebCrypto; JavaScript comparison loops do not
+  // carry a constant-time guarantee through every runtime/JIT.
+  return crypto.subtle.verify("HMAC", key, signature, bytes);
 }
-
-export { timingSafeEqual };

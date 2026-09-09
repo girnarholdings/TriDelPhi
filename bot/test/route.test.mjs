@@ -152,6 +152,38 @@ await test("survives payloads missing the fields it reads", async () => {
   }
 });
 
+await test("bounds pull-request action names before reflecting a reason", async () => {
+  for (const action of ["x".repeat(65), "opened\nforged", "OPENED", 42, null]) {
+    const d = route("pull_request", prEvent({ action }), { allowlist: ALLOW });
+    assert.equal(d.act, "ignore");
+    assert.equal(d.reason, "pull_request action is missing or malformed");
+    assert.ok(d.reason.length < 100);
+  }
+});
+
+await test("rejects traversal and confusable repository identities", async () => {
+  const badRepositories = [
+    { name: "../demo", owner: { login: "acme" } },
+    { name: "demo", owner: { login: "../acme" } },
+    { name: "demo", owner: { login: "аcme" } }, // leading Cyrillic a
+    { name: ".demo", owner: { login: "acme" } },
+  ];
+  for (const bad of badRepositories) {
+    const d = route("pull_request", prEvent({ repository: bad }), { allowlist: ALLOW });
+    assert.equal(d.act, "ignore");
+    assert.match(d.reason, /valid repository/);
+  }
+});
+
+await test("rejects a full_name that disagrees with owner and name", async () => {
+  const payload = prEvent({
+    repository: { ...repository, full_name: "attacker/demo" },
+  });
+  const d = route("pull_request", payload, { allowlist: ALLOW });
+  assert.equal(d.act, "ignore");
+  assert.match(d.reason, /disagrees/);
+});
+
 await test("ignores event types the bot does not act on", async () => {
   for (const ev of ["push", "star", "", undefined]) {
     const d = route(ev, prEvent(), { allowlist: ALLOW });

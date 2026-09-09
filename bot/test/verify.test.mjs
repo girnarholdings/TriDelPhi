@@ -5,7 +5,7 @@
 
 import assert from "node:assert";
 import { createHmac } from "node:crypto";
-import { verifySignature, timingSafeEqual } from "../src/verify.js";
+import { verifySignature } from "../src/verify.js";
 
 function githubSignature(secret, body) {
   return "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
@@ -58,10 +58,11 @@ await test("signature is case-insensitive on the hex digest", async () => {
   assert.equal(await verifySignature(SECRET, BODY, sig), true);
 });
 
-await test("timingSafeEqual basics", () => {
-  assert.equal(timingSafeEqual("abc", "abc"), true);
-  assert.equal(timingSafeEqual("abc", "abd"), false);
-  assert.equal(timingSafeEqual("abc", "abcd"), false);
+await test("rejects trailing data and malformed signature types", async () => {
+  const sig = githubSignature(SECRET, BODY);
+  for (const malformed of [sig + "=extra", sig + "\n", sig + "," + sig, [sig], {}]) {
+    assert.equal(await verifySignature(SECRET, BODY, malformed), false);
+  }
 });
 
 console.log(`\n${passed} tests passed`);

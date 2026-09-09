@@ -44,6 +44,7 @@ in the merged SARIF and in gating. Other tools keep their own levels.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -55,8 +56,8 @@ from urllib.parse import unquote, urlparse
 
 from .model import Diagnostic
 from .orchestrate import MAX_OUTPUT_BYTES, run_zizmor, sarif_shape_error
-from .sarif import is_suppressed
-from .severity import SARIF_LEVEL_TO_SEVERITY as _SARIF_LEVEL_TO_SEVERITY
+from .sarif import severity_counts
+from .subprocessutil import run_bounded
 
 __all__ = [
     "LADDER",
@@ -203,12 +204,13 @@ SEMGREP_EXPOSURE = ToolSpec(
     install_hint="pipx install semgrep",
     network=False,  # local --config, --metrics off: no registry, no upload
     ok_exit_codes=frozenset({0, 1}),
-    timeout=600,
+    timeout=180,
     # The exposure audit's code-pattern rung: our LOCAL bundled ruleset,
     # metrics off, no registry — the offline-honest counterpart to L5.
     argv=(
         "scan", "--config", str(SEMGREP_EXPOSURE_RULES), "--sarif", "--output", "{report}",
-        "--metrics", "off", "--disable-version-check", "--quiet", ".",
+        "--metrics", "off", "--disable-version-check", "--quiet",
+        "--max-target-bytes", "8000000", "--timeout", "10", ".",
     ),
 )
 
@@ -229,21 +231,7 @@ class ExternalRun:
         self.diagnostic = diagnostic
         self.severity_counts: dict[str, int] = {"critical": 0, "warning": 0, "note": 0}
         if sarif is not None:
-            for result in _iter_results(sarif):
-                # A result the tool marked suppressed in source (e.g. semgrep's
-                # `# nosemgrep`) is an audited, accepted finding: it stays in the
-                # merged document as a dismissed alert but is not a live item, so
-                # it neither shows as "worth a look" nor gates the build.
-                if is_suppressed(result):
-                    continue
-                # The level is attacker-influenced like the rest of the
-                # document: anything that is not a known SARIF level string
-                # (wrong type included) counts as the SARIF default, warning.
-                level = result.get("level")
-                if not isinstance(level, str):
-                    level = "warning"
-                severity = _SARIF_LEVEL_TO_SEVERITY.get(level, "warning")
-                self.severity_counts[severity] += 1
+            self.severity_counts = severity_counts(_iter_results(sarif))
         self.finding_count = sum(self.severity_counts.values())
 
     @property
@@ -289,6 +277,8 @@ def run_tool(
         if zres.sarif is not None:
             _normalize_uris(zres.sarif, root)
             _ensure_workflow_prefix(zres.sarif)
+            _normalise_levels(zres.sarif)
+            _add_external_fingerprints(zres.sarif)
         return ExternalRun(ZIZMOR, sarif=zres.sarif, diagnostic=zres.diagnostic)
 
     binary = _binary(spec)
@@ -308,12 +298,12 @@ def run_tool(
         cmd = [binary, *(arg.replace("{report}", str(report)) for arg in spec.argv)]
 
         try:
-            completed = subprocess.run(
+            completed = run_bounded(
                 cmd,
-                capture_output=True,
-                text=True,
                 timeout=spec.timeout,
                 cwd=str(root),
+                max_stdout_bytes=MAX_OUTPUT_BYTES,
+                max_stderr_bytes=1024 * 1024,
             )
         except FileNotFoundError:  # pragma: no cover - race with which()
             return _skip(spec, f"{spec.name} vanished between lookup and run")
@@ -328,7 +318,7 @@ def run_tool(
 
         if spec.output_format == "scorecard-json":
             raw = completed.stdout or ""
-            if len(raw.encode("utf-8", errors="replace")) > MAX_OUTPUT_BYTES:
+            if completed.stdout_truncated:
                 return _skip(
                     spec,
                     f"{spec.name} produced over {MAX_OUTPUT_BYTES // (1024 * 1024)} MB "
@@ -352,6 +342,8 @@ def run_tool(
     if isinstance(document, ExternalRun):
         return document
     _normalize_uris(document, root)
+    _normalise_levels(document)
+    _add_external_fingerprints(document)
     if spec.severity_override:
         _override_levels(document, spec.severity_override)
     return ExternalRun(spec, sarif=document)
@@ -369,7 +361,7 @@ def _contained_parse(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRun:
     """Parse tool output defensively. Returns the document or a skip result."""
     try:
         document = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
         return _skip(spec, f"{spec.name} output was not valid SARIF JSON; skipped")
 
     defect = sarif_shape_error(document)
@@ -403,7 +395,7 @@ def _scorecard_to_sarif(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRu
     """
     try:
         doc = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
         return _skip(spec, f"{spec.name} output was not valid JSON; skipped")
     if not isinstance(doc, dict) or not isinstance(doc.get("checks"), list):
         return _skip(spec, f"{spec.name} output had no checks list; skipped")
@@ -440,15 +432,25 @@ def _scorecard_to_sarif(spec: ToolSpec, raw: str) -> dict[str, Any] | ExternalRu
                 {
                     "id": rule_id,
                     "name": name.replace("-", ""),
-                    "shortDescription": {"text": f"OSSF Scorecard: {name}"},
+                    "shortDescription": {"text": f"OSSF Scorecard advisory: {name}"},
                     "helpUri": f"{_SCORECARD_DOCS}#{anchor}",
+                    "properties": {"tridelphiAdvisory": True},
                 }
             )
         results.append(
             {
                 "ruleId": rule_id,
                 "level": level,
-                "message": {"text": f"{name} scored {score}/10: {reason}".strip()},
+                "message": {
+                    "text": (
+                        f"Advisory repository posture — {name} scored {score}/10: {reason}"
+                    ).strip()
+                },
+                "properties": {
+                    "scorecardScore": score,
+                    "tridelphiAdvisory": True,
+                    "tridelphiGatePolicy": "posture-only",
+                },
                 "locations": [
                     {
                         "physicalLocation": {
@@ -514,37 +516,48 @@ def _iter_result_locations(document: dict[str, Any]):
                 yield location
 
 
+def _iter_artifact_locations(document: dict[str, Any]):
+    """Every artifactLocation object, including stacks/code flows/extensions.
+
+    SARIF permits file locations outside ``result.locations``. A recursive
+    trust-boundary rewrite must cover them too; an iterative walk avoids Python
+    recursion limits on hostile scanner output.
+    """
+
+    stack: list[Any] = [document]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            artifact = value.get("artifactLocation")
+            if isinstance(artifact, dict):
+                yield artifact
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+
+
 def _normalize_uris(document: dict[str, Any], root: Path) -> None:
-    """Rewrite absolute ``file://`` URIs to repo-relative paths, in place.
+    """Confine every scanner-supplied artifact URI to the repository.
 
     osv-scanner emits ``file:///abs/path/to/package-lock.json``; GitHub code
     scanning can only annotate files it can resolve relative to the repo root.
     zizmor emits URIs relative to the *enclosing git root* (observed live), so
     when the scanned root is a subdirectory of a git repo — monorepos, our own
     fixtures — the URIs carry a computable prefix that must be stripped. URIs
-    outside the root are left untouched rather than guessed at -- except a
-    relative URI that climbs out via "..", which is rewritten to an
-    unambiguous absolute ``file://`` URI (see ``_relativize``): a wrapped
-    scanner's output is attacker-influenced, and a "../"-escaping relative
-    path is the one out-of-root shape that would otherwise look identical to
-    a legitimate in-repo path to a downstream consumer resolving it.
+    Anything outside the root, malformed, control-character-bearing, or using
+    a non-file scheme is replaced with the repo-level ``README.md`` anchor.
+    Keeping a hostile absolute URI is unnecessary data disclosure and can make
+    downstream uploaders resolve an attacker-chosen local path.
     """
     resolved = root.resolve()
     git_prefix = _git_prefix(resolved)
-    for location in _iter_result_locations(document):
-        physical = location.get("physicalLocation")
-        if not isinstance(physical, dict):
-            continue
-        artifact = physical.get("artifactLocation")
-        if not isinstance(artifact, dict):
-            continue
+    for artifact in _iter_artifact_locations(document):
         uri = artifact.get("uri")
         if not isinstance(uri, str):
             continue
         new = _relativize(uri, resolved, git_prefix)
-        if new is not None:
-            artifact["uri"] = new
-            artifact.pop("uriBaseId", None)
+        artifact["uri"] = new if new is not None else "README.md"
+        artifact.pop("uriBaseId", None)
 
 
 def _git_prefix(root: Path) -> str | None:
@@ -559,17 +572,33 @@ def _git_prefix(root: Path) -> str | None:
 
 
 def _relativize(uri: str, root: Path, git_prefix: str | None) -> str | None:
-    if uri.startswith("file://"):
-        path = Path(unquote(urlparse(uri).path))
-    elif uri.startswith("/"):
-        path = Path(uri)
+    decoded = uri
+    for _ in range(4):
+        again = unquote(decoded)
+        if again == decoded:
+            break
+        decoded = again
+    if not decoded or any(ord(char) < 32 or ord(char) == 127 for char in decoded):
+        return None
+
+    parsed = urlparse(decoded)
+    if parsed.query or parsed.fragment:
+        return None
+    if parsed.scheme and parsed.scheme != "file":
+        return None
+    if parsed.scheme == "file":
+        if parsed.netloc not in {"", "localhost"}:
+            return None
+        path = Path(parsed.path)
+    elif decoded.startswith("/"):
+        path = Path(decoded)
     else:
         # A relative URI: either already relative to the scanned root, or (for
         # zizmor inside a monorepo) relative to the enclosing git root, in
         # which case the computable prefix is stripped first.
-        candidate = uri
-        if git_prefix and uri.startswith(git_prefix):
-            candidate = uri[len(git_prefix):]
+        candidate = parsed.path
+        if git_prefix and candidate.startswith(git_prefix):
+            candidate = candidate[len(git_prefix):]
         # Either way it must not climb out via "..". Unlike an absolute or
         # file:// URI outside the root, a "../"-escaping relative URI is
         # indistinguishable from a legitimate in-repo path to a naive resolver,
@@ -577,16 +606,60 @@ def _relativize(uri: str, root: Path, git_prefix: str | None) -> str | None:
         # file:// URI that can never be mistaken for a path inside the scanned
         # root. The check runs on the percent-decoded form because that is what
         # a URI consumer resolves ("%2e%2e/" is "../" to them).
-        resolved = (root / unquote(candidate)).resolve()
+        resolved = (root / candidate).resolve()
         try:
             resolved.relative_to(root)
         except ValueError:
-            return f"file://{resolved.as_posix()}"
-        return candidate if candidate != uri else None
+            return None
+        clean = Path(candidate).as_posix()
+        return clean
     try:
         return path.resolve().relative_to(root).as_posix()
     except ValueError:
-        return None  # outside the repo; do not guess
+        return None
+
+
+_SARIF_LEVELS = {"error", "warning", "note", "none"}
+
+
+def _normalise_levels(document: dict[str, Any]) -> None:
+    """Make the unknown-severity policy explicit in the emitted document."""
+
+    for result in _iter_results(document):
+        if result.get("level") not in _SARIF_LEVELS:
+            result["level"] = "warning"
+
+
+def _add_external_fingerprints(document: dict[str, Any]) -> None:
+    """Attach stable, line-insensitive identities for baselining external tools."""
+
+    for run in document.get("runs", []):
+        if not isinstance(run, dict):
+            continue
+        driver = run.get("tool", {}).get("driver", {}) if isinstance(run.get("tool"), dict) else {}
+        tool_name = driver.get("name", "external") if isinstance(driver, dict) else "external"
+        for result in run.get("results", []):
+            if not isinstance(result, dict):
+                continue
+            message = result.get("message", {})
+            message_text = message.get("text", "") if isinstance(message, dict) else ""
+            uris: list[str] = []
+            for location in result.get("locations", []):
+                if not isinstance(location, dict):
+                    continue
+                physical = location.get("physicalLocation", {})
+                artifact = physical.get("artifactLocation", {}) if isinstance(physical, dict) else {}
+                if isinstance(artifact, dict) and isinstance(artifact.get("uri"), str):
+                    uris.append(artifact["uri"])
+            identity = json.dumps(
+                [str(tool_name), str(result.get("ruleId", "")), str(message_text), sorted(uris)],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+            partial = result.setdefault("partialFingerprints", {})
+            if isinstance(partial, dict):
+                partial.setdefault("tridelphiExternal/v1", digest)
 
 
 def _ensure_workflow_prefix(document: dict[str, Any]) -> None:
@@ -651,11 +724,6 @@ def credits_text() -> str:
         lines.append(f"  {'':20} {spec.what}; {net}")
         lines.append(f"  {'':20} {spec.homepage}")
         lines.append("")
-    lines.append("")
-    lines.append("  L7 · trust           gh CLI  (MIT, optional)")
-    lines.append(f"  {'':20} verifies upstream SLSA provenance; only the fetch is online")
-    lines.append(f"  {'':20} https://github.com/cli/cli")
-    lines.append("")
     lines.append("TriDelPhi core (the capability-graph analysis) is native and always runs.")
     lines.append(
         "L6 (attest & gate) and L7's trust-lock pawl are native too: "

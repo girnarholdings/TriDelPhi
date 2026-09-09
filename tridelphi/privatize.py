@@ -24,12 +24,14 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
-from .expose import _detect_maps_and_secrets, _Surface
+from .expose import ExposureCoverage, ExposureLimits, _detect_maps_and_secrets, _Surface, _walk
+from .subprocessutil import run_bounded
 
 __all__ = ["DirSnapshot", "run_privatize"]
 
@@ -98,6 +100,8 @@ class DirSnapshot:
         self._committed = False
 
     def __enter__(self) -> DirSnapshot:
+        if self.target.is_symlink() or not self.target.is_dir():
+            raise ValueError("snapshot target must be a plain directory, not a symlink")
         self._tmp = Path(tempfile.mkdtemp(prefix="tridelphi-snap-"))
         # If the copy fails (unreadable tree, disk full), `__exit__` never runs —
         # the `with` block was never entered — so clean the tempdir here rather
@@ -119,6 +123,8 @@ class DirSnapshot:
         if self._backup is None or not self._backup.exists():
             return
         if self.target.exists():
+            if self.target.is_symlink() or not self.target.is_dir():
+                raise RuntimeError("refusing rollback because the target became a symlink or special file")
             shutil.rmtree(self.target)
         shutil.copytree(self._backup, self.target, symlinks=True)
 
@@ -148,8 +154,7 @@ def _safe_from_tampering(path: Path) -> bool:
     entry is itself a symlink, whose own mode bits are a meaningless ``rwxrwxrwx``
     and must not be read): the real binary, the directory holding the real
     binary, and the directory holding the (possibly symlink) entry we were given
-    — a writable entry directory would let an attacker repoint it. The pinned
-    install lands under the repo, which the user owns. (POSIX permission bits; on
+    — a writable entry directory would let an attacker repoint it. (POSIX permission bits; on
     a platform without them this is a no-op and the other candidates still apply.)"""
     import stat
 
@@ -164,27 +169,19 @@ def _safe_from_tampering(path: Path) -> bool:
         return False
 
 
-def _find_obfuscator(root: Path) -> list[str] | None:
+def _find_obfuscator(_root: Path) -> list[str] | None:
     """Locate the pinned javascript-obfuscator installed by install-privatize.sh.
 
-    Every candidate — including the one on PATH — is passed through
-    :func:`_safe_from_tampering` before it is returned, so a binary sitting in a
-    group- or world-writable location is never executed. That gate, not the
-    choice of directory, is what defuses a poisoned obfuscator in a shared temp."""
+    Only the dedicated directory used by TriDelPhi's installer is eligible.
+    Project-local ``node_modules/.bin`` and PATH are deliberately excluded: the
+    project is the input being guarded, so a same-named executable it supplies
+    is not trusted tooling."""
     import os
 
     dest = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "tridelphi-privatize"
-    candidates = [
-        root / "node_modules" / ".bin" / "javascript-obfuscator",
-        root / ".tridelphi" / "privatize" / "node_modules" / ".bin" / "javascript-obfuscator",
-        dest / "node_modules" / ".bin" / "javascript-obfuscator",
-    ]
-    for c in candidates:
-        if c.is_file() and _safe_from_tampering(c):
-            return [str(c)]
-    found = shutil.which("javascript-obfuscator")
-    if found and _safe_from_tampering(Path(found)):
-        return [found]
+    candidate = dest / "node_modules" / ".bin" / "javascript-obfuscator"
+    if candidate.is_file() and _safe_from_tampering(candidate):
+        return [str(candidate)]
     return None
 
 
@@ -197,7 +194,12 @@ def _default_obfuscate(src: Path, dst: Path) -> tuple[bool, str]:
         )
     cmd = [*argv, str(src), "--output", str(dst), *_SAFE_FLAGS]
     try:
-        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        completed = run_bounded(
+            cmd,
+            timeout=600,
+            max_stdout_bytes=2 * 1024 * 1024,
+            max_stderr_bytes=2 * 1024 * 1024,
+        )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         return False, f"obfuscator did not run: {exc}"
     if completed.returncode != 0 or not dst.exists():
@@ -223,9 +225,12 @@ def _default_run_cmd(command: str, cwd: Path, timeout: int) -> tuple[bool, str]:
     is a dev/CI-runner command, not a Windows path.)
     """
     try:
-        completed = subprocess.run(
-            ["/bin/sh", "-c", command], cwd=str(cwd), capture_output=True,
-            text=True, timeout=timeout,
+        completed = run_bounded(
+            ["/bin/sh", "-c", command],
+            cwd=str(cwd),
+            timeout=timeout,
+            max_stdout_bytes=2 * 1024 * 1024,
+            max_stderr_bytes=2 * 1024 * 1024,
         )
     except subprocess.TimeoutExpired:
         return False, f"`{command}` did not finish within {timeout}s"
@@ -239,13 +244,21 @@ def _default_run_cmd(command: str, cwd: Path, timeout: int) -> tuple[bool, str]:
 
 
 def _resolve_output(root: Path, privatize_out: str | None) -> Path | None:
+    root = root.resolve()
     if privatize_out:
         p = (root / privatize_out) if not Path(privatize_out).is_absolute() else Path(privatize_out)
-        return p if p.is_dir() else None
+        if p.is_symlink() or not p.is_dir():
+            return None
+        try:
+            resolved = p.resolve(strict=True)
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            return None
+        return resolved
     for name in _OUTPUT_DIRS:
         cand = root / name
-        if cand.is_dir():
-            return cand
+        if cand.is_dir() and not cand.is_symlink():
+            return cand.resolve()
     return None
 
 
@@ -267,15 +280,40 @@ def _shipped_secrets(root: Path, target: Path):
     the way the repo-wide audit does. Locations stay repo-relative.
     """
     surface = _Surface()
-    for p in sorted(target.rglob("*")):
-        if not p.is_file() or p.is_symlink():
-            continue
+    limits = ExposureLimits(
+        max_files=25_000,
+        max_entries=50_000,
+        max_total_bytes=500_000_000,
+        max_seconds=15,
+    )
+    coverage = ExposureCoverage()
+    coverage.deadline = time.monotonic() + limits.max_seconds
+    for p in _walk(target, limits, coverage):
         if p.suffix == ".map":
             surface.maps.append(p)
         elif p.suffix in (".js", ".mjs", ".cjs"):
             surface.bundles.append(p)
-    return [f for f in _detect_maps_and_secrets(root, surface)
-            if f.severity == "critical" and f.rule in _INTERLOCK_SECRET_RULES]
+    findings = [
+        f
+        for f in _detect_maps_and_secrets(root, surface, coverage, limits.max_file_bytes)
+        if f.severity == "critical" and f.rule in _INTERLOCK_SECRET_RULES
+    ]
+    return findings, coverage
+
+
+def _tree_coverage(root: Path) -> ExposureCoverage:
+    """Bounded no-follow validation for transformed output trees."""
+
+    limits = ExposureLimits(
+        max_files=25_000,
+        max_entries=50_000,
+        max_total_bytes=500_000_000,
+        max_seconds=15,
+    )
+    coverage = ExposureCoverage()
+    coverage.deadline = time.monotonic() + limits.max_seconds
+    _walk(root, limits, coverage)
+    return coverage
 
 
 def run_privatize(
@@ -308,6 +346,7 @@ def run_privatize(
         print(f"tridelphi: {root} is not a directory", file=err)
         return 2
 
+    root = root.resolve()
     target = _resolve_output(root, privatize_out)
     if target is None:
         print("tridelphi privatize: no built output found. Build your app first "
@@ -330,8 +369,24 @@ def run_privatize(
         print("  Declined — nothing was changed.\n", file=out)
         return 0
 
-    # Secret interlock — the load-bearing honesty check.
-    secrets = _shipped_secrets(root, target)
+    # Secret interlock — the load-bearing honesty check. Its bounded no-follow
+    # walk also proves the tree is fully readable before any transform starts.
+    secrets, coverage = _shipped_secrets(root, target)
+    if coverage.skipped_symlinks:
+        print(
+            "\n  ⛔ Refusing: the build output contains a symlink. Privatize never\n"
+            "     follows or rewrites links because they can point outside your build.\n",
+            file=err,
+        )
+        return 2
+    if not coverage.complete:
+        print(
+            "\n  ⛔ Refusing: the secret check could not read the complete build safely.\n"
+            "     Privatize will not hide output it could not inspect. Reduce the build\n"
+            "     size or remove unreadable files, then try again.\n",
+            file=err,
+        )
+        return 2
     if secrets:
         print("\n  ⛔ Refusing: your build ships what looks like a live secret.\n"
               "     Obfuscation would hide it from you, not from an attacker who can\n"
@@ -341,23 +396,34 @@ def run_privatize(
             print(f"       · {f.where} — {f.message.split('.')[0]}.", file=err)
         return 2
 
-    tmp_out = target.parent / (target.name + ".tridelphi-tmp")
-    # The staging path is predictable and sits beside the build dir. Refuse if
-    # something already occupies it as a symlink or a non-directory: blindly
-    # rmtree-ing a pre-planted symlink, or replace()-ing onto one, would let it
-    # redirect the swap outside the build tree.
-    if tmp_out.is_symlink() or (tmp_out.exists() and not tmp_out.is_dir()):
-        print(f"\n  ⛔ Refusing: {tmp_out.name} already exists and is not a plain\n"
-              "     directory. Remove it and run privatize again.\n", file=err)
-        return 2
-    if tmp_out.exists():
-        shutil.rmtree(tmp_out)
+    # A random, owner-created staging parent avoids predictable pre-planted
+    # paths. The transform writes into a not-yet-existing child, so we never
+    # delete someone else's preexisting file or directory to make room.
+    stage_root = Path(tempfile.mkdtemp(prefix=f".{target.name}.tridelphi-", dir=target.parent))
+    tmp_out = stage_root / target.name
 
     ok, detail = obf(target, tmp_out)
     if not ok:
-        if tmp_out.exists():
-            shutil.rmtree(tmp_out, ignore_errors=True)
+        shutil.rmtree(stage_root, ignore_errors=True)
         print(f"\n  Could not obfuscate: {detail}\n", file=err)
+        return 2
+    transformed_coverage = (
+        _tree_coverage(tmp_out)
+        if not tmp_out.is_symlink() and tmp_out.is_dir()
+        else None
+    )
+    if (
+        tmp_out.is_symlink()
+        or transformed_coverage is None
+        or not transformed_coverage.complete
+        or transformed_coverage.skipped_symlinks
+    ):
+        shutil.rmtree(stage_root, ignore_errors=True)
+        print(
+            "\n  ⛔ Refusing: the obfuscator output is symlinked, incomplete, too large, "
+            "or unreadable.\n",
+            file=err,
+        )
         return 2
 
     # No smoke check → dry-run. We never replace a working build with output we
@@ -371,19 +437,25 @@ def run_privatize(
 
     # Verified swap: back up the original, put the obfuscated output in place,
     # run the user's checks, and keep it only if they pass.
-    with DirSnapshot(target) as snap:
-        shutil.rmtree(target)
-        tmp_out.replace(target)
-        for label, cmd in (("build", build_cmd), ("smoke", smoke_cmd)):
-            if not cmd:
-                continue
-            passed, output = verify(cmd, root, 900)
-            if not passed:
-                print(f"\n  ✗ The {label} check failed on the obfuscated build — reverting.\n"
-                      f"    Your files are back exactly as they were.\n"
-                      f"    {label}: {output.strip()[-300:]}\n", file=err)
-                return 2  # DirSnapshot rolls back on the uncommitted exit
-        snap.commit()
+    try:
+        with DirSnapshot(target) as snap:
+            if target.is_symlink() or not target.is_dir():
+                print("\n  ⛔ Refusing: the live output changed type before the swap.\n", file=err)
+                return 2
+            shutil.rmtree(target)
+            tmp_out.replace(target)
+            for label, cmd in (("build", build_cmd), ("smoke", smoke_cmd)):
+                if not cmd:
+                    continue
+                passed, output = verify(cmd, root, 900)
+                if not passed:
+                    print(f"\n  ✗ The {label} check failed on the obfuscated build — reverting.\n"
+                          f"    Your files are back exactly as they were.\n"
+                          f"    {label}: {output.strip()[-300:]}\n", file=err)
+                    return 2  # DirSnapshot rolls back on the uncommitted exit
+            snap.commit()
+    finally:
+        shutil.rmtree(stage_root, ignore_errors=True)
 
     print("\n  ✓ Obfuscated and verified against your checks. Your build output is now\n"
           "    harder to read. This is not a guarantee — obfuscators can miscompile;\n"

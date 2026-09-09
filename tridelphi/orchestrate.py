@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .model import Diagnostic
+from .subprocessutil import run_bounded
 
 __all__ = [
     "MAX_OUTPUT_BYTES",
@@ -44,6 +45,45 @@ __all__ = [
 # attacker-influenced content; a report this size is an attack or a bug, and
 # either way it does not belong in memory or in the merged document.
 MAX_OUTPUT_BYTES = 25 * 1024 * 1024
+MAX_SARIF_RUNS = 64
+MAX_SARIF_RESULTS_PER_RUN = 50_000
+MAX_SARIF_RULES_PER_RUN = 50_000
+MAX_SARIF_LOCATIONS_PER_RESULT = 32
+MAX_SARIF_NODES = 2_000_000
+MAX_SARIF_STRING_CHARS = 1_000_000
+
+
+def _text_error(value: Any, label: str, *, required: bool = False) -> str | None:
+    if value is None and not required:
+        return None
+    if not isinstance(value, str):
+        return f"output had a non-text {label}"
+    if required and not value.strip():
+        return f"output had an empty {label}"
+    if len(value) > MAX_SARIF_STRING_CHARS:
+        return f"output had an overlong {label}"
+    return None
+
+
+def _global_budget_error(document: Any) -> str | None:
+    """Bound hostile JSON even in SARIF extension properties we do not use."""
+
+    stack = [document]
+    seen = 0
+    while stack:
+        value = stack.pop()
+        seen += 1
+        if seen > MAX_SARIF_NODES:
+            return "output exceeded the SARIF object budget"
+        if isinstance(value, str):
+            if len(value) > MAX_SARIF_STRING_CHARS:
+                return "output contained an overlong string"
+        elif isinstance(value, dict):
+            stack.extend(value.keys())
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return None
 
 
 def sarif_shape_error(document: Any) -> str | None:
@@ -58,21 +98,90 @@ def sarif_shape_error(document: Any) -> str | None:
     """
     if not isinstance(document, dict) or not isinstance(document.get("runs"), list):
         return "output was not a SARIF document"
-    for run in document["runs"]:
+    budget_error = _global_budget_error(document)
+    if budget_error is not None:
+        return budget_error
+    runs = document["runs"]
+    if len(runs) > MAX_SARIF_RUNS:
+        return f"output had more than {MAX_SARIF_RUNS} runs"
+    for run in runs:
         if not isinstance(run, dict):
             return "output had a malformed run"
         results = run.get("results", [])
         if not isinstance(results, list) or any(not isinstance(r, dict) for r in results):
             return "output had malformed results"
+        if len(results) > MAX_SARIF_RESULTS_PER_RUN:
+            return f"output had more than {MAX_SARIF_RESULTS_PER_RUN} results in one run"
         driver = run.get("tool", {})
         if not isinstance(driver, dict) or not isinstance(driver.get("driver"), dict):
             return "output had no tool.driver"
+        driver = driver["driver"]
+        error = _text_error(driver.get("name"), "tool.driver.name", required=True)
+        if error is not None:
+            return error
+        for field in ("version", "semanticVersion", "informationUri"):
+            error = _text_error(driver.get(field), f"tool.driver.{field}")
+            if error is not None:
+                return error
+        rules = driver.get("rules", [])
+        if not isinstance(rules, list) or any(not isinstance(rule, dict) for rule in rules):
+            return "output had malformed tool rules"
+        if len(rules) > MAX_SARIF_RULES_PER_RUN:
+            return f"output had more than {MAX_SARIF_RULES_PER_RUN} tool rules"
+        for rule in rules:
+            error = _text_error(rule.get("id"), "rule id")
+            if error is not None:
+                return error
         for result in results:
+            error = _text_error(result.get("ruleId"), "result ruleId")
+            if error is not None:
+                return error
+            level = result.get("level")
+            if level is not None and not isinstance(level, str):
+                return "output had a non-text result level"
+            message = result.get("message")
+            if message is not None:
+                if not isinstance(message, dict):
+                    return "output had a malformed result message"
+                for field in ("text", "markdown", "id"):
+                    error = _text_error(message.get(field), f"result message {field}")
+                    if error is not None:
+                        return error
             locations = result.get("locations", [])
             if not isinstance(locations, list) or any(
                 not isinstance(loc, dict) for loc in locations
             ):
                 return "output had malformed result locations"
+            if len(locations) > MAX_SARIF_LOCATIONS_PER_RESULT:
+                return f"output had more than {MAX_SARIF_LOCATIONS_PER_RESULT} result locations"
+            for location in locations:
+                physical = location.get("physicalLocation")
+                if physical is not None and not isinstance(physical, dict):
+                    return "output had a malformed physicalLocation"
+                if not isinstance(physical, dict):
+                    continue
+                artifact = physical.get("artifactLocation")
+                if artifact is not None and not isinstance(artifact, dict):
+                    return "output had a malformed artifactLocation"
+                if isinstance(artifact, dict):
+                    error = _text_error(artifact.get("uri"), "artifact URI")
+                    if error is not None:
+                        return error
+                    error = _text_error(artifact.get("uriBaseId"), "artifact uriBaseId")
+                    if error is not None:
+                        return error
+                region = physical.get("region")
+                if region is not None and not isinstance(region, dict):
+                    return "output had a malformed region"
+                if isinstance(region, dict):
+                    for field in ("startLine", "startColumn", "endLine", "endColumn"):
+                        coordinate = region.get(field)
+                        if coordinate is not None and (
+                            not isinstance(coordinate, int)
+                            or isinstance(coordinate, bool)
+                            or coordinate < 1
+                        ):
+                            return f"output had an invalid region {field}"
     return None
 
 
@@ -140,12 +249,12 @@ def run_zizmor(repo_root: str | Path, *, offline: bool = True, timeout: int = 12
     cmd.append(".github/workflows")
 
     try:
-        completed = subprocess.run(
+        completed = run_bounded(
             cmd,
-            capture_output=True,
-            text=True,
             timeout=timeout,
             cwd=str(repo_root),
+            max_stdout_bytes=MAX_OUTPUT_BYTES,
+            max_stderr_bytes=1024 * 1024,
         )
     except FileNotFoundError:  # pragma: no cover - race with zizmor_path()
         return ZizmorResult(
@@ -161,7 +270,7 @@ def run_zizmor(repo_root: str | Path, *, offline: bool = True, timeout: int = 12
     # zizmor exits non-zero when it finds problems, which is success for our
     # purposes. A parse failure of its stdout is the real error signal.
     stdout = completed.stdout.strip()
-    if len(stdout.encode("utf-8", errors="replace")) > MAX_OUTPUT_BYTES:
+    if completed.stdout_truncated:
         return ZizmorResult(
             diagnostic=Diagnostic(
                 "zizmor",
@@ -185,7 +294,7 @@ def run_zizmor(repo_root: str | Path, *, offline: bool = True, timeout: int = 12
 
     try:
         document = json.loads(stdout)
-    except ValueError:
+    except (ValueError, RecursionError):
         return ZizmorResult(
             diagnostic=Diagnostic(
                 "zizmor", "zizmor output was not valid SARIF JSON", "warning"

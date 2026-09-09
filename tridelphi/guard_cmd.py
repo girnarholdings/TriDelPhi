@@ -102,7 +102,7 @@ def _card(finding: Finding, index: int, total: int, out: TextIO) -> None:
     print(file=out)
 
 
-# The optional tooling, what each one buys, and which installer provides it.
+# The optional tooling and what each one buys.
 # Everything here is optional by design: the Rule-of-Two core is native and
 # needs none of it. What the absence costs you is a rung reporting "not run",
 # which reads like a clean result — so it is worth saying out loud.
@@ -115,29 +115,21 @@ _OPTIONAL_TOOLS: tuple[tuple[str, str, str], ...] = (
     ("javascript-obfuscator", "`tridelphi privatize`", "privatize"),
 )
 
-_INSTALLERS = {
-    "ladder": ("scripts/install-ladder.sh", "5"),
-    "privatize": ("scripts/install-privatize.sh", ""),
-}
-
-
 def _missing_tools() -> list[tuple[str, str, str]]:
     import shutil
 
     return [t for t in _OPTIONAL_TOOLS if shutil.which(t[0]) is None]
 
 
-def _offer_missing_tools(root: Path, *, yes: bool, stream: TextIO, out: TextIO) -> None:
-    """Name what is missing, and offer to fetch it — never silently.
+def _offer_missing_tools(
+    _root: Path, *, yes: bool, stream: TextIO, out: TextIO
+) -> None:
+    """Name missing coverage, but never run installer code from the target.
 
-    Downloading and running binaries is a different class of act from editing a
-    workflow file, so it is not covered by `-y` and is never done without an
-    explicit yes. That is also why this offers rather than auto-installs: a tool
-    whose banner promises it "ran entirely on your machine, nothing uploaded"
-    cannot quietly reach out to the network on your behalf.
-
-    The installers live in `scripts/`, which the published wheel does not ship,
-    so the offer only appears when guard is run from a checkout that has them.
+    The repository being guarded is untrusted input. A file it calls
+    ``scripts/install-ladder.sh`` is not a TriDelPhi installer, even if the name
+    matches. Installation therefore stays a separate, user-run operation from
+    an official TriDelPhi checkout or release.
     """
     missing = _missing_tools()
     if not missing:
@@ -147,61 +139,15 @@ def _offer_missing_tools(root: Path, *, yes: bool, stream: TextIO, out: TextIO) 
     for name, why, _kind in missing:
         print(f"    · {name:<22} {why}", file=out)
 
-    kinds = {kind for _n, _w, kind in missing}
-    available = {k: root / _INSTALLERS[k][0] for k in kinds if (root / _INSTALLERS[k][0]).is_file()}
-    if not available:
-        print(
-            "\n  What they check is skipped — a missing tool, not a clean result.\n"
-            "  Install them with the pinned, checksum-verified scripts from the\n"
-            "  TriDelPhi repository (scripts/install-ladder.sh).\n",
-            file=out,
-        )
-        return
-
-    if yes:
-        # -y means "apply the fixes without asking", not "fetch and run binaries".
-        print(
-            "\n  Skipping install: -y covers applying fixes, not downloading tools.\n"
-            "  Run `bash scripts/install-ladder.sh 5 ~/.local/bin` when you want them.\n",
-            file=out,
-        )
-        return
-
     print(
-        "\n  These install from pinned versions, each verified against a recorded\n"
-        "  checksum before use. Install them now? [y/N] ",
-        end="",
+        "\n  What they check is skipped — a missing tool, not a clean result.\n"
+        "  For safety, guard never runs installer scripts from the project it is\n"
+        "  scanning. Use the pinned, checksum-verified installer from the official\n"
+        "  TriDelPhi release or checkout, then run guard again.\n",
         file=out,
-        flush=True,
     )
-    answer = (stream.readline() or "").strip().lower()
-    if answer not in ("y", "yes"):
-        print("\n  Left alone. What they check will be skipped.\n", file=out)
-        return
-
-    import subprocess
-
-    dest = Path.home() / ".local" / "bin"
-    dest.mkdir(parents=True, exist_ok=True)
-    for kind, script in sorted(available.items()):
-        arg = _INSTALLERS[kind][1]
-        cmd = ["bash", str(script)] + ([arg] if arg else []) + [str(dest)]
-        print(f"  running {' '.join(cmd[1:])}", file=out)
-        try:
-            completed = subprocess.run(cmd, cwd=str(root), check=False)
-        except OSError as exc:
-            print(f"  could not run the installer: {exc}", file=out)
-            continue
-        if completed.returncode != 0:
-            print(f"  {script.name} failed; nothing was changed by it.", file=out)
-
-    still = [n for n, _w, _k in _missing_tools()]
-    if still:
-        print(f"\n  Still missing: {', '.join(still)}.", file=out)
-        print(f"  If they installed to {dest}, add it to PATH:", file=out)
-        print(f'      export PATH="{dest}:$PATH"\n', file=out)
-    else:
-        print("\n  All tools present.\n", file=out)
+    if yes:
+        print("  (`-y` only authorizes verified code fixes; it never installs tools.)\n", file=out)
 
 
 def _gating(findings, include_warnings: bool) -> list[Finding]:

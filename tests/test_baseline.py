@@ -70,6 +70,50 @@ def test_corrupt_baseline_does_not_crash(repo, repo_root):
     assert run_cli([str(repo)], cwd=repo_root).returncode == 1
 
 
+def test_unchanged_baseline_is_not_shown_as_a_live_problem(repo, repo_root):
+    baseline = repo / ".tridelphi-baseline.json"
+    run_cli([str(repo), "--write-baseline", str(baseline)], cwd=repo_root)
+    text = run_cli([str(repo)], cwd=repo_root)
+    assert text.returncode == 0
+    assert "START HERE" not in text.stdout
+    assert "no new findings" in text.stdout
+
+    checklist = run_cli([str(repo), "--format", "checklist"], cwd=repo_root)
+    assert checklist.returncode == 0
+    assert "to fix" not in checklist.stdout
+    assert "unchanged finding" in checklist.stdout
+
+
+def test_standalone_gate_ignores_explicitly_unchanged_results(repo, repo_root):
+    baseline = repo / ".tridelphi-baseline.json"
+    sarif = repo / "report.sarif"
+    run_cli([str(repo), "--write-baseline", str(baseline)], cwd=repo_root)
+    scan = run_cli([str(repo), "--format", "sarif"], cwd=repo_root)
+    sarif.write_text(scan.stdout, encoding="utf-8")
+    gate = run_cli(["gate", str(sarif)], cwd=repo_root)
+    assert gate.returncode == 0
+    assert "tridelphi: clean" in gate.stdout
+
+
+@pytest.mark.parametrize(
+    "document",
+    [[], {"version": 2, "fingerprints": []}, {"version": 1, "fingerprints": "bad"}],
+)
+def test_malformed_baseline_roots_fail_safe_as_empty(repo, repo_root, document):
+    (repo / ".tridelphi-baseline.json").write_text(json.dumps(document), encoding="utf-8")
+    assert run_cli([str(repo)], cwd=repo_root).returncode == 1
+
+
+def test_baseline_writer_refuses_destination_symlink(repo, repo_root, tmp_path):
+    outside = tmp_path / "outside.json"
+    outside.write_text("untouched", encoding="utf-8")
+    link = repo / "baseline.json"
+    link.symlink_to(outside)
+    result = run_cli([str(repo), "--write-baseline", str(link)], cwd=repo_root)
+    assert result.returncode == 2
+    assert outside.read_text(encoding="utf-8") == "untouched"
+
+
 def test_inline_suppression_requires_a_reason(repo_root, tmp_path):
     from tridelphi.api import analyze
 

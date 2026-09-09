@@ -109,9 +109,7 @@ def test_git_prefix_strip_cannot_reintroduce_traversal(tmp_path):
     root = tmp_path / "mono" / "sub" / "dir"
     root.mkdir(parents=True)
     out = _relativize("sub/dir/../../../../etc/passwd", root.resolve(), "sub/dir/")
-    assert out is not None
-    assert not out.startswith("../")
-    assert out.startswith("file://")
+    assert out is None
 
 
 def test_git_root_itself_gets_no_prefix(tmp_path):

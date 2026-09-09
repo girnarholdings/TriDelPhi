@@ -34,6 +34,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from .fsutil import atomic_write_text
 from .release import ACTION_REF, install_command
 
 __all__ = [
@@ -82,6 +83,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -101,14 +104,26 @@ jobs:
         # carries the full detail to the Security tab.
         run: |
           code=0
-          tridelphi . --format checklist --sarif-file tridelphi.sarif \
-            --checklist-md-file report.md > report.txt 2>&1 || code=$?
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          {
-            echo 'md<<TRIDELPHI_EOF'
-            cat report.md 2>/dev/null || cat report.txt
-            echo TRIDELPHI_EOF
-          } >> "$GITHUB_OUTPUT"
+          REPORT_TEXT="$RUNNER_TEMP/tridelphi-report.txt"
+          REPORT_MD="$RUNNER_TEMP/tridelphi-report.md"
+          SARIF_FILE="$RUNNER_TEMP/tridelphi.sarif"
+          EXIT_MARKER="$RUNNER_TEMP/tridelphi-exit-code"
+          rm -f -- "$REPORT_TEXT" "$REPORT_MD" "$SARIF_FILE" "$EXIT_MARKER"
+          tridelphi . --format checklist --sarif-file "$SARIF_FILE" \
+            --checklist-md-file "$REPORT_MD" > "$REPORT_TEXT" 2>&1 || code=$?
+          printf '%s\\n' "$code" > "$EXIT_MARKER"
+          if [ -s "$SARIF_FILE" ]; then
+            echo "sarif_ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sarif_ready=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f "$REPORT_MD" ]; then
+            cat "$REPORT_MD" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "TriDelPhi could not produce the readable report; the final gate will fail." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "TriDelPhi finished. Open the job Summary for the plain-language report."
 
       # Uploads on push only, on purpose: uploading on a pull request makes
       # github-advanced-security[bot] echo these same findings back as inline
@@ -116,9 +131,9 @@ jobs:
       # PR; the Security tab tracks the default branch.
       - name: Upload to code scanning
         uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
-        if: always() && github.event_name != 'pull_request'
+        if: always() && steps.scan.outputs.sarif_ready == 'true' && github.event_name != 'pull_request'
         with:
-          sarif_file: tridelphi.sarif
+          sarif_file: ${{ runner.temp }}/tridelphi.sarif
           category: tridelphi
 
       # Optional: also audit your *shipped* product — built JS, DB/config — for
@@ -138,15 +153,33 @@ jobs:
       #       category: tridelphi-expose
 
       - name: Comment on the pull request
-        if: github.event_name == 'pull_request'
+        # Fork pull_request tokens are read-only and cannot comment. Those runs
+        # still scan and gate; their readable report is in the job Summary.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          REPORT_MD: ${{ steps.scan.outputs.md }}
+          REPORT_FILE: ${{ runner.temp }}/tridelphi-report.md
         with:
           script: |
             // The comment is what the notification email renders — real
             // Markdown, not a monospace dump.
-            const report = process.env.REPORT_MD || 'TriDelPhi produced no output.';
+            const fs = require('fs');
+            function readBounded(path, limit = 60000) {
+              if (!path) return '';
+              let fd;
+              try {
+                fd = fs.openSync(path, 'r');
+                const buffer = Buffer.alloc(limit);
+                const count = fs.readSync(fd, buffer, 0, limit, 0);
+                return buffer.subarray(0, count).toString('utf8');
+              } catch (_error) {
+                return '';
+              } finally {
+                if (fd !== undefined) fs.closeSync(fd);
+              }
+            }
+            const report = (readBounded(process.env.REPORT_FILE) ||
+              'TriDelPhi produced no readable report.').replaceAll('@', '&#64;');
             const body = [
               '<!-- tridelphi -->',
               report.slice(0, 60000),
@@ -177,17 +210,32 @@ jobs:
         # The guard's teeth: after the report is uploaded and the comment is
         # posted, a critical fails the build — with the exact solution one
         # click away in the run's Summary tab, ordered easiest-first.
-        if: steps.scan.outputs.code != '0'
         run: |
-          {
-            echo '## 🔺 TriDelPhi found something a stranger could exploit'
-            echo
-            tridelphi fix --markdown || true
-            echo
-            echo 'Fix it from your terminal, interactively: `__TRIDELPHI_INSTALL_LOCAL__ && tridelphi guard`'
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "TriDelPhi: critical finding — see the job Summary for the fix plan." >&2
-          exit 1
+          code=2
+          if [ -f "$RUNNER_TEMP/tridelphi-exit-code" ]; then
+            IFS= read -r code < "$RUNNER_TEMP/tridelphi-exit-code"
+          fi
+          case "$code" in
+            0) exit 0 ;;
+            1)
+              {
+                echo '## 🔺 TriDelPhi found something a stranger could exploit'
+                echo
+                tridelphi fix --markdown || true
+                echo
+                echo 'Fix it from your terminal, interactively: `__TRIDELPHI_INSTALL_LOCAL__ && tridelphi guard`'
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "TriDelPhi: critical finding — see the job Summary for the fix plan." >&2
+              exit 1
+              ;;
+            *)
+              echo '## ⬜ TriDelPhi could not finish the scan' >> "$GITHUB_STEP_SUMMARY"
+              echo 'Treat this as unknown, not safe. Open the Scan step, fix the error, and rerun.' \
+                >> "$GITHUB_STEP_SUMMARY"
+              echo "TriDelPhi could not finish; failing closed." >&2
+              exit 2
+              ;;
+          esac
 """
 
 # Reply-to-fix: a maintainer replies `tridelphi fix` on a pull request and this
@@ -198,8 +246,8 @@ jobs:
 #   U   the comment body is read ONLY inside `if:` expressions, which GitHub
 #       evaluates before any shell exists; no event text ever reaches a shell,
 #       an env file, or a prompt. The PR number is numeric and env-quoted.
-#   gate  only OWNER / MEMBER / COLLABORATOR comment authors can trigger it —
-#       the author_association gate TriDelPhi itself recommends (and honors).
+#   gate  OWNER / MEMBER / COLLABORATOR is the early event gate, followed by a
+#       live API check that the sender currently has write/maintain/admin access.
 #   scope fork pull requests are skipped before checkout: the bot only ever
 #       scans and pushes branches of this repository, i.e. code written by
 #       someone who already has write access. And because `issue_comment`
@@ -252,10 +300,10 @@ jobs:
       )
     runs-on: ubuntu-latest
     steps:
-      # Re-verify authorization before doing anything. The comment path is already
-      # gated on author_association above; the checkbox path is gated by GitHub
-      # (write access to toggle), which we confirm here — and we never act on the
-      # bot's own edits (its periodic re-render of the comment).
+      # Re-verify current repository permission before doing anything. GitHub's
+      # MEMBER/COLLABORATOR association is not the same as write permission, so
+      # both the typed-comment and checkbox paths must pass this live API check.
+      # We also never act on the bot's own periodic comment edits.
       - name: Authorize the requester
         id: auth
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -263,7 +311,9 @@ jobs:
           script: |
             const p = context.payload;
             if (p.sender && p.sender.type === 'Bot') { core.setOutput('ok', 'false'); return; }
-            if (p.action === 'created') { core.setOutput('ok', 'true'); return; }
+            if (!p.sender || typeof p.sender.login !== 'string') {
+              core.setOutput('ok', 'false'); return;
+            }
             const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
               owner: context.repo.owner, repo: context.repo.repo, username: p.sender.login,
             });
@@ -327,46 +377,33 @@ jobs:
 
       - name: Apply the automatic fixes (each verified or rolled back)
         if: steps.pr.outputs.skip == 'false'
-        id: apply
         # The log lives OUTSIDE the working tree ($RUNNER_TEMP): a log inside it
         # made `git status` below report a change on every run, so the bot
         # committed its own log and reported "fixes applied" when nothing was.
         run: |
           tridelphi fix --apply > "$RUNNER_TEMP/fix-log.txt" 2>&1 || true
-          cat "$RUNNER_TEMP/fix-log.txt"
-          {
-            echo 'log<<TRIDELPHI_EOF'
-            cat "$RUNNER_TEMP/fix-log.txt"
-            echo TRIDELPHI_EOF
-          } >> "$GITHUB_OUTPUT"
 
       # An intentional tool update (Dependabot, or a maintainer) trips the L7
       # trust-lock by design — the pawl cannot tell a wanted bump from a swap.
       # Ticking the box IS the human confirmation, so re-record the moved pins
-      # here. `--relock` refuses if an action changed OWNER: that is the repo
-      # transfer / takeover shape, and no click should wave it through.
+      # here. `--relock` refuses an ambiguous remove-plus-add publisher change:
+      # offline source inspection cannot prove that it is a routine replacement.
       - name: Re-lock tool pins the maintainer just approved
         if: steps.pr.outputs.skip == 'false'
         id: relock
         run: |
           if tridelphi verify . --relock > "$RUNNER_TEMP/relock.txt" 2>&1; then
-            echo "refused=false" >> "$GITHUB_OUTPUT"
+            rm -f "$RUNNER_TEMP/relock-refused"
           else
-            echo "refused=true" >> "$GITHUB_OUTPUT"
+            : > "$RUNNER_TEMP/relock-refused"
           fi
-          cat "$RUNNER_TEMP/relock.txt"
-          {
-            echo 'log<<TRIDELPHI_EOF'
-            cat "$RUNNER_TEMP/relock.txt"
-            echo TRIDELPHI_EOF
-          } >> "$GITHUB_OUTPUT"
 
       - name: Push what verified
         if: steps.pr.outputs.skip == 'false'
         id: push
         run: |
           if [ -z "$(git status --porcelain)" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            rm -f "$RUNNER_TEMP/push-changed"
             echo "No files changed — nothing was auto-fixable, or nothing verified."
           else
             git config user.name "github-actions[bot]"
@@ -374,43 +411,53 @@ jobs:
             git add -A
             git commit -m "tridelphi: apply verified automatic fixes"
             git push
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            : > "$RUNNER_TEMP/push-changed"
           fi
 
       - name: Report back
         if: steps.pr.outputs.skip == 'false'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          FIX_LOG: ${{ steps.apply.outputs.log }}
-          CHANGED: ${{ steps.push.outputs.changed }}
-          RELOCK_LOG: ${{ steps.relock.outputs.log }}
-          RELOCK_REFUSED: ${{ steps.relock.outputs.refused }}
         with:
           script: |
-            const changed = process.env.CHANGED === 'true';
-            const refused = process.env.RELOCK_REFUSED === 'true';
-            const log = (process.env.FIX_LOG || '').slice(0, 25000);
-            const relock = (process.env.RELOCK_LOG || '').slice(0, 25000);
+            const fs = require('fs');
+            const path = require('path');
+            const temp = process.env.RUNNER_TEMP;
+            const read = (name) => {
+              let fd;
+              try {
+                fd = fs.openSync(path.join(temp, name), 'r');
+                const buffer = Buffer.alloc(25000);
+                const count = fs.readSync(fd, buffer, 0, buffer.length, 0);
+                return buffer.subarray(0, count).toString('utf8');
+              } catch { return ''; }
+              finally { if (fd !== undefined) fs.closeSync(fd); }
+            };
+            const escape = (value) => value
+              .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+              .replaceAll('@', '&#64;')
+              .slice(0, 25000);
+            const changed = fs.existsSync(path.join(temp, 'push-changed'));
+            const refused = fs.existsSync(path.join(temp, 'relock-refused'));
+            const log = escape(read('fix-log.txt'));
+            const relock = escape(read('relock.txt'));
             // A refused re-lock is the one outcome that must not read as routine:
-            // an action changed hands, which is exactly what the lock is for.
+            // the source identities cannot be safely reconciled automatically.
             const headline = refused
-              ? '🛑 **TriDelPhi stopped: one of your pinned tools changed hands.** A repo transfer and a takeover look identical from here, so nothing was re-locked. Confirm the action is still the one you trust, then record it deliberately with `tridelphi verify --write-trust-lock`.'
+              ? '🛑 **TriDelPhi stopped: your pinned tool identities need review.** A locked publisher was removed while another was introduced, or the lock disagrees with the source. TriDelPhi cannot resolve ownership offline, so nothing was re-locked. Review the change, then replace the lock deliberately with `tridelphi verify --write-trust-lock --yes`.'
               : changed
               ? '🔺 **TriDelPhi applied its verified fixes** — each change below was re-scanned before it was kept.'
               : '🔺 **TriDelPhi had nothing it could fix automatically** — the remaining items need a human decision (`tridelphi guard` locally walks you through them).';
-            // Tell them the last step. A push made by GITHUB_TOKEN leaves the
-            // re-run needing a maintainer's "Approve and run" on many repos, so
-            // the checks sit stale and it looks like nothing happened. Saying so
-            // is the difference between "done" and "why is it still red".
+            // GITHUB_TOKEN pushes do not trigger ordinary push/PR workflows.
+            // Never imply that stale checks cover the new commit.
             const nextStep = changed
-              ? "**One last step:** the checks re-run on the new commit, and GitHub may " +
-                "hold them for approval — if they look stuck, open the **Actions** tab and " +
-                "click **Approve and run**."
+              ? "**One last step:** GitHub does not automatically start checks for a bot-token push. " +
+                "Review the changes, then push a new commit yourself to this PR branch " +
+                "to trigger fresh checks. Do not merge based on checks for the old commit."
               : null;
             const body = [
               headline, '',
-              ...(relock.trim() ? ['**Tool pins**', '', '```', relock, '```', ''] : []),
-              '```', log, '```',
+              ...(relock.trim() ? ['**Tool pins**', '', '<pre>', relock, '</pre>', ''] : []),
+              '<pre>', log || 'No automatic fix output.', '</pre>',
               ...(nextStep ? ['', nextStep] : []),
             ].join('\\n');
             await github.rest.issues.createComment({
@@ -451,6 +498,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # `expose` reads files on disk, so your built output has to exist before
       # it looks. Without this step it will still catch committed secrets and
@@ -467,24 +516,46 @@ jobs:
         run: __TRIDELPHI_INSTALL__
 
       - name: Audit what we ship
-        id: audit
         run: |
-          tridelphi expose . --markdown --fail-on none > report.md 2>&1 || true
-          {
-            echo 'md<<TRIDELPHI_EOF'
-            cat report.md
-            echo TRIDELPHI_EOF
-          } >> "$GITHUB_OUTPUT"
-          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          REPORT_TEXT="$RUNNER_TEMP/tridelphi-expose.txt"
+          REPORT_MD="$RUNNER_TEMP/tridelphi-expose.md"
+          rm -f -- "$REPORT_TEXT" "$REPORT_MD"
+          tridelphi expose . --format checklist --checklist-md-file "$REPORT_MD" \
+            --fail-on none > "$REPORT_TEXT" 2>&1 || true
+          if [ -f "$REPORT_MD" ]; then
+            cat "$REPORT_MD" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "TriDelPhi could not produce the exposure report. Rerun the Audit step." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "TriDelPhi finished. Open the job Summary for the plain-language report."
 
       - name: Comment on the pull request
-        if: github.event_name == 'pull_request'
+        # Fork pull_request tokens are read-only and cannot comment. Those runs
+        # still audit; their readable report is in the job Summary.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          REPORT_MD: ${{ steps.audit.outputs.md }}
+          REPORT_FILE: ${{ runner.temp }}/tridelphi-expose.md
         with:
           script: |
-            const report = process.env.REPORT_MD || 'TriDelPhi produced no output.';
+            const fs = require('fs');
+            function readBounded(path, limit = 60000) {
+              if (!path) return '';
+              let fd;
+              try {
+                fd = fs.openSync(path, 'r');
+                const buffer = Buffer.alloc(limit);
+                const count = fs.readSync(fd, buffer, 0, limit, 0);
+                return buffer.subarray(0, count).toString('utf8');
+              } catch (_error) {
+                return '';
+              } finally {
+                if (fd !== undefined) fs.closeSync(fd);
+              }
+            }
+            const report = (readBounded(process.env.REPORT_FILE) ||
+              'TriDelPhi produced no readable report.').replaceAll('@', '&#64;');
             const body = ['<!-- tridelphi-expose -->', report.slice(0, 60000)].join('\\n');
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -520,18 +591,21 @@ APP_WORKFLOW = APP_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command(pin
 
 _NEXT_STEPS = """\
 Done. TriDelPhi now guards this repo: every pull request is scanned, a
-plain-English comment explains what it found, and a critical FAILS the build —
-with the fix plan in the run's Summary tab.
+plain-English comment explains same-repo pull requests, and a critical FAILS
+the build — with the report and fix plan in the run's Summary tab. GitHub gives
+fork pull requests a read-only token, so those runs use the Summary instead of
+failing while trying to post a comment.
 
 Next:
   1. Commit and push both files:
        git add .github/workflows/tridelphi.yml .github/workflows/tridelphi-fix.yml
        git commit -m "Add TriDelPhi security scan + fix bot"
        git push
-  2. Open a pull request — you'll get a comment within a minute.
+  2. Open a pull request — same-repo branches get a comment within a minute;
+     fork pull requests get the same scan and gate in the job Summary.
   3. If it flags something minor, just reply `tridelphi fix` on the pull
      request: the bot applies the automatic fixes to the branch, re-scanning
-     each one before it's kept. (Maintainer comments only; forks excluded.)
+     each one before it's kept. (Current write access required; forks excluded.)
   4. For anything bigger, run `tridelphi guard` in your terminal: it shows each
      problem with its exact solution and asks before fixing anything.
   5. (Optional) Turn on GitHub code scanning to see findings in the Security tab:
@@ -630,7 +704,12 @@ def render_action_workflow(
         "permissions:",
         "  contents: read",
         "  security-events: write",
-        "  pull-requests: write",
+    ]
+    if comment:
+        lines.append("  pull-requests: write")
+    if level >= 6:
+        lines.extend(("  id-token: write", "  attestations: write"))
+    lines += [
         "",
         "concurrency:",
         "  group: tridelphi-${{ github.ref }}",
@@ -642,6 +721,8 @@ def render_action_workflow(
         "    runs-on: ubuntu-latest",
         "    steps:",
         f"      - uses: {_CHECKOUT}",
+        "        with:",
+        "          persist-credentials: false",
         f"      - uses: {ACTION_REF}",
         "        with:",
         f"          level: '{level}'",
@@ -697,7 +778,7 @@ def run_init(
     out = out or sys.stdout
     err = err or sys.stderr
     root = Path(target)
-    if not root.is_dir():
+    if root.is_symlink() or not root.is_dir():
         print(f"tridelphi: {root} is not a directory", file=err)
         return 2
 
@@ -705,7 +786,7 @@ def run_init(
         # The no-CI path writes into .git/hooks, which only exists in a real
         # repository — and must never clobber a hook someone already wrote.
         hooks_dir = root / ".git" / "hooks"
-        if not (root / ".git").is_dir():
+        if (root / ".git").is_symlink() or not (root / ".git").is_dir():
             print(f"tridelphi: {root} is not a git repository (no .git); "
                   "--local installs a git hook, so it needs one", file=err)
             return 2
@@ -715,9 +796,11 @@ def run_init(
                   "overwrite, or add the two tridelphi lines to it by hand.",
                   file=err)
             return 1
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        hook.write_text(LOCAL_HOOK, encoding="utf-8", newline="\n")
-        hook.chmod(hook.stat().st_mode | 0o755)
+        try:
+            atomic_write_text(hook, LOCAL_HOOK, create_parent=True, mode=0o755)
+        except OSError as exc:
+            print(f"tridelphi: could not write pre-push hook: {exc}", file=err)
+            return 2
         print(f"wrote {hook}", file=out)
         print(file=out)
         print(_LOCAL_NEXT_STEPS, file=out)
@@ -757,10 +840,16 @@ def run_init(
         )
         return 1
 
-    workflow_dir.mkdir(parents=True, exist_ok=True)
-    for path, content in targets:
-        path.write_text(content, encoding="utf-8", newline="\n")
-        print(f"wrote {path}", file=out)
+    try:
+        if (root / ".github").is_symlink() or workflow_dir.is_symlink():
+            raise OSError("refusing to write workflows through a symlinked directory")
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        for path, content in targets:
+            atomic_write_text(path, content, mode=0o644)
+            print(f"wrote {path}", file=out)
+    except OSError as exc:
+        print(f"tridelphi: could not write workflow: {exc}", file=err)
+        return 2
     print(file=out)
     print(next_steps, file=out)
     return 0

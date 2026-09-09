@@ -202,6 +202,27 @@ def test_malformed_files_never_crash(tmp_path):
     })
     result = _native(root)  # must not raise
     assert isinstance(result.findings, list)
+    assert not result.coverage.complete
+    assert any("could not parse compose" in reason for reason in result.coverage.incomplete_reasons)
+
+
+def test_repeated_compose_aliases_are_budgeted_as_partial_coverage(tmp_path, monkeypatch):
+    from tridelphi.structure import structure_error
+
+    root = _repo(tmp_path, {
+        "docker-compose.yml": (
+            "shared: &shared [one, two]\n"
+            "repeated: [*shared, *shared, *shared]\n"
+            "services: {}\n"
+        ),
+    })
+    monkeypatch.setattr(
+        "tridelphi.expose.structure_error",
+        lambda document, **_limits: structure_error(document, max_nodes=8),
+    )
+    result = _native(root)
+    assert not result.coverage.complete
+    assert any("structure exceeds" in reason for reason in result.coverage.incomplete_reasons)
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +249,51 @@ def test_run_expose_clean_exits_zero(tmp_path, monkeypatch):
     out = io.StringIO()
     code = run_expose(str(root), out=out)
     assert code == 0
-    assert "looks exposed" in out.getvalue()
+    assert "Native checks finished; code-pattern add-on did not run" in out.getvalue()
+    assert "Nothing in your committed code or config looks exposed" not in out.getvalue()
+
+
+def test_custom_asset_root_and_root_bundle_are_scanned(tmp_path):
+    custom = _repo(tmp_path, {"web/release/main.js": 'var k="AKIAIOSFODNN7EXAMPLE";'})
+    result = analyze_exposure(custom, run_semgrep=False, asset_roots=("web/release",))
+    assert any(f.rule == "client-secret" for f in result.findings)
+
+    root = _repo(tmp_path / "other", {
+        "package.json": '{"scripts":{"build":"vite build"}}',
+        "bundle.js": 'var k="AKIAIOSFODNN7EXAMPLE";',
+    })
+    result = analyze_exposure(root, run_semgrep=False)
+    assert any(f.rule == "client-secret" for f in result.findings)
+
+
+def test_asset_root_escape_is_an_execution_error(tmp_path):
+    root = _repo(tmp_path, {"src/app.js": "const ok = true;"})
+    err = io.StringIO()
+    assert run_expose(str(root), asset_roots=("../outside",), err=err) == 2
+    assert "must stay inside" in err.getvalue()
+
+
+def test_symlinked_input_makes_exposure_partial(tmp_path):
+    root = _repo(tmp_path, {"src/app.js": "const ok = true;"})
+    outside = tmp_path / "secret.js"
+    outside.write_text('var k="AKIAIOSFODNN7EXAMPLE";', encoding="utf-8")
+    (root / "dist").mkdir()
+    (root / "dist" / "linked.js").symlink_to(outside)
+    result = analyze_exposure(root, run_semgrep=False)
+    assert not result.coverage.complete
+    assert result.coverage.skipped_symlinks == 1
+    assert "symlinked entries" in " ".join(result.coverage.incomplete_reasons)
+
+
+def test_exposure_output_symlink_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr("tridelphi.expose.run_tool", lambda *a, **k: _skip_run())
+    root = _repo(tmp_path, {"src/app.js": "const ok = true;"})
+    outside = tmp_path / "outside.sarif"
+    outside.write_text("untouched", encoding="utf-8")
+    link = tmp_path / "report.sarif"
+    link.symlink_to(outside)
+    assert run_expose(str(root), sarif_file=str(link), err=io.StringIO()) == 2
+    assert outside.read_text(encoding="utf-8") == "untouched"
 
 
 def test_run_expose_markdown_is_inbox_ready(tmp_path, monkeypatch):
