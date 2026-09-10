@@ -12,6 +12,10 @@ const random = () => [...crypto.getRandomValues(new Uint8Array(32))]
 class Failure extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
+class InstallationRequired extends Failure {
+  constructor() { super(403, "Install or re-enable the TriDelPhi GitHub App, then sign in again."); }
+}
+const installationUrl = env => `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`;
 const fail = (status, message) => { throw new Failure(status, message); };
 const json = (value, status = 200) => Response.json(value, { status });
 const redirect = url => new Response(null, { status: 303, headers: { location: url } });
@@ -105,7 +109,7 @@ async function identity(env, token, fetcher) {
     }
     if (data.installations.length < 100) break;
   }
-  if (!installed) fail(403, "Install or re-enable the TriDelPhi GitHub App, then sign in again.");
+  if (!installed) throw new InstallationRequired();
   return { id: user.id, login: user.login };
 }
 
@@ -176,7 +180,19 @@ export function createPortal(fetcher = fetch) {
         if (typeof grant.access_token !== "string" || !/^ghu_[A-Za-z0-9]+$/.test(grant.access_token)) {
           fail(401, "A GitHub App user authorization is required.");
         }
-        const user = await identity(env, grant.access_token, fetcher);
+        let user;
+        try { user = await identity(env, grant.access_token, fetcher); }
+        catch (error) {
+          if (!(error instanceof InstallationRequired)) throw error;
+          // Only verified OAuth callbacks get this navigation, never API calls.
+          // No token/session is retained before installation is verified.
+          const previous = getCookie(request, SESSION);
+          if (HEX.test(previous)) await state(env, previous, "delete");
+          response = redirect(installationUrl(env));
+          response.headers.append("Set-Cookie", cookie(LOGIN, "", 0));
+          response.headers.append("Set-Cookie", cookie(SESSION, "", 0));
+          return secure(response);
+        }
         const session = random();
         const lifetime = Math.min(1800, Number(grant.expires_in ?? 1800));
         if (!Number.isFinite(lifetime) || lifetime < 1) fail(401, "GitHub authorization expired.");
@@ -187,6 +203,11 @@ export function createPortal(fetcher = fetch) {
         response = redirect(env.PUBLIC_ORIGIN + "/");
         response.headers.append("Set-Cookie", cookie(SESSION, session, Math.floor(lifetime)));
         response.headers.append("Set-Cookie", cookie(LOGIN, "", 0));
+      } else if (url.pathname === "/auth/installed" && request.method === "GET") {
+        // GitHub Setup URL: installation_id/setup_action are untrusted hints.
+        // Start fresh browser-bound OAuth, then re-check identity + installation.
+        // Never reuse the consumed callback state or infer authentication here.
+        response = redirect(env.PUBLIC_ORIGIN + "/auth/login");
       } else if (url.pathname === "/auth/logout" && request.method === "POST") {
         const id = getCookie(request, SESSION);
         if (HEX.test(id)) await state(env, id, "delete");
@@ -194,7 +215,7 @@ export function createPortal(fetcher = fetch) {
         response.headers.append("Set-Cookie", cookie(SESSION, "", 0));
         response.headers.append("Set-Cookie", cookie(LOGIN, "", 0));
       } else if (url.pathname === "/api/config" && request.method === "GET") {
-        response = json({ installUrl: `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new` });
+        response = json({ installUrl: installationUrl(env) });
       } else if (["/api/session", "/api/codespaces", "/api/scan"].includes(url.pathname)) {
         if (request.method !== (url.pathname === "/api/session" ? "GET" : "POST")) fail(405, "Method not allowed.");
         const session = await state(env, getCookie(request, SESSION), "get");

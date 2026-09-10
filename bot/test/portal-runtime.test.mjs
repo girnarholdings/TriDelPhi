@@ -12,7 +12,7 @@ const bundle = await build({
   bundle: true, write: false, format: "esm", platform: "browser",
 });
 
-for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redirect"]) {
+for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redirect", "install-required"]) {
   test(`Workers runtime OAuth: ${scenario}`, async () => {
     const calls = [];
     const mf = new Miniflare({
@@ -42,7 +42,7 @@ for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redir
           return Response.json({ id: 7, login: "builder" });
         }
         if (request.url === "https://api.github.com/user/installations?per_page=100&page=1") {
-          return Response.json({ installations: [{ app_id: 123, suspended_at: null }] });
+          return Response.json({ installations: scenario === "install-required" ? [] : [{ app_id: 123, suspended_at: null }] });
         }
         assert.fail("Unexpected outbound destination; redirects must not be followed");
       },
@@ -56,7 +56,7 @@ for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redir
       const callbackUrl = origin + `/auth/callback?state=${state}&code=fake-code`;
       const callbackHeaders = { ...headers, Cookie: login.headers.get("set-cookie").split(";")[0] };
       const response = await worker.fetch(callbackUrl, { headers: callbackHeaders, redirect: "manual" });
-      assert.equal(response.status, scenario === "success" ? 303 : scenario === "api-redirect" ? 403 : 401);
+      assert.equal(response.status, ["success", "install-required"].includes(scenario) ? 303 : scenario === "api-redirect" ? 403 : 401);
       assert.equal(response.headers.get("cache-control"), "no-store");
       if (scenario === "success") {
         assert.equal(response.headers.get("location"), origin + "/");
@@ -67,6 +67,16 @@ for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redir
         const session = await worker.fetch(origin + "/api/session", { headers: { ...headers, Cookie: sessionCookie } });
         assert.equal(session.status, 200);
         assert.deepEqual(await session.json(), { login: "builder", tier: "free", paidScanningAvailable: false });
+      } else if (scenario === "install-required") {
+        assert.equal(response.headers.get("location"), "https://github.com/apps/tridelphi-test/installations/new");
+        assert.ok(!response.headers.get("set-cookie").includes("ghu_fakeToken"));
+        assert.equal(calls.length, 3);
+        const installed = await worker.fetch(origin + "/auth/installed?installation_id=999&returnTo=https://untrusted.example", { headers, redirect: "manual" });
+        assert.equal(installed.status, 303);
+        assert.equal(installed.headers.get("location"), origin + "/auth/login");
+        assert.equal(installed.headers.get("set-cookie"), null);
+        const anonymous = await worker.fetch(origin + "/api/session", { headers });
+        assert.equal(anonymous.status, 401);
       } else {
         assert.equal(response.headers.get("set-cookie"), null);
         assert.ok(!(await response.text()).includes("fake-secret"));

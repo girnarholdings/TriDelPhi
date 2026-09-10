@@ -200,6 +200,35 @@ test("OAuth exchange cannot substitute a PAT for App authorization", async () =>
   assert.equal(f.calls.length, 1);
 });
 
+for (const options of [{ noInstall: true }, { wrongApp: true }, { suspended: true }]) {
+  test(`OAuth prompts installation without granting access: ${JSON.stringify(options)}`, async () => {
+    const f = fixture(options);
+    const login = await f.request("/auth/login");
+    const id = new URL(login.headers.get("location")).searchParams.get("state");
+    const path = `/auth/callback?state=${id}&code=code&returnTo=https://evil.test`;
+    const headers = { Cookie: `__Host-tridelphi-login=${id}; __Host-tridelphi-session=${sessionId}` };
+    const response = await f.request(path, { headers });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), "https://github.com/apps/tridelphi-test/installations/new");
+    assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(f.records.size, 0);
+    assert.ok(!response.headers.get("set-cookie").includes(token));
+    assert.equal((await f.request(path, { headers })).status, 401);
+    assert.equal((await f.request("/api/session")).status, 401);
+  });
+}
+
+test("installation return ignores forged IDs and starts a fresh login, not a session", async () => {
+  const f = fixture();
+  const response = await f.request("/auth/installed?installation_id=123&setup_action=install&returnTo=https://evil.test", { auth: false });
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("location"), origin + "/auth/login");
+  assert.equal(response.headers.get("set-cookie"), null);
+  assert.equal(f.calls.length, 0);
+  assert.equal((await f.request("/api/session", { auth: false })).status, 401);
+  assert.equal((await f.request("/auth/installed", { method: "POST" })).status, 404);
+});
+
 test("oversized metadata refused", async () => {
   const f = fixture();
   assert.equal((await f.request("/api/codespaces", { body: { junk: "x".repeat(2048) } })).status, 413);

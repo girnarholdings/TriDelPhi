@@ -11,6 +11,29 @@ No changes were made to the apex homepage, email records, App settings or billin
 
 ## Deployment receipt and immediate next step
 
+### Automatic installation follow-up
+
+Sign-in now redirects verified users with no active App installation to GitHub's
+fixed installation page, instead of returning the installation-required JSON.
+No scan session is created before installation passes. Existing session state
+is removed; login/session cookies are cleared. API routes remain fail-closed.
+The new `/auth/installed` endpoint discards all installation query parameters
+and redirects to `/auth/login` for fresh PKCE and identity/installation checks.
+Validation: 36 Node unit tests + 5 workerd runtime tests pass (41 total).
+
+**One-time owner setting still required:** in the existing GitHub App settings,
+set **Post installation → Setup URL** to
+`https://scan.tridelphi.com/auth/installed`; enable **Redirect on update**.
+Leave **Request user authorization (OAuth) during installation** unchecked so
+GitHub uses the Setup URL, not an unsolicited callback without portal PKCE/state.
+Keep Callback URL `https://scan.tridelphi.com/auth/callback` unchanged.
+Until configured, installation redirects work but users must return and click
+Sign in manually. A forged installation ID never authenticates anyone.
+See [GitHub Setup URL documentation](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/about-the-setup-url).
+
+The deployment receipt below records the earlier runtime fix; the follow-up
+installation deployment receipt is recorded in PR #71.
+
 - Portal: https://scan.tridelphi.com
 - Account: `1b5410140e248d8064f8ef81c8c52a1c`
 - Active zone: `cf76915fb3935c4d8059d4067dc9214e`

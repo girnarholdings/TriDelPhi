@@ -62,6 +62,11 @@ App; **do not create a duplicate**.
 
 1. Choose a unique App name. Set its homepage to your TriDelPhi website.
 2. Set **Callback URL** to `https://scan.tridelphi.com/auth/callback`.
+   Set **Post installation → Setup URL** to
+   `https://scan.tridelphi.com/auth/installed` and enable **Redirect on update**.
+   Leave **Request user authorization (OAuth) during installation** unchecked:
+   the portal starts its own browser-bound PKCE flow after installation instead.
+   GitHub's install-initiated OAuth does not supply the portal's PKCE/state pair.
 3. Keep user access token expiration enabled. Do not enable device flow.
 4. Disable webhooks for this portal-only App; no events are required. The
    existing `bot/` webhook receiver is independent and unchanged.
@@ -77,6 +82,16 @@ App; **do not create a duplicate**.
 7. Copy App ID, slug, and Client ID into `wrangler.toml`. Store the generated
    **Client Secret** using Wrangler's secret input, never chat, Git or browser JS.
    This flow does not need the App's private key.
+
+Visitors may start with **Sign in with GitHub**. If GitHub verifies their identity
+but no active App installation is accessible, the callback automatically sends
+them to the fixed App installation URL. It clears old session/login cookies and
+does not retain the new token. After installation, the Setup URL starts fresh
+OAuth and rechecks installation before granting a session. Installation query
+parameters never prove identity or grant access. Protected API routes still deny
+missing/suspended installations; they never redirect API requests to GitHub.
+Until the owner configures the Setup URL, users must return to the portal and
+click Sign in after installation. No App settings are changed by Worker deploys.
 
 GitHub references:
 - [GitHub App user authorization and PKCE](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
