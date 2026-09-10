@@ -61,7 +61,8 @@ async function github(path, token, fetcher) {
   const response = await fetcher(API + path, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json",
       "User-Agent": "TriDelPhi-Portal", "X-GitHub-Api-Version": "2026-03-10" },
-    redirect: "error", signal: AbortSignal.timeout(15_000),
+    // Workers supports manual, not error. The !ok gate below rejects every 3xx.
+    redirect: "manual", signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
     await response.body?.cancel();
@@ -164,9 +165,13 @@ export function createPortal(fetcher = fetch) {
           method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET,
             code, code_verifier: login.verifier, redirect_uri: env.PUBLIC_ORIGIN + "/auth/callback" }),
-          redirect: "error", signal: AbortSignal.timeout(15_000),
+          // Never follow redirects carrying the client secret or authorization code.
+          redirect: "manual", signal: AbortSignal.timeout(15_000),
         });
-        if (!tokenResponse.ok) fail(401, "GitHub sign-in failed. Start again.");
+        if (!tokenResponse.ok) {
+          await tokenResponse.body?.cancel();
+          fail(401, "GitHub sign-in failed. Start again.");
+        }
         const grant = await boundedJson(tokenResponse, 16_384);
         if (typeof grant.access_token !== "string" || !/^ghu_[A-Za-z0-9]+$/.test(grant.access_token)) {
           fail(401, "A GitHub App user authorization is required.");

@@ -209,6 +209,12 @@ jobs:
       - name: Scan portal — login, authorization, billing and Codespaces boundaries
         working-directory: portal
         run: npm test
+      - name: Install pinned local Workers test runtime (no lifecycle scripts)
+        working-directory: bot
+        run: npm ci --ignore-scripts
+      - name: Scan portal — actual Workers runtime and redirect rejection
+        working-directory: bot
+        run: node --test test/portal-runtime.test.mjs
 
   # A single check to require in branch protection. Adding a job above without
   # listing it here would silently widen what can merge, so it is spelled out.

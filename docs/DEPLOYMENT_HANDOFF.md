@@ -1,8 +1,10 @@
 # TriDelPhi deployment and GitHub publication handoff
 
-Updated: 2026-09-10. **The portal is deployed; GitHub sign-in is not configured.**
+Updated: 2026-09-10. **The callback runtime fix is deployed; fresh real-user
+sign-in acceptance is still pending. The App secret is configured.**
 [PR #70](https://github.com/girnarholdings/TriDelPhi/pull/70) is merged as
-`84b0a10fb28ab679fdba2069c4b6e1487e93c44e`. Its tree matches the deployed source.
+`84b0a10fb28ab679fdba2069c4b6e1487e93c44e`. The deployed callback fix is in
+the follow-up PR #71, along with this updated handoff.
 The owner migrated nameservers and confirmed this account uses **Workers Free**.
 The agent deployed only `tridelphi-scan-portal` and attached `scan.tridelphi.com`.
 No changes were made to the apex homepage, email records, App settings or billing.
@@ -12,21 +14,32 @@ No changes were made to the apex homepage, email records, App settings or billin
 - Portal: https://scan.tridelphi.com
 - Account: `1b5410140e248d8064f8ef81c8c52a1c`
 - Active zone: `cf76915fb3935c4d8059d4067dc9214e`
-- Deployed at: `2026-09-10T09:03:34Z`
-- Deployment: `a37f4613-39e6-4276-9ff7-15c775df2db2`
-- Version: `2286c454-0717-4c40-aba8-b826e5aa6636` (100% traffic)
+- Callback fix deployed at: `2026-09-10T13:42:14Z`
+- Deployment: `acaa0701-e693-42bb-9284-3eaf733ec0d1`
+- Version: `0660df04-a629-4418-9ac6-cc42c803e5bd` (100% traffic)
 - Custom-domain association: `40f259fa9cdd056443d3d21d584783fd1e95975c`
 - SQLite Durable Object migration: `v1`, class `PortalState`
 - Worker preview URLs and workers.dev are disabled; observability is disabled.
 - No paid execution backend, AI service, Codespace, or plan upgrade was started.
 
-**The owner must add `GITHUB_CLIENT_SECRET` as a Secret, not plaintext.**
-Open the existing GitHub App settings and generate/copy its client secret, then
-open [this Worker's settings](https://dash.cloudflare.com/1b5410140e248d8064f8ef81c8c52a1c/workers/services/view/tridelphi-scan-portal/production/settings).
-Under Variables and Secrets, add type **Secret**, name **`GITHUB_CLIENT_SECRET`**,
-paste its value directly there, and deploy/save the change. Do not paste it into
-chat, Git, this document, or frontend code. The public Client ID is not the secret.
-No App private key is needed for the portal's user-token flow.
+**The owner already added `GITHUB_CLIENT_SECRET` as a Secret. Do not rotate it
+just to retry sign-in.** The binding is verified by name/type only; its value was
+not retrieved. No App private key is needed for the portal's user-token flow.
+Start fresh at the portal and click Sign in with GitHub; an old callback URL
+cannot be reused because login state is consumed once.
+
+The prior callback 503 was reproduced in workerd using fake credentials:
+Workers rejects `redirect: "error"` before making the token request. Both token
+exchange and authenticated GitHub API calls now use `manual`; their non-2xx
+gates reject redirects without following them. Four actual-runtime tests cover
+successful session creation/revalidation, invalid grants, token/API redirects,
+and callback replay. All outbound test requests are intercepted; no credentials
+or raw production exceptions are logged.
+
+Live checks after the fix: page/JS/CSS/config 200, anonymous session 401,
+deliberately invalid-code callback 401 (previously generic 503), replay 401.
+This proves the runtime crash is fixed, not that the real secret and full
+provider authorization flow have passed. The owner must complete fresh sign-in.
 
 Then run the live acceptance checklist below. Until that succeeds, this is a
 deployed setup page, not a completed hosted-scanning launch. Do not add a homepage
@@ -78,9 +91,10 @@ portal session cookies must not be delivered to the homepage's hosting provider.
    No subscription changes were made. Recheck before deploying to another
    account or enabling any additional products. Terminal Wrangler is still
    unauthenticated; MCP authorization does not authenticate the CLI.
-2. The deployed Worker's secret-name list is empty: **`GITHUB_CLIENT_SECRET`
-   is missing**. The owner reports updating the callback, but real OAuth,
-   installation consent and Codespaces eligibility remain untested.
+2. `GITHUB_CLIENT_SECRET` is present as `secret_text` and was preserved during
+   the callback fix deployment. The callback URL is owner-confirmed. Real OAuth
+   completion, installation consent and Codespaces eligibility still need the
+   live acceptance checks below.
 3. Public nameservers now match Cloudflare: `dalary.ns.cloudflare.com` and
    `eoin.ns.cloudflare.com`. Authoritative DNS and Cloudflare's public resolver
    resolve `scan.tridelphi.com`. This Mac initially retained a negative cached
@@ -113,6 +127,8 @@ Completed validation:
 - Python: **862 passed, 13 optional-tool skips** on local macOS/Python 3.12.
 - Portal: **32 passing tests**, covering identity, installation, PKCE/state,
   revocation, expiry, request boundaries, billing ownership and paid-tier denial.
+- Callback fix: **4 additional passing actual-Workers-runtime tests**, also
+  wired into CI. Node-only mocks had accepted a fetch option workerd rejects.
 - Existing webhook bot: **37 passing checks**, rerun in this publication pass;
   its implementation is unchanged by this deployment update.
 - `ruff check tridelphi/ tests/ scripts/` and `git diff --check` pass.
@@ -128,9 +144,10 @@ Completed validation:
 - Live portal HTML/CSS/JavaScript each returned HTTP 200 with byte-for-byte
   matches to local assets. HTTPS certificate validation succeeded. CSP, no-store,
   HSTS, frame denial and nosniff headers were present.
-- Live `/api/config`, `/auth/login`, `/api/session`, and `/api/scan` returned the
-  expected HTTP 503 setup error while the App secret is missing. This proves
-  fail-closed setup behavior, not a successful authentication/scan round-trip.
+- Before the owner added the secret, dynamic routes returned the expected 503
+  setup error. After the callback fix, live config returns 200, login redirects
+  303, anonymous session is 401 and invalid-code/replayed callbacks are 401.
+  A real successful authentication/scan round-trip is not yet claimed.
 - Apex homepage returned HTTP 200 from GitHub Pages, unchanged.
 
 ## 1. GitHub publication and local history
@@ -242,8 +259,11 @@ machine install Node 22+ and run `npm ci` inside `bot` to get the locked tooling
 Do not commit `node_modules`, `.dev.vars`, Wrangler auth files, logs or tokens.
 
 This Worker now exists. Do not recreate it or replay migration `v1` manually.
-Add the secret to the existing service, then deploy and test. Do not claim a
-working login merely because the static page is reachable.
+The secret already exists: preserve it, the assets, and existing bindings on
+code-only updates. The callback fix used API `keep_assets: true` and
+`keep_bindings` for assets, plaintext vars, secrets, Durable Objects and rate
+limits, with observability/logpush disabled. Do not claim a working login merely
+because the static page is reachable.
 
 If using an API token instead of browser login, use a scoped deployment token
 for the correct account and zone. Store it securely as `CLOUDFLARE_API_TOKEN`,

@@ -32,7 +32,7 @@ function fixture(options = {}) {
   };
   const fetcher = async (url, init) => {
     calls.push({ url, init });
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     if (url === "https://github.com/login/oauth/access_token") {
       return Response.json({ access_token: options.pat ? "ghp_notAnAppUserToken" : token, expires_in: 3600 });
     }

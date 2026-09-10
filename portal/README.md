@@ -11,8 +11,9 @@ Cloudflare **scan compute** is reserved for the future paid tier.
 `https://tridelphi.com` remains on its current host (currently reported as GitHub
 Pages). App identity is configured and GitHub connector write access works.
 The portal is deployed on the owner-confirmed Workers Free account and its
-Cloudflare zone is active. **Sign-in remains disabled until the owner adds
-`GITHUB_CLIENT_SECRET` to the Worker and live acceptance checks pass.**
+Cloudflare zone is active. The owner added `GITHUB_CLIENT_SECRET` directly to the
+Worker. The callback runtime fix is deployed; **a fresh real-user sign-in and
+the remaining live acceptance checks are still required before launch.**
 Follow [the deployment handoff](../docs/DEPLOYMENT_HANDOFF.md).
 
 **Operator rule:** never spend money on Cloudflare or any other service without
@@ -85,7 +86,12 @@ GitHub references:
 
 ## Configure and deploy later
 
-Tests have no npm dependencies: `cd portal && npm test` with Node 22 or newer.
+Unit tests have no npm dependencies: `cd portal && npm test` with Node 22 or newer.
+Also run the real Workers runtime regression suite (all GitHub traffic is mocked):
+`cd bot && npm ci --ignore-scripts && node --test test/portal-runtime.test.mjs`.
+Its Miniflare/esbuild runtime is supplied by the locked Wrangler toolchain.
+Unlike Node's fetch, Workers rejects `redirect: "error"`; outbound requests must
+use `manual` and reject non-2xx responses without forwarding credentials.
 Use the repository's pinned Wrangler tooling from `bot/`:
 
 ```bash
@@ -119,7 +125,8 @@ live provider behavior. Native Windows/Linux CI is separate from local macOS tes
 
 The existing Cloudflare account and GitHub App were created by the owner. On
 2026-09-10 the portal Worker was deployed and only `scan.tridelphi.com` was
-attached. No App secret, payment setup, paid backend or Codespace was created.
+attached. The owner subsequently added the App secret directly in Cloudflare.
+No payment setup, paid backend or Codespace was created.
 Keep the scan link off the main website until staging
 passes. Do not send secrets to cPanel or enable request-body logging there.
 
