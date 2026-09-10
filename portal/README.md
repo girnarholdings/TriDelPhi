@@ -10,8 +10,9 @@ Cloudflare **scan compute** is reserved for the future paid tier.
 `https://scan.tridelphi.com/auth/callback`. The existing homepage at
 `https://tridelphi.com` remains on its current host (currently reported as GitHub
 Pages). App identity is configured and GitHub connector write access works.
-Deployment is on hold pending Cloudflare account/zone and billing verification,
-the App secret, and live acceptance checks.
+The portal is deployed on the owner-confirmed Workers Free account and its
+Cloudflare zone is active. **Sign-in remains disabled until the owner adds
+`GITHUB_CLIENT_SECRET` to the Worker and live acceptance checks pass.**
 Follow [the deployment handoff](../docs/DEPLOYMENT_HANDOFF.md).
 
 **Operator rule:** never spend money on Cloudflare or any other service without
@@ -116,8 +117,9 @@ Confirm GitHub honors the pinned ref/devcontainer link parameters, and that a
 clean Codespace runs the audit command. Unit tests mock GitHub and cannot prove
 live provider behavior. Native Windows/Linux CI is separate from local macOS tests.
 
-No Cloudflare account, App secret, DNS, payment setup or live deployment was
-created by this change. The GitHub App was created separately by the owner.
+The existing Cloudflare account and GitHub App were created by the owner. On
+2026-09-10 the portal Worker was deployed and only `scan.tridelphi.com` was
+attached. No App secret, payment setup, paid backend or Codespace was created.
 Keep the scan link off the main website until staging
 passes. Do not send secrets to cPanel or enable request-body logging there.
 

@@ -1,10 +1,36 @@
 # TriDelPhi deployment and GitHub publication handoff
 
-Updated: 2026-09-09. This is the current operational handoff, not a claim of a
-live service. **Cloudflare deployment is on hold.** GitHub connector write access
-now works and [PR #70](https://github.com/girnarholdings/TriDelPhi/pull/70) is open.
-No agent changes were made to
-the live homepage, DNS, nameservers, GitHub App settings or billing.
+Updated: 2026-09-10. **The portal is deployed; GitHub sign-in is not configured.**
+[PR #70](https://github.com/girnarholdings/TriDelPhi/pull/70) is merged as
+`84b0a10fb28ab679fdba2069c4b6e1487e93c44e`. Its tree matches the deployed source.
+The owner migrated nameservers and confirmed this account uses **Workers Free**.
+The agent deployed only `tridelphi-scan-portal` and attached `scan.tridelphi.com`.
+No changes were made to the apex homepage, email records, App settings or billing.
+
+## Deployment receipt and immediate next step
+
+- Portal: https://scan.tridelphi.com
+- Account: `1b5410140e248d8064f8ef81c8c52a1c`
+- Active zone: `cf76915fb3935c4d8059d4067dc9214e`
+- Deployed at: `2026-09-10T09:03:34Z`
+- Deployment: `a37f4613-39e6-4276-9ff7-15c775df2db2`
+- Version: `2286c454-0717-4c40-aba8-b826e5aa6636` (100% traffic)
+- Custom-domain association: `40f259fa9cdd056443d3d21d584783fd1e95975c`
+- SQLite Durable Object migration: `v1`, class `PortalState`
+- Worker preview URLs and workers.dev are disabled; observability is disabled.
+- No paid execution backend, AI service, Codespace, or plan upgrade was started.
+
+**The owner must add `GITHUB_CLIENT_SECRET` as a Secret, not plaintext.**
+Open the existing GitHub App settings and generate/copy its client secret, then
+open [this Worker's settings](https://dash.cloudflare.com/1b5410140e248d8064f8ef81c8c52a1c/workers/services/view/tridelphi-scan-portal/production/settings).
+Under Variables and Secrets, add type **Secret**, name **`GITHUB_CLIENT_SECRET`**,
+paste its value directly there, and deploy/save the change. Do not paste it into
+chat, Git, this document, or frontend code. The public Client ID is not the secret.
+No App private key is needed for the portal's user-token flow.
+
+Then run the live acceptance checklist below. Until that succeeds, this is a
+deployed setup page, not a completed hosted-scanning launch. Do not add a homepage
+scan link yet. No source/report uploads are accepted by the portal.
 
 ## Owner spending rule — mandatory for all future work
 
@@ -46,27 +72,20 @@ portal session cookies must not be delivered to the homepage's hosting provider.
 
 ## Current access and remaining blockers
 
-1. Cloudflare MCP authentication now works for account, zone and Worker reads.
-   The connected account is `1b5410140e248d8064f8ef81c8c52a1c`. It lists no
-   `tridelphi.com` zone and no `tridelphi-scan-portal` Worker. The subscriptions
-   endpoint returns API error `10000` (authentication/permission failure), so
-   the Workers billing plan cannot be verified. **Do not deploy until no-charge
-   operation is verified or the owner explicitly approves the potential cost.**
-   This is a billing/zone readiness blocker, not a blanket MCP login failure.
-   Earlier terminal Wrangler authentication was unavailable; MCP authorization
-   does not automatically authenticate the CLI. Do not use temporary accounts.
-2. The GitHub App **client secret** is not available in the environment, and
-   `portal/.dev.vars` does not exist. The App ID/Client ID are not substitutes.
-   No portal Worker exists in the visible Cloudflare account. Check secret names
-   in the intended account after resolving ownership; do not disclose values.
-   The owner reports updating the callback; the live OAuth flow is not verified.
-3. Public DNS lookup returned Porkbun nameservers:
-   `maceio.ns.porkbun.com`, `salvador.ns.porkbun.com`,
-   `curitiba.ns.porkbun.com`, `fortaleza.ns.porkbun.com`.
-   The latest read still returned Porkbun nameservers after the owner's DNS
-   update. An earlier lookup returned no A/CNAME answer for `scan`.
-   Cloudflare Custom Domains require an **active Cloudflare zone**; readiness
-   cannot be established from this workspace. Nameserver changes were not made.
+1. Cloudflare MCP read/write access works. The active zone and deployed Worker
+   are verified. Billing API reads still fail with error `10000`; the **owner's
+   explicit Workers Free confirmation on 2026-09-10** resolved the plan blocker.
+   No subscription changes were made. Recheck before deploying to another
+   account or enabling any additional products. Terminal Wrangler is still
+   unauthenticated; MCP authorization does not authenticate the CLI.
+2. The deployed Worker's secret-name list is empty: **`GITHUB_CLIENT_SECRET`
+   is missing**. The owner reports updating the callback, but real OAuth,
+   installation consent and Codespaces eligibility remain untested.
+3. Public nameservers now match Cloudflare: `dalary.ns.cloudflare.com` and
+   `eoin.ns.cloudflare.com`. Authoritative DNS and Cloudflare's public resolver
+   resolve `scan.tridelphi.com`. This Mac initially retained a negative cached
+   result; HTTPS was tested against the returned Cloudflare address with the
+   real hostname and normal certificate verification, never `curl -k`.
 4. Terminal Git push authentication failed with
    **“could not read Username for 'https://github.com': terminal prompts disabled.”**
    `gh` is not installed/on PATH in the agent environment.
@@ -82,11 +101,12 @@ permissions just to solve the publication problem.
 
 ## Local work and validation
 
-The branch contains earlier hardening commit
+The preserved original local branch contains earlier hardening commit
 `dca62051daaf0710c9bb1d53a20b532ffe38307f`, then portal/audit implementation commit
 `dba0783dc7873bb122b10b3731a080e138f3e576`, then the deployment configuration and
-handoff commit. Run `git log -3 --oneline` for the final tip. The last observed
-remote main was `152507f801bb0f55af862c41d91ad92fd9915f61`; refresh before pushing.
+handoff commit. API publication preserved its exact file tree under new commit
+IDs. Current verified merged main is `84b0a10fb28ab679fdba2069c4b6e1487e93c44e`;
+refresh remote state before further publication.
 
 Completed validation:
 
@@ -101,9 +121,17 @@ Completed validation:
   DNS ownership, the live App callback or actual Codespaces billing/availability.
 - The prior local workerd smoke test served the page with HTTP 200 and returned
   HTTP 503 for unconfigured authentication, with no-store and security headers.
-- Native static-scan acceptance CI is configured for macOS, Windows and Linux;
-  the PR can now run remote jobs. Check its latest results; do not describe
-  Windows/Linux runtime validation as already completed.
+- All 13 [GitHub CI jobs](https://github.com/girnarholdings/TriDelPhi/actions/runs/34417173417)
+  passed on the merged PR head, including macOS/Linux/Windows native audit,
+  Python 3.11/3.12/3.13, real-scanner ladder and the aggregate gate.
+- On deployment day, all 32 portal tests and Wrangler 4.120.0 dry-run passed again.
+- Live portal HTML/CSS/JavaScript each returned HTTP 200 with byte-for-byte
+  matches to local assets. HTTPS certificate validation succeeded. CSP, no-store,
+  HSTS, frame denial and nosniff headers were present.
+- Live `/api/config`, `/auth/login`, `/api/session`, and `/api/scan` returned the
+  expected HTTP 503 setup error while the App secret is missing. This proves
+  fail-closed setup behavior, not a successful authentication/scan round-trip.
+- Apex homepage returned HTTP 200 from GitHub Pages, unchanged.
 
 ## 1. GitHub publication and local history
 
@@ -114,7 +142,7 @@ was verified to exactly match local candidate `1258cca290d2221eb77380822affcbf45
 (tree `01f81230e177448e493da8a4f9a9b3e4c8405d32`). A follow-up updates the
 scanner pin to the published candidate and records this handoff/spending rule.
 Published candidate commit: `78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8`.
-PR: https://github.com/girnarholdings/TriDelPhi/pull/70 (not merged).
+PR: https://github.com/girnarholdings/TriDelPhi/pull/70 (merged).
 
 API-created commits have different IDs from the original local commits. Preserve
 the original `codex/fortify-beginner-followups` local branch and the full-history
@@ -127,8 +155,8 @@ If terminal publishing is desired later, use normal GitHub CLI/Desktop login and
 the credential manager, never a token in a remote URL or shell command. Classic
 OAuth needs the `workflow` scope for workflow changes; fine-grained credentials
 need Contents, Workflows and Pull requests write for this repository.
-Update the existing PR rather than creating a duplicate. Refresh remote state,
-inspect conflicts and rerun affected tests before further publication.
+PR #70 is merged; follow-up changes belong on a new branch from current main.
+Refresh remote state, inspect conflicts and rerun affected tests before publication.
 
 **Pinned scanner prerequisite:** verify that GitHub can retrieve the pinned
 commit and its devcontainer before deploying the portal. After review/merge,
@@ -159,13 +187,11 @@ update. Do not assume a previously issued authorization already has new access.
 
 ## 3. Prepare Cloudflare and DNS without breaking the homepage
 
-Use the Cloudflare account that should own this service. Add/verify the
-`tridelphi.com` zone and confirm it is active. The current public nameservers
-are Porkbun's. The normal full-zone setup requires a separately approved DNS
-migration: export existing records, preserve **all** A/AAAA/CNAME/MX/TXT/CAA and
-verification records, and handle DNSSEC correctly before changing nameservers.
-Keep the registrar at Porkbun and the homepage's hosting unchanged if desired.
-This handoff does not authorize deleting DNS records or moving email/hosting.
+The owner completed the migration and `tridelphi.com` is active in the account
+above. Do not repeat the migration or change nameservers. Preserve all existing
+A/AAAA/CNAME/MX/TXT/CAA, verification records and DNSSEC settings. The registrar
+and the GitHub Pages homepage remain unchanged. This handoff does not authorize
+deleting DNS records or moving email/hosting.
 
 The custom-domain entry attaches **only `scan.tridelphi.com`**, not the apex or
 `www`. Do not replace the homepage's DNS target with this Worker. Check for an
@@ -188,6 +214,15 @@ See [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/
 and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
 Record the plan check before proceeding. Never upgrade automatically.
 
+For the first deployment this requirement was satisfied by the owner's explicit
+Workers Free confirmation. The CLI remained unauthenticated, so the agent used
+Wrangler only for bundling/dry-run and deployed through Cloudflare's official
+asset-upload and Worker APIs using the authorized connection. Three public
+assets were uploaded with short-lived upload credentials held only in process
+memory; no account token, App secret or upload credential was saved to Git.
+Remote bindings were checked against `portal/wrangler.toml`, including the
+unchanged immutable scanner pin and empty paid entitlements.
+
 Wrangler 4.120.0 dependencies already exist under `bot/node_modules` on this Mac.
 The bundled Node runtime is not on the default shell PATH. For this checkout:
 
@@ -206,11 +241,9 @@ nonsecret `account_id` in `portal/wrangler.toml` after confirming it. For a fres
 machine install Node 22+ and run `npm ci` inside `bot` to get the locked tooling.
 Do not commit `node_modules`, `.dev.vars`, Wrangler auth files, logs or tokens.
 
-On a new Worker, `secret put` may ask to create it first. Approve only the named
-`tridelphi-scan-portal` service in the correct account. If creation cannot happen
-before the first deployment, deploy the fail-closed configuration once, set the
-secret immediately, then redeploy and test. Do not claim a working login merely
-because the static page is reachable.
+This Worker now exists. Do not recreate it or replay migration `v1` manually.
+Add the secret to the existing service, then deploy and test. Do not claim a
+working login merely because the static page is reachable.
 
 If using an API token instead of browser login, use a scoped deployment token
 for the correct account and zone. Store it securely as `CLOUDFLARE_API_TOKEN`,
@@ -266,6 +299,7 @@ Read this document and `portal/README.md`, inspect Git status, and preserve loca
 commits. Do not restart the implementation or recreate the App. Verify GitHub and
 Cloudflare write access independently; GitHub's earlier 403 is resolved. Respect
 the mandatory owner spending rule. Do not ask for secrets in chat. Complete
-publication verification → PR → billing/zone readiness → App secret
-→ deploy → live verification, updating this handoff with actual PR/deployment
-URLs and failures. Never mark the service live on the strength of a dry-run.
+App secret → live OAuth/installation verification → Codespaces acceptance,
+updating this handoff with actual results. The code is merged and the Worker is
+already deployed. Do not repeat solved authentication/DNS work or mark the full
+scanning workflow complete on the strength of a reachable setup page.
