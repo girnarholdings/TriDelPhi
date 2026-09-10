@@ -211,7 +211,7 @@ def test_absolute_file_uris_become_repo_relative(stub_path):
     assert "uriBaseId" not in artifact
 
 
-def test_uris_outside_the_repo_are_left_alone(stub_path):
+def test_uris_outside_the_repo_are_neutralized(stub_path):
     bin_dir, repo = stub_path
     finding = {
         "ruleId": "x",
@@ -225,7 +225,7 @@ def test_uris_outside_the_repo_are_left_alone(stub_path):
     uri = res.sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"][
         "artifactLocation"
     ]["uri"]
-    assert uri == "file:///etc/passwd"
+    assert uri == "README.md"
 
 
 # --- CLI integration ---------------------------------------------------------

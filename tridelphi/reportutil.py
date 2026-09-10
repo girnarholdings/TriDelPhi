@@ -25,8 +25,14 @@ _MD_META = re.compile(r"([\\`*_{}\[\]<>|~])")
 
 def md_escape(text: str) -> str:
     """Backslash-escape Markdown/HTML metacharacters in untrusted text so it
-    renders as the literal characters, never as markup, in a posted comment."""
-    return _MD_META.sub(r"\\\1", text)
+    renders as the literal characters, never as markup, in a posted comment.
+
+    GitHub's ``@name`` syntax is not Markdown, but it has the externally visible
+    side effect of notifying another account. Encode the at-sign as an HTML
+    entity so an attacker-chosen filename or scanner message cannot mention-spam
+    people from a security bot comment.
+    """
+    return _MD_META.sub(r"\\\1", text).replace("@", "&#64;")
 
 
 def wrap(text: str, width: int) -> list[str]:

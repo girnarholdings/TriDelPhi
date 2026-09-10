@@ -31,10 +31,10 @@ def _render(repo, **kw):
     return buf.getvalue()
 
 
-def test_offline_guarantee_is_always_stated(repo_root):
+def test_local_core_scope_is_always_stated_without_overclaiming_addons(repo_root):
     out = _render(repo_root / MALICIOUS)
-    assert "Nothing was uploaded, copied, or shared" in out
-    assert "entirely on your machine" in out
+    assert "Core read local workflow files" in out
+    assert "did not upload your source" in out
 
 
 def test_critical_reads_as_not_safe_with_a_plain_fix(repo_root):
@@ -277,6 +277,30 @@ def test_markdown_escapes_untrusted_tool_output(repo_root):
     assert md.count("<script") == md.count("\\<script") and "\\<script" in md
     # The stray table pipe is escaped so it can't break the layout.
     assert "\\| col" in md
+
+
+def test_markdown_neutralizes_repo_labels_and_mentions(repo_root):
+    from tridelphi.checklist import render_checklist_markdown
+
+    result = analyze(repo_root / CLEAN)
+    external = {
+        "zizmor": ExternalStatus(
+            ran=True,
+            counts={"critical": 0, "warning": 1, "note": 0},
+            items=[("warning", "@victim.yml:1", "ask @maintainer <script>")],
+        )
+    }
+    md = render_checklist_markdown(
+        result,
+        repo_label="[click](https://evil.invalid) @owner",
+        files_scanned=result.files_scanned,
+        jobs_scanned=result.contexts_scanned,
+        fail_on="critical",
+        external=external,
+    )
+    assert "@victim" not in md and "@maintainer" not in md and "@owner" not in md
+    assert "&#64;victim" in md and "&#64;maintainer" in md and "&#64;owner" in md
+    assert "\\[click\\]" in md
 
 
 def _md_with_advisory(repo_root):

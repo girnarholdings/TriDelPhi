@@ -81,7 +81,7 @@ The copycat-site trick, mechanized.
 
 - **A directory** — a cloned repo or unpacked download. Pure file reads.
 - **An archive** — `.tgz` / `.tar.gz` / `.zip` / `.whl`, extracted to a temp dir first. Path-traversal and zip-slip entries are refused — an archive built to escape its extraction directory is malicious by construction, and that refusal is itself the verdict.
-- **`npm:<pkg>`** — `npm pack` downloads the published tarball and, unlike `npm install`, runs none of its scripts.
+- **`npm:<pkg>`** — bounded HTTPS GETs from `registry.npmjs.org`, never an npm subprocess. Checks SHA-512/SHA-256 integrity metadata before extraction; older packages lacking it are refused. URLs, local paths and version ranges are refused. Redirects must stay on the registry's HTTPS host.
 - **`pypi:<pkg>`** — a plain HTTPS GET against PyPI's JSON API, never `pip download` (which can execute a hostile `setup.py` just to resolve metadata).
 
 The two registry forms are the tool's only network use. They download without

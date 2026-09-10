@@ -1,13 +1,18 @@
 # L7 proposal — capping the TriDelPhi hardening ladder
 
-> **Status: implemented.** L7 · trust shipped as `tridelphi verify` (and
-> `--level 7`) — the offline **trust-lock pawl** as the headline, with
-> opportunistic `gh attestation verify` for upstream provenance at `note`
-> level, exactly as this proposal recommended. See `tridelphi/verify_cmd.py`
-> and `tests/test_verify_l7.py`. The audit findings in §1 that this rung does
-> **not** close (scorecard gating, external-finding baselining) remain recorded
-> here as honest known-limitations. This document is preserved as the design
-> rationale.
+> **Status: implemented with a narrowed trust claim.** L7 · trust shipped as
+> `tridelphi verify` (and `--level 7`) with an offline written-owner-path +
+> full-commit-SHA trust-lock as its enforceable boundary. It does not resolve
+> GitHub redirects, current publisher ownership, or signer identity. Once armed,
+> new actions gate until reviewed, and ambiguous remove-plus-add publisher
+> replacements cannot be auto-relocked. On 2026-09-01 the experimental
+> `gh attestation verify oci://…` lookup was removed: that OCI subject did not
+> prove the GitHub Action source reference named by `uses:`. Upstream artifact
+> provenance remains future work until real signed fixtures bind the exact
+> subject, signer, repository and digest. External findings now have stable
+> baseline fingerprints, except gitleaks credentials, which are deliberately
+> never waivable. The body below remains the proposal and audit rationale, not
+> a claim that every proposed feature shipped.
 
 **Author:** external supply-chain / CI security audit
 **Scope:** a candid audit of L1–L6 as built, then one proposed L7 rung, the

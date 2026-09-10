@@ -17,6 +17,14 @@
 // draft toggles, edits to the description) changes no code and must not burn a
 // runner minute.
 const SCAN_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
+const OWNER_PART = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+const REPO_PART = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/;
+const SAFE_REF = /^[^\u0000-\u001f\u007f]{1,255}$/;
+const EVENT_ACTION = /^[a-z][a-z0-9_]{0,63}$/;
+
+export function validRepo(owner, repo) {
+  return OWNER_PART.test(owner || "") && REPO_PART.test(repo || "");
+}
 
 /** Parse "owner/repo, owner/other" into a lower-cased Set. */
 export function parseAllowlist(raw) {
@@ -24,7 +32,10 @@ export function parseAllowlist(raw) {
     String(raw || "")
       .split(/[,\s]+/)
       .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
+      .filter((s) => {
+        const parts = s.split("/");
+        return parts.length === 2 && validRepo(parts[0], parts[1]);
+      }),
   );
 }
 
@@ -37,10 +48,24 @@ export function parseAllowlist(raw) {
 export function route(eventType, payload, { allowlist } = {}) {
   const ignore = (reason) => ({ act: "ignore", reason });
 
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return ignore("payload is not a JSON object");
+  }
+  if (typeof eventType !== "string" || eventType.length > 64) {
+    return ignore("event name is missing or malformed");
+  }
+
   const repository = payload?.repository;
   const owner = repository?.owner?.login;
   const repo = repository?.name;
-  if (!owner || !repo) return ignore("payload names no repository");
+  if (!validRepo(owner, repo)) return ignore("payload names no valid repository");
+  const canonical = `${owner}/${repo}`;
+  if (
+    repository.full_name !== undefined &&
+    String(repository.full_name).toLowerCase() !== canonical.toLowerCase()
+  ) {
+    return ignore("repository.full_name disagrees with owner/name");
+  }
 
   // Fail closed. A hosted bot with no allowlist would dispatch into any
   // repository whose webhook happens to carry the shared secret; for a security
@@ -51,9 +76,14 @@ export function route(eventType, payload, { allowlist } = {}) {
   if (!allowed.has(`${owner}/${repo}`.toLowerCase())) return ignore(`${owner}/${repo} is not allowlisted`);
 
   if (eventType === "pull_request") {
+    if (typeof payload.action !== "string" || !EVENT_ACTION.test(payload.action)) {
+      return ignore("pull_request action is missing or malformed");
+    }
     if (!SCAN_ACTIONS.has(payload.action)) return ignore(`pull_request.${payload.action} changes no code`);
     const pr = payload.pull_request;
-    if (!pr?.number) return ignore("pull_request has no number");
+    if (!Number.isSafeInteger(pr?.number) || pr.number <= 0) {
+      return ignore("pull_request has no valid number");
+    }
     if (pr.draft && payload.action !== "ready_for_review") return ignore("pull request is a draft");
     // Fork pull requests are deliberately not dispatched. A dispatched run
     // checks the pull request out and then runs the repository's own action
@@ -65,10 +95,16 @@ export function route(eventType, payload, { allowlist } = {}) {
     // not as same-repo. Requiring a positive same-repo match means an absent or
     // unexpected head can never be mistaken for a trusted branch.
     const headRepo = pr.head?.repo?.full_name;
-    const thisRepo = repository.full_name || `${owner}/${repo}`;
-    if (!headRepo || headRepo.toLowerCase() !== String(thisRepo).toLowerCase()) {
+    const thisRepo = repository.full_name || canonical;
+    const sameId = Number.isSafeInteger(repository.id) && repository.id > 0 &&
+      Number.isSafeInteger(pr.head?.repo?.id) && pr.head.repo.id === repository.id;
+    const sameName = typeof headRepo === "string" &&
+      headRepo.toLowerCase() === String(thisRepo).toLowerCase();
+    if (!sameId && !sameName) {
       return ignore("pull request is from a fork (or a deleted fork); the pull_request trigger scans it read-only");
     }
+    const ref = pr.base?.ref || repository.default_branch || "main";
+    if (typeof ref !== "string" || !SAFE_REF.test(ref)) return ignore("base ref is malformed");
     return {
       act: "scan",
       reason: `pull_request.${payload.action}`,
@@ -78,7 +114,7 @@ export function route(eventType, payload, { allowlist } = {}) {
       // workflow_dispatch needs a ref that exists in THIS repository. A fork's
       // head branch does not, so dispatch against the base branch and let the
       // run check the pull request out by number.
-      ref: pr.base?.ref || repository.default_branch || "main",
+      ref,
     };
   }
 

@@ -70,6 +70,24 @@ def test_weak_actor_guard_is_warning(tmp_path):
     assert "author_association" in f.remediation.rendered
 
 
+@pytest.mark.parametrize("claimed_role", ["OWNER", "MEMBER", "COLLABORATOR"])
+def test_role_literal_does_not_make_actor_identity_an_authorization_check(
+    tmp_path, claimed_role
+):
+    r = _scan(tmp_path, f"""
+        on:
+          issue_comment:
+            types: [created]
+        jobs:
+          a:
+            runs-on: ubuntu-latest
+            if: github.actor == '{claimed_role}'
+            steps:
+              - run: echo ok
+        """)
+    assert [f for f in r.findings if f.rule_id == "tridelphi/weak-actor-guard"]
+
+
 def test_strong_author_association_guard_is_clean(tmp_path):
     r = _scan(tmp_path, """
         on:

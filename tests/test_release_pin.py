@@ -15,6 +15,7 @@ release time and drift fails the build instead of a stranger's first run.
 from __future__ import annotations
 
 import re
+import runpy
 
 import pytest
 
@@ -31,7 +32,7 @@ _USER_FACING = ("README.md", "site/index.html", "site/setup.html")
 _PINNED = tuple(
     f"{d}{f}" for d, f in (
         ("", "README.md"), ("", "action.yml"),
-        ("site/", "index.html"), ("site/", "setup.html"),
+        ("site/", "index.html"), ("site/", "setup.html"), ("site/", "release.js"),
         ("docs/", "MARKETPLACE.md"), ("docs/", "RELEASES.md"), ("docs/", "REPO_SETUP.md"),
     )
 )
@@ -101,6 +102,14 @@ def test_the_pin_is_immutable(repo_root):
     user never agreed to run. The readable version lives in a trailing comment.
     """
     assert re.fullmatch(r"[0-9a-f]{40}", ACTION_SHA), "the pin must be a full commit SHA"
+
+
+def test_static_site_release_metadata_is_generated_from_release_module(repo_root):
+    namespace = runpy.run_path(str(repo_root / "scripts" / "render-release-metadata.py"))
+    assert (repo_root / "site" / "release.js").read_text(encoding="utf-8") == namespace["render"]()
+    setup = (repo_root / "site" / "setup.html").read_text(encoding="utf-8")
+    assert '<script src="release.js"></script>' in setup
+    assert "RELEASE.actionUses" in setup and "RELEASE.installPinned" in setup
 
 
 def test_ci_installs_are_pinned_and_local_installs_are_not():

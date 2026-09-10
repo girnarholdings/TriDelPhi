@@ -65,33 +65,36 @@ cheapest fix. `→ tests/test_realworld.py::test_pwn_request_target_is_critical`
 popular `tj-actions/changed-files` action and **moved its tags (v1–v45) to a
 malicious commit** (`0e58ed8671d6b60d0890c21b07f8835ace038e67`) that scraped
 runner memory for secrets — affecting **over 23,000 repositories**
-([Wiz][wiz], [CISA][cisa], [The Hacker News][thn], GHSA-mrrh-fwg8-r2c3). This is
-the class SHA-pinning alone struggles with: to a reviewer, a moved pin just
-looks like a version bump to a new, legitimate-looking SHA.
+([Wiz][wiz], [CISA][cisa], [The Hacker News][thn], GHSA-mrrh-fwg8-r2c3).
+Repositories that consumed mutable tags received changed code without a
+workflow-file diff. A repository already pinned to a full commit SHA did not
+silently follow the moved tag.
 
-**How TriDelPhi's L7 trust-lock catches it.** You record each action's identity
-once (`tridelphi verify --write-trust-lock`) and commit `.tridelphi/trust.lock`.
-On any later run, an action whose pinned SHA changed **under the same ref** — or
-whose owner changed — is an error that fails the build.
+**What TriDelPhi can enforce offline.** L7 refuses mutable tags and branches, so
+the vulnerable consumption shape is an error before an incident. If a later PR
+changes a full source pin, the committed trust-lock makes that repository diff
+an error until it is reviewed and re-locked. TriDelPhi does **not** contact
+GitHub to resolve tags and therefore cannot announce that a remote tag moved.
 
 **The reproduction** (`tests/fixtures/realworld/supply-chain-tj-actions/`): the
-lock records the legitimate pre-attack SHA; the workflow now pins the real
-malicious commit. TriDelPhi's output:
+lock records a previously reviewed source SHA; the workflow now pins the real
+malicious commit. This tests pin-diff gating, not remote tag resolution:
 
 ```
 $ tridelphi verify .
 [ERROR] tridelphi-verify/trust-lock-regression
   tj-actions/changed-files was locked to a1b2c3d4e5f6… but the workflow now
-  pins 0e58ed8671d6…. If you intended this bump, re-run --write-trust-lock;
-  if not, this is the change SHA-pinning cannot catch.
+  pins 0e58ed8671d6…. If you intended this bump, re-run --relock after review;
+  if not, restore the recorded pin.
 
 L7 trust: 2 third-party actions · 1 error, 0 notes
 exit code = 1        # fails the build
 ```
 
 The untampered control (pin matches the lock) exits `0` — the pawl does not cry
-wolf on a correctly pinned action. ✅ **Caught, and it blocks the build.**
-`→ tests/test_realworld.py::test_tj_actions_supply_chain_takeover_is_caught`
+wolf on a matching source pin. ✅ **The risky mutable reference and a later pin
+replacement both block; remote tag monitoring remains out of scope.**
+`→ tests/test_realworld.py::test_tj_actions_malicious_commit_pin_change_is_caught`
 
 ---
 

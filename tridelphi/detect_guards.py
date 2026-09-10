@@ -28,15 +28,6 @@ __all__ = ["detect", "has_strong_association_gate"]
 
 # An actor-identity reference used as a guard.
 _ACTOR_REF = re.compile(r"github\.(?:triggering_actor|actor)\b")
-# Signals that a real authorization check is present, which makes the guard OK.
-_STRONG = (
-    "author_association",
-    "permission",  # e.g. a check-permissions action output
-    "OWNER",
-    "MEMBER",
-    "COLLABORATOR",
-)
-
 _TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
 
 
@@ -79,6 +70,36 @@ def _split_top_level_or(expr: str) -> list[str]:
 _INVERSIONS = ("!contains", "!=", "==false", "=='false'", '=="false"')
 
 
+def _call_arguments(expr: str, name: str) -> Iterator[tuple[str, ...]]:
+    """Yield balanced, quote-aware arguments for calls with the given name."""
+    pattern = re.compile(rf"\b{re.escape(name)}\s*\(")
+    for match in pattern.finditer(expr):
+        args: list[str] = []
+        depth = 0
+        quote = ""
+        start = match.end()
+        i = start
+        while i < len(expr):
+            char = expr[i]
+            if quote:
+                if char == quote:
+                    quote = ""
+            elif char in "'\"":
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                if depth == 0:
+                    args.append(expr[start:i].strip())
+                    yield tuple(args)
+                    break
+                depth -= 1
+            elif char == "," and depth == 0:
+                args.append(expr[start:i].strip())
+                start = i + 1
+            i += 1
+
+
 def _is_positive_association_term(term: str) -> bool:
     """Is this single (top-level) term a positive author_association membership
     test — ``contains(fromJSON('[…trusted…]'), …author_association)`` — with no
@@ -86,13 +107,17 @@ def _is_positive_association_term(term: str) -> bool:
     compact = term.replace(" ", "")
     if "author_association" not in compact:
         return False
-    if not any(assoc in term for assoc in _TRUSTED_ASSOCIATIONS):
-        return False
-    if "contains(" not in compact:
-        return False
     if any(bad in compact for bad in _INVERSIONS):
         return False
-    return re.search(r"!\s*contains", term) is None
+    if re.search(r"!\s*contains", term) is not None:
+        return False
+    trusted = re.compile(rf"\b(?:{'|'.join(_TRUSTED_ASSOCIATIONS)})\b")
+    return any(
+        len(args) >= 2
+        and trusted.search(args[0]) is not None
+        and "author_association" in args[1]
+        for args in _call_arguments(term, "contains")
+    )
 
 
 def has_strong_association_gate(context: ExecutionContext) -> bool:
@@ -128,6 +153,12 @@ def has_strong_association_gate(context: ExecutionContext) -> bool:
     return all(_is_positive_association_term(d) for d in _split_top_level_or(expr))
 
 
+def _is_strong_association_expression(expr: str) -> bool:
+    if "author_association" not in expr:
+        return False
+    return all(_is_positive_association_term(d) for d in _split_top_level_or(expr))
+
+
 def _guard_expressions(context: ExecutionContext) -> Iterator[tuple[str, object]]:
     """Every `if:` expression in the job — job-level and step-level — with a
     node to anchor a position on."""
@@ -149,7 +180,7 @@ def detect(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
     for expr, node in _guard_expressions(context):
         if not _ACTOR_REF.search(expr):
             continue
-        if any(strong in expr for strong in _STRONG):
+        if _is_strong_association_expression(expr):
             continue
         position = node.value_position() if node is not None else context.position
         hits.append(

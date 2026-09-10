@@ -14,8 +14,18 @@ name = "tridelphi-bot"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
 
-# For `wrangler dev` only. Real secrets go through `wrangler secret put`, not here.
 [vars]
-GITHUB_WEBHOOK_SECRET = "dev-secret-change-me"
 # Comma-separated "owner/repo". Empty means dispatch nothing (fail closed).
 ALLOWED_REPOS = ""
+
+# One globally consistent object makes webhook delivery IDs single-use and
+# caps dispatches per repository. The Worker refuses credentialed dispatches if
+# this binding is removed; per-isolate memory is not a replay defense.
+[durable_objects]
+bindings = [
+  { name = "REPLAY_GUARD", class_name = "ReplayGuard" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ReplayGuard"]

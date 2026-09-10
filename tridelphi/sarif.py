@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from importlib import resources
 from typing import Any
 
 from .model import RULES, Diagnostic, Finding, rule_by_id
+from .severity import SARIF_LEVEL_TO_SEVERITY
 from .severity import SEVERITY_TO_SARIF_LEVEL as _LEVEL
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "fingerprint",
     "is_suppressed",
     "load_schema",
+    "severity_counts",
     "simple_sarif",
     "to_sarif",
     "validate_sarif",
@@ -54,6 +56,27 @@ def is_suppressed(result: dict[str, Any]) -> bool:
     return isinstance(supp, list) and len(supp) > 0 and all(
         isinstance(s, dict) for s in supp
     )
+
+
+def severity_counts(results: Iterable[Any]) -> dict[str, int]:
+    """Count live SARIF results with one shared, fail-safe interpretation.
+
+    A result explicitly marked ``baselineState: unchanged`` has already been
+    reviewed into the ratchet. It remains in SARIF for audit history, but is
+    not a current alert and must not re-fail ``tridelphi gate``.
+    """
+    counts = {"critical": 0, "warning": 0, "note": 0}
+    for result in results:
+        if not isinstance(result, dict):
+            counts["warning"] += 1
+            continue
+        if is_suppressed(result) or result.get("baselineState") == "unchanged":
+            continue
+        level = result.get("level")
+        if not isinstance(level, str):
+            level = "warning"
+        counts[SARIF_LEVEL_TO_SEVERITY.get(level, "warning")] += 1
+    return counts
 
 
 def load_schema() -> dict[str, Any]:

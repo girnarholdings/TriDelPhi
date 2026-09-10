@@ -36,6 +36,9 @@ inputs:
       6 +attest (writes a signed-elsewhere evidence statement); 7 +trust
       (verify consumed actions against the committed trust-lock). Default 3
       stays lean and fast; 5+ pulls in semgrep's dependency tree, so opt into it.
+      Levels 6-7 also require `id-token: write` and `attestations: write` in the
+      calling job. Level 7 needs a reviewed `.tridelphi/trust.lock`; create it
+      once with `tridelphi verify --write-trust-lock` and commit it.
     default: "3"
   fail-on:
     description: Exit non-zero at this level or above (critical | warning | none).
@@ -99,7 +102,7 @@ runs:
         PIP_NO_PYTHON_VERSION_WARNING: "1"
       run: |
         echo "::group::Installing TriDelPhi and the level-${LEVEL} scanners"
-        python3 -m pip install --quiet "$GITHUB_ACTION_PATH"
+        python3 -I -m pip install --quiet "$GITHUB_ACTION_PATH"
         bash "$GITHUB_ACTION_PATH/scripts/install-ladder.sh" "$LEVEL"
         echo "::endgroup::"
         echo "TriDelPhi $(tridelphi --version 2>/dev/null || echo '?') ready at level ${LEVEL}"
@@ -118,32 +121,78 @@ runs:
       # regardless. The threshold is enforced as the final step.
       run: |
         set +e
+        REPORT_TEXT="$RUNNER_TEMP/tridelphi-report.txt"
+        REPORT_MD="$RUNNER_TEMP/tridelphi-report.md"
+        INTERNAL_SARIF="$RUNNER_TEMP/tridelphi.sarif"
+        INTERNAL_EVIDENCE="$RUNNER_TEMP/tridelphi-evidence.json"
+        EXIT_MARKER="$RUNNER_TEMP/tridelphi-exit-code"
+        rm -f -- "$REPORT_TEXT" "$REPORT_MD" "$INTERNAL_SARIF" \
+          "$INTERNAL_EVIDENCE" "$EXIT_MARKER"
         LEVEL_ARGS=()
         if [ "$LEVEL" -ge 1 ] 2>/dev/null; then
-          LEVEL_ARGS=(--level "$LEVEL" --evidence-file "$EVIDENCE_FILE" --trust-lock "$TRUST_LOCK")
+          LEVEL_ARGS=(--level "$LEVEL" --evidence-file "$INTERNAL_EVIDENCE" --trust-lock "$TRUST_LOCK")
         fi
         tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" \
           --format checklist \
-          --sarif-file "$SARIF_FILE" \
-          --checklist-md-file report.md \
-          --fail-on "$FAIL_ON" > report.txt 2>&1
+          --sarif-file "$INTERNAL_SARIF" \
+          --checklist-md-file "$REPORT_MD" \
+          --fail-on "$FAIL_ON" > "$REPORT_TEXT" 2>&1
         code=$?
-        {
-          echo 'text<<TRIDELPHI_EOF'
-          cat report.txt
-          echo TRIDELPHI_EOF
-          echo 'md<<TRIDELPHI_EOF'
-          cat report.md 2>/dev/null || cat report.txt
-          echo TRIDELPHI_EOF
-          echo "exit_code=${code}"
-        } >> "$GITHUB_OUTPUT"
-        cat report.txt
+
+        # Uploads and comments consume the private runner-temp copies. Preserve
+        # the public output-path inputs with a bounded atomic copy that refuses
+        # source or destination symlinks. A hostile checkout can therefore
+        # neither redirect an artifact write nor leave stale SARIF to upload.
+        TRIDELPHI_INTERNAL_SARIF="$INTERNAL_SARIF" \
+        TRIDELPHI_INTERNAL_EVIDENCE="$INTERNAL_EVIDENCE" \
+        TRIDELPHI_REQUESTED_SARIF="$SARIF_FILE" \
+        TRIDELPHI_REQUESTED_EVIDENCE="$EVIDENCE_FILE" \
+          python3 -I - <<'PY'
+        import os
+        import sys
+        from pathlib import Path
+
+        from tridelphi.fsutil import atomic_copy_file
+
+        copies = (
+            (os.environ["TRIDELPHI_INTERNAL_SARIF"], os.environ["TRIDELPHI_REQUESTED_SARIF"]),
+            (os.environ["TRIDELPHI_INTERNAL_EVIDENCE"], os.environ["TRIDELPHI_REQUESTED_EVIDENCE"]),
+        )
+        try:
+            for source, destination in copies:
+                if Path(source).is_file():
+                    atomic_copy_file(source, destination)
+        except (OSError, ValueError):
+            print("TriDelPhi could not safely copy a requested artifact path.", file=sys.stderr)
+            raise SystemExit(1)
+        PY
+        copy_code=$?
+        if [ "$copy_code" -ne 0 ]; then
+          code=2
+        fi
+
+        printf '%s\n' "$code" > "$EXIT_MARKER"
+        if [ -s "$INTERNAL_SARIF" ]; then
+          echo "sarif_ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "sarif_ready=false" >> "$GITHUB_OUTPUT"
+        fi
+        if [ -s "$INTERNAL_EVIDENCE" ]; then
+          echo "evidence_ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "evidence_ready=false" >> "$GITHUB_OUTPUT"
+        fi
+
         # The Summary tab is where a non-expert lands from the email. Put the
         # readable report there, not only in the log, so nobody has to expand a
         # job to find out whether they are safe.
-        {
-          cat report.md 2>/dev/null || { echo '```'; cat report.txt; echo '```'; }
-        } >> "$GITHUB_STEP_SUMMARY"
+        if [ -f "$REPORT_MD" ]; then
+          cat "$REPORT_MD" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "TriDelPhi could not produce the readable report; the final gate will fail." \
+            >> "$GITHUB_STEP_SUMMARY"
+        fi
+        echo "TriDelPhi finished. Open the job Summary for the plain-language report."
         exit 0
 
     # Skipped on pull requests unless pr-annotations is on: uploading here makes
@@ -151,10 +200,10 @@ runs:
     # sticky comment below already says it better. Pushes always upload, so the
     # Security tab tracks the default branch.
     - name: Upload to code scanning
-      if: ${{ always() && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
+      if: ${{ always() && steps.scan.outputs.sarif_ready == 'true' && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
       uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
       with:
-        sarif_file: ${{ inputs.sarif-file }}
+        sarif_file: ${{ runner.temp }}/tridelphi.sarif
         category: tridelphi
 
     # Optional exposure audit of the *shipped product* (built JS, DB/config).
@@ -162,6 +211,7 @@ runs:
     # only see build output that is present in the checkout — so it is worth
     # enabling only after a build step has produced e.g. ./dist.
     - name: Audit shipped output
+      id: exposure
       if: ${{ inputs.expose == 'true' }}
       shell: bash
       env:
@@ -169,17 +219,31 @@ runs:
       # Never fail this step; the audit is advisory and its SARIF still uploads.
       run: |
         set +e
+        EXPOSURE_SARIF="$RUNNER_TEMP/tridelphi-expose.sarif"
+        EXPOSURE_MD="$RUNNER_TEMP/tridelphi-expose.md"
+        EXPOSURE_TEXT="$RUNNER_TEMP/tridelphi-expose.txt"
+        rm -f -- "$EXPOSURE_SARIF" "$EXPOSURE_MD" "$EXPOSURE_TEXT"
         tridelphi expose "$SCAN_PATH" \
           --format checklist \
-          --sarif-file tridelphi-expose.sarif \
-          --fail-on none
+          --sarif-file "$EXPOSURE_SARIF" \
+          --checklist-md-file "$EXPOSURE_MD" \
+          --fail-on none > "$EXPOSURE_TEXT" 2>&1
+        if [ -s "$EXPOSURE_SARIF" ]; then
+          echo "sarif_ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "sarif_ready=false" >> "$GITHUB_OUTPUT"
+        fi
+        if [ -f "$EXPOSURE_MD" ]; then
+          cat "$EXPOSURE_MD" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        echo "TriDelPhi exposure audit finished. Open the job Summary for its report."
         exit 0
 
     - name: Upload exposure audit to code scanning
-      if: ${{ inputs.expose == 'true' && always() && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
+      if: ${{ inputs.expose == 'true' && always() && steps.exposure.outputs.sarif_ready == 'true' && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
       uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
       with:
-        sarif_file: tridelphi-expose.sarif
+        sarif_file: ${{ runner.temp }}/tridelphi-expose.sarif
         category: tridelphi-expose
 
     # L6: publish the evidence statement as a signed build attestation, so a
@@ -187,23 +251,44 @@ runs:
     # on push (attestations need the workflow's own OIDC identity, which fork
     # PRs do not get), and only if the evidence file was written.
     - name: Attest the scan evidence
-      if: ${{ (inputs.level == '6' || inputs.level == '7') && github.event_name != 'pull_request' && hashFiles(inputs.evidence-file) != '' }}
+      if: ${{ (inputs.level == '6' || inputs.level == '7') && github.event_name != 'pull_request' && steps.scan.outputs.evidence_ready == 'true' }}
       uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
       with:
-        subject-path: ${{ inputs.evidence-file }}
+        subject-path: ${{ runner.temp }}/tridelphi-evidence.json
 
     - name: Comment on the pull request
-      if: ${{ inputs.comment == 'true' && (github.event_name == 'pull_request' || inputs.pr-number != '') }}
+      # Fork pull_request tokens are read-only by platform policy and cannot
+      # comment. Skip that impossible write instead of turning a completed scan
+      # into a misleading 403; its report remains in the job Summary and gate.
+      if: ${{ inputs.comment == 'true' && (inputs.pr-number != '' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
-        REPORT_MD: ${{ steps.scan.outputs.md }}
+        REPORT_FILE: ${{ runner.temp }}/tridelphi-report.md
         PR_NUMBER: ${{ inputs.pr-number }}
       with:
         script: |
           // The comment is what the notification email renders, so it is real
           // Markdown — verdict heading, status table, details fold — not a
           // monospace dump.
-          const report = process.env.REPORT_MD || 'TriDelPhi produced no output.';
+          const fs = require('fs');
+          function readBounded(path, limit = 60000) {
+            if (!path) return '';
+            let fd;
+            try {
+              fd = fs.openSync(path, 'r');
+              const buffer = Buffer.alloc(limit);
+              const count = fs.readSync(fd, buffer, 0, limit, 0);
+              return buffer.subarray(0, count).toString('utf8');
+            } catch (_error) {
+              return '';
+            } finally {
+              if (fd !== undefined) fs.closeSync(fd);
+            }
+          }
+          // The renderer escapes repository-derived Markdown. Neutralize @ as
+          // an extra boundary so a filename cannot notify an unrelated user.
+          const report = (readBounded(process.env.REPORT_FILE) ||
+            'TriDelPhi produced no readable report.').replaceAll('@', '&#64;');
           // On a pull_request event the number is in the context; a dispatched
           // run has no such context and passes it explicitly instead.
           const issue_number = Number(process.env.PR_NUMBER) || context.issue.number;
@@ -229,6 +314,14 @@ runs:
 
     - name: Enforce the threshold
       shell: bash
-      env:
-        EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
-      run: exit "$EXIT_CODE"
+      run: |
+        code=2
+        if [ -f "$RUNNER_TEMP/tridelphi-exit-code" ]; then
+          IFS= read -r code < "$RUNNER_TEMP/tridelphi-exit-code"
+        fi
+        case "$code" in
+          0) exit 0 ;;
+          1) exit 1 ;;
+          2) exit 2 ;;
+          *) echo "TriDelPhi returned an invalid status; failing closed." >&2; exit 2 ;;
+        esac

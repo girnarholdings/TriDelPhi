@@ -96,6 +96,10 @@ def test_scorecard_json_becomes_sarif_by_score():
         "scorecard/Security-Policy": "warning",
         "scorecard/Pinned-Dependencies": "note",
     }
+    for finding in run["results"]:
+        assert finding["properties"]["tridelphiAdvisory"] is True
+        assert finding["properties"]["tridelphiGatePolicy"] == "posture-only"
+        assert finding["message"]["text"].startswith("Advisory repository posture")
 
 
 def test_scorecard_results_always_carry_a_location():

@@ -125,6 +125,7 @@ class RepoInventory:
     mcp_servers: tuple[McpServer, ...] = ()
     hook_configs: tuple[AgentConfigFile, ...] = ()
     codeowners_paths: tuple[str, ...] = ()
+    unknown_config_paths: tuple[str, ...] = ()
 
     def config_kinds(self) -> tuple[str, ...]:
         return tuple(sorted({c.kind for c in self.agent_configs}))
@@ -159,6 +160,7 @@ class ExecutionContext:
     called_workflow: str | None = None
     untrusted_worktree: bool = False
     untrusted_worktree_reason: str = ""
+    semantic_unknowns: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -323,6 +325,22 @@ RULES: tuple[RuleSpec, ...] = (
         help_uri=f"{_HELP}#agent-hook-execution",
         default_level="error",
         adr_techniques=("code-interpreter-abuse", "excessive-tool-permissions"),
+    ),
+    RuleSpec(
+        id="tridelphi/agent-semantics-unknown",
+        name="AgentSemanticsUnknown",
+        short_description="AI-agent action behavior is not modeled, so safety is unknown",
+        full_description=(
+            "The workflow invokes an action whose name indicates an AI coding agent, "
+            "but TriDelPhi has no reviewed model of which pull-request-controlled "
+            "instruction, MCP, and hook files it restores from the trusted base. "
+            "Unknown behavior is reported rather than silently treated as safe. Pin "
+            "the action and review its vendor security documentation before granting "
+            "credentials or a persistent runner."
+        ),
+        help_uri=f"{_HELP}#agent-semantics-unknown",
+        default_level="warning",
+        adr_techniques=("indirect-prompt-injection", "unvetted-mcp-server"),
     ),
     RuleSpec(
         id="tridelphi/untrusted-checkout-privileged-egress",

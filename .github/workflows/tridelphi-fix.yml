@@ -61,10 +61,10 @@ jobs:
       )
     runs-on: ubuntu-latest
     steps:
-      # Re-verify authorization before doing anything. The comment path is already
-      # gated on author_association above; the checkbox path is gated by GitHub
-      # (write access to toggle), which we confirm here — and we never act on the
-      # bot's own edits (its periodic re-render of the comment).
+      # Re-verify current repository permission before doing anything. GitHub's
+      # MEMBER/COLLABORATOR association is not the same as write permission, so
+      # both the typed-comment and checkbox paths must pass this live API check.
+      # We also never act on the bot's own periodic comment edits.
       - name: Authorize the requester
         id: auth
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -72,7 +72,9 @@ jobs:
           script: |
             const p = context.payload;
             if (p.sender && p.sender.type === 'Bot') { core.setOutput('ok', 'false'); return; }
-            if (p.action === 'created') { core.setOutput('ok', 'true'); return; }
+            if (!p.sender || typeof p.sender.login !== 'string') {
+              core.setOutput('ok', 'false'); return;
+            }
             const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
               owner: context.repo.owner, repo: context.repo.repo, username: p.sender.login,
             });
@@ -145,46 +147,33 @@ jobs:
 
       - name: Apply the automatic fixes (each verified or rolled back)
         if: steps.pr.outputs.skip == 'false'
-        id: apply
         # The log lives OUTSIDE the working tree ($RUNNER_TEMP): a log inside it
         # made `git status` below report a change on every run, so the bot
         # committed its own log and reported "fixes applied" when nothing was.
         run: |
           tridelphi fix --apply > "$RUNNER_TEMP/fix-log.txt" 2>&1 || true
-          cat "$RUNNER_TEMP/fix-log.txt"
-          {
-            echo 'log<<TRIDELPHI_EOF'
-            cat "$RUNNER_TEMP/fix-log.txt"
-            echo TRIDELPHI_EOF
-          } >> "$GITHUB_OUTPUT"
 
       # An intentional tool update (Dependabot, or a maintainer) trips the L7
       # trust-lock by design — the pawl cannot tell a wanted bump from a swap.
       # Ticking the box IS the human confirmation, so re-record the moved pins
-      # here. `--relock` refuses if an action changed OWNER: that is the repo
-      # transfer / takeover shape, and no click should wave it through.
+      # here. `--relock` refuses an ambiguous remove-plus-add publisher change:
+      # offline source inspection cannot prove that it is a routine replacement.
       - name: Re-lock tool pins the maintainer just approved
         if: steps.pr.outputs.skip == 'false'
         id: relock
         run: |
           if tridelphi verify . --relock > "$RUNNER_TEMP/relock.txt" 2>&1; then
-            echo "refused=false" >> "$GITHUB_OUTPUT"
+            rm -f "$RUNNER_TEMP/relock-refused"
           else
-            echo "refused=true" >> "$GITHUB_OUTPUT"
+            : > "$RUNNER_TEMP/relock-refused"
           fi
-          cat "$RUNNER_TEMP/relock.txt"
-          {
-            echo 'log<<TRIDELPHI_EOF'
-            cat "$RUNNER_TEMP/relock.txt"
-            echo TRIDELPHI_EOF
-          } >> "$GITHUB_OUTPUT"
 
       - name: Push what verified
         if: steps.pr.outputs.skip == 'false'
         id: push
         run: |
           if [ -z "$(git status --porcelain)" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            rm -f "$RUNNER_TEMP/push-changed"
             echo "No files changed — nothing was auto-fixable, or nothing verified."
           else
             git config user.name "github-actions[bot]"
@@ -192,43 +181,53 @@ jobs:
             git add -A
             git commit -m "tridelphi: apply verified automatic fixes"
             git push
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            : > "$RUNNER_TEMP/push-changed"
           fi
 
       - name: Report back
         if: steps.pr.outputs.skip == 'false'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          FIX_LOG: ${{ steps.apply.outputs.log }}
-          CHANGED: ${{ steps.push.outputs.changed }}
-          RELOCK_LOG: ${{ steps.relock.outputs.log }}
-          RELOCK_REFUSED: ${{ steps.relock.outputs.refused }}
         with:
           script: |
-            const changed = process.env.CHANGED === 'true';
-            const refused = process.env.RELOCK_REFUSED === 'true';
-            const log = (process.env.FIX_LOG || '').slice(0, 25000);
-            const relock = (process.env.RELOCK_LOG || '').slice(0, 25000);
+            const fs = require('fs');
+            const path = require('path');
+            const temp = process.env.RUNNER_TEMP;
+            const read = (name) => {
+              let fd;
+              try {
+                fd = fs.openSync(path.join(temp, name), 'r');
+                const buffer = Buffer.alloc(25000);
+                const count = fs.readSync(fd, buffer, 0, buffer.length, 0);
+                return buffer.subarray(0, count).toString('utf8');
+              } catch { return ''; }
+              finally { if (fd !== undefined) fs.closeSync(fd); }
+            };
+            const escape = (value) => value
+              .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+              .replaceAll('@', '&#64;')
+              .slice(0, 25000);
+            const changed = fs.existsSync(path.join(temp, 'push-changed'));
+            const refused = fs.existsSync(path.join(temp, 'relock-refused'));
+            const log = escape(read('fix-log.txt'));
+            const relock = escape(read('relock.txt'));
             // A refused re-lock is the one outcome that must not read as routine:
-            // an action changed hands, which is exactly what the lock is for.
+            // the source identities cannot be safely reconciled automatically.
             const headline = refused
-              ? '🛑 **TriDelPhi stopped: one of your pinned tools changed hands.** A repo transfer and a takeover look identical from here, so nothing was re-locked. Confirm the action is still the one you trust, then record it deliberately with `tridelphi verify --write-trust-lock`.'
+              ? '🛑 **TriDelPhi stopped: your pinned tool identities need review.** A locked publisher was removed while another was introduced, or the lock disagrees with the source. TriDelPhi cannot resolve ownership offline, so nothing was re-locked. Review the change, then replace the lock deliberately with `tridelphi verify --write-trust-lock --yes`.'
               : changed
               ? '🔺 **TriDelPhi applied its verified fixes** — each change below was re-scanned before it was kept.'
               : '🔺 **TriDelPhi had nothing it could fix automatically** — the remaining items need a human decision (`tridelphi guard` locally walks you through them).';
-            // Tell them the last step. A push made by GITHUB_TOKEN leaves the
-            // re-run needing a maintainer's "Approve and run" on many repos, so
-            // the checks sit stale and it looks like nothing happened. Saying so
-            // is the difference between "done" and "why is it still red".
+            // GITHUB_TOKEN pushes do not trigger ordinary push/PR workflows.
+            // Never imply that stale checks cover the new commit.
             const nextStep = changed
-              ? "**One last step:** the checks re-run on the new commit, and GitHub may " +
-                "hold them for approval — if they look stuck, open the **Actions** tab and " +
-                "click **Approve and run**."
+              ? "**One last step:** GitHub does not automatically start checks for a bot-token push. " +
+                "Review the changes, then push a new commit yourself to this PR branch " +
+                "to trigger fresh checks. Do not merge based on checks for the old commit."
               : null;
             const body = [
               headline, '',
-              ...(relock.trim() ? ['**Tool pins**', '', '```', relock, '```', ''] : []),
-              '```', log, '```',
+              ...(relock.trim() ? ['**Tool pins**', '', '<pre>', relock, '</pre>', ''] : []),
+              '<pre>', log || 'No automatic fix output.', '</pre>',
               ...(nextStep ? ['', nextStep] : []),
             ].join('\n');
             await github.rest.issues.createComment({

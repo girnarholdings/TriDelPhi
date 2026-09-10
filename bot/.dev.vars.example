@@ -1,0 +1,2 @@
+# Copy this file to `.dev.vars` for local development only. Never commit the copy.
+GITHUB_WEBHOOK_SECRET="replace-with-a-long-random-local-secret"

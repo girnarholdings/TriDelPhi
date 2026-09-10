@@ -44,14 +44,18 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 import tarfile
+import time
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .jsonutil import loads_jsonc
 from .sarif import simple_sarif
 from .severity import SEVERITY_ORDER as _SEVERITY_RANK
+from .structure import structure_error
 
 __all__ = [
     "CATEGORIES",
@@ -115,7 +119,9 @@ class PreflightResult:
 # to hang the scanner with a million files or a 10GB blob. Partial coverage is
 # reported (`truncated`), never silent.
 _MAX_FILES = 6000
+_MAX_ENTRIES = 100_000
 _MAX_READ_BYTES = 2 * 1024 * 1024
+_MAX_SCAN_SECONDS = 15
 
 # Unlike `expose`, node_modules is IN scope: a downloaded app bundle can carry
 # a malicious dependency's postinstall right there in the tree.
@@ -163,6 +169,27 @@ class _Surface:
     files: list[_File] = field(default_factory=list)
     package_jsons: list[Path] = field(default_factory=list)
     truncated: bool = False
+    coverage_issues: list[str] = field(default_factory=list)
+
+
+def _coverage_issue(surface: _Surface, kind: str, detail: str) -> None:
+    """Record one deterministic example per coverage-failure kind."""
+
+    if not any(item.startswith(f"{kind}:") for item in surface.coverage_issues):
+        surface.coverage_issues.append(f"{kind}: {detail}")
+    surface.truncated = True
+
+
+def _display_path(path: Path, root: Path) -> str:
+    """Stable target-relative label for lexical and already-resolved paths."""
+
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        try:
+            return str(path.relative_to(root.resolve()))
+        except ValueError:
+            return path.name
 
 
 def _classify(rel: Path) -> str | None:
@@ -194,16 +221,42 @@ def _classify(rel: Path) -> str | None:
 
 def _discover(root: Path) -> _Surface:
     s = _Surface()
+    if root.is_symlink() or not root.is_dir():
+        _coverage_issue(s, "invalid root", "the scan target is not a regular directory")
+        return s
     stack = [root]
-    seen = 0
+    files_seen = 0
+    entries_seen = 0
+    deadline = time.monotonic() + _MAX_SCAN_SECONDS
     while stack:
+        if time.monotonic() > deadline:
+            _coverage_issue(s, "time limit", f"discovery exceeded {_MAX_SCAN_SECONDS} seconds")
+            return s
         current = stack.pop()
         try:
-            entries = sorted(current.iterdir())
+            entries: list[Path] = []
+            for entry in current.iterdir():
+                entries_seen += 1
+                if entries_seen > _MAX_ENTRIES:
+                    _coverage_issue(s, "entry limit", f"tree exceeded {_MAX_ENTRIES} entries")
+                    return s
+                if time.monotonic() > deadline:
+                    _coverage_issue(
+                        s, "time limit", f"discovery exceeded {_MAX_SCAN_SECONDS} seconds"
+                    )
+                    return s
+                entries.append(entry)
+            entries.sort()
         except OSError:
+            _coverage_issue(
+                s,
+                "unreadable directory",
+                _display_path(current, root) if current != root else ".",
+            )
             continue
         for entry in entries:
             if entry.is_symlink():
+                _coverage_issue(s, "symlink skipped", _display_path(entry, root))
                 continue
             if entry.is_dir():
                 low = entry.name.lower()
@@ -214,9 +267,9 @@ def _discover(root: Path) -> _Surface:
                 continue
             if _TEST_FILE.search(entry.name):
                 continue
-            seen += 1
-            if seen > _MAX_FILES:
-                s.truncated = True
+            files_seen += 1
+            if files_seen > _MAX_FILES:
+                _coverage_issue(s, "file limit", f"tree exceeded {_MAX_FILES} files")
                 return s
             rel = entry.relative_to(root)
             if entry.name == "package.json":
@@ -636,18 +689,42 @@ _SUSPICIOUS_CMD = re.compile(
     r"powershell\b[^\n]{0,60}-e(nc)?\b|nc\s+-|\bncat\b)\b")
 
 
-def _scan_package_json(path: Path, root: Path) -> tuple[list[PreflightFinding], list[Path]]:
+def _read_text_accounted(path: Path, root: Path, surface: _Surface) -> str | None:
+    try:
+        size = path.stat(follow_symlinks=False).st_size
+    except OSError:
+        _coverage_issue(surface, "unreadable file", _display_path(path, root))
+        return None
+    if size > _MAX_READ_BYTES:
+        _coverage_issue(
+            surface,
+            "oversized file",
+            f"{_display_path(path, root)} exceeds {_MAX_READ_BYTES // (1024 * 1024)} MiB",
+        )
+    text = _read_text(path)
+    if text is None:
+        _coverage_issue(surface, "unreadable file", _display_path(path, root))
+    return text
+
+
+def _scan_package_json(
+    path: Path, root: Path, surface: _Surface
+) -> tuple[list[PreflightFinding], list[Path]]:
     """npm lifecycle scripts: the single most-used malware delivery slot in the
     JS ecosystem. Returns findings plus referenced script files to pull into
     the INSTALL-context scan set."""
     out: list[PreflightFinding] = []
     extra: list[Path] = []
-    raw = _read_text(path)
+    raw = _read_text_accounted(path, root, surface)
     if raw is None:
         return out, extra
     try:
         doc = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
+        _coverage_issue(surface, "malformed package manifest", _display_path(path, root))
+        return out, extra
+    if structure_error(doc, max_nodes=200_000, max_collection_items=50_000) or not isinstance(doc, dict):
+        _coverage_issue(surface, "malformed package manifest", _display_path(path, root))
         return out, extra
     scripts = doc.get("scripts")
     if not isinstance(scripts, dict):
@@ -710,9 +787,27 @@ def _scan_agent_configs(f: _File, text: str) -> list[PreflightFinding]:
     if not _is_structured_config(rel=f.rel):
         return out
     try:
-        doc = json.loads(text)
-    except ValueError:
-        return out
+        doc = loads_jsonc(text)
+    except (ValueError, TypeError, RecursionError):
+        return [PreflightFinding(
+            "A" if f.context == "agent" else "I",
+            "unreadable-executable-config",
+            "critical",
+            f.rel,
+            "This executable configuration could not be parsed safely. Its commands "
+            "are unknown, so TriDelPhi will not call it clean.",
+            "do not install or open this project until you can parse and explain this file.",
+        )]
+    if structure_error(doc, max_nodes=200_000, max_collection_items=50_000) or not isinstance(doc, (dict, list)):
+        return [PreflightFinding(
+            "A" if f.context == "agent" else "I",
+            "unreadable-executable-config",
+            "critical",
+            f.rel,
+            "This executable configuration has an unexpected top-level shape. Its "
+            "commands are unknown, so TriDelPhi will not call it clean.",
+            "do not install or open this project until you can explain this file.",
+        )]
 
     def commands(node: Any) -> list[str]:
         found: list[str] = []
@@ -783,56 +878,118 @@ _MAX_EXTRACT_BYTES = 300 * 1024 * 1024
 _MAX_EXTRACT_ENTRIES = 20000
 
 
+def _prepare_extract_destination(dest: Path) -> Path:
+    if dest.is_symlink():
+        raise ValueError("extraction destination must not be a symlink")
+    if dest.exists() and not dest.is_dir():
+        raise ValueError("extraction destination must be a directory")
+    dest.mkdir(parents=True, exist_ok=True)
+    if any(dest.iterdir()):
+        raise ValueError("extraction destination must be empty")
+    return dest.resolve()
+
+
+def _archive_target(root: Path, member_name: str, seen: set[Path]) -> Path:
+    normalized = member_name.replace("\\", "/")
+    if "\x00" in normalized:
+        raise ValueError("archive entry contains a NUL byte")
+    if re.match(r"^[A-Za-z]:", normalized):
+        raise ValueError(f"archive entry uses an absolute drive path: {member_name}")
+    member = PurePosixPath(normalized)
+    if member.is_absolute() or not member.parts:
+        raise ValueError(f"archive entry is absolute or empty: {member_name}")
+    if any(part == ".." for part in member.parts):
+        raise ValueError(f"archive entry escapes via upward traversal: {member_name}")
+    target = (root / Path(*member.parts)).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise ValueError(f"archive entry escapes the extraction dir: {member_name}") from None
+    if target in seen:
+        raise ValueError(f"archive contains duplicate output path: {member_name}")
+    seen.add(target)
+    return target
+
+
+def _copy_archive_member(source, target: Path, extracted: int) -> int:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    created = False
+    try:
+        with target.open("xb") as output:
+            created = True
+            while chunk := source.read(1024 * 1024):
+                extracted += len(chunk)
+                if extracted > _MAX_EXTRACT_BYTES:
+                    raise ValueError("archive expands past the size cap")
+                output.write(chunk)
+    except Exception:
+        if created:
+            target.unlink(missing_ok=True)
+        raise
+    return extracted
+
+
 def extract_archive(archive: Path, dest: Path) -> Path:
     """Safely extract a .tgz/.tar.gz/.tar/.zip/.whl into ``dest`` and return
     the extraction root. Path-traversal entries, links pointing outside, and
     oversize archives are refused — the target is untrusted by definition."""
-    dest.mkdir(parents=True, exist_ok=True)
+    root = _prepare_extract_destination(dest)
     name = archive.name.lower()
-    total = 0
+    extracted = 0
+    seen: set[Path] = set()
     if name.endswith((".zip", ".whl")):
         with zipfile.ZipFile(archive) as zf:
             infos = zf.infolist()
             if len(infos) > _MAX_EXTRACT_ENTRIES:
                 raise ValueError(f"archive has {len(infos)} entries (cap {_MAX_EXTRACT_ENTRIES})")
+            entries: list[tuple[zipfile.ZipInfo, Path]] = []
+            declared_total = 0
             for info in infos:
-                target = (dest / info.filename).resolve()
-                if not str(target).startswith(str(dest.resolve())):
-                    raise ValueError(f"archive entry escapes the extraction dir: {info.filename}")
-                total += info.file_size
-                if total > _MAX_EXTRACT_BYTES:
+                target = _archive_target(root, info.filename, seen)
+                mode = info.external_attr >> 16
+                kind = stat.S_IFMT(mode)
+                if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    raise ValueError(f"archive entry is not a plain file/dir: {info.filename}")
+                declared_total += max(info.file_size, 0)
+                if declared_total > _MAX_EXTRACT_BYTES:
                     raise ValueError("archive expands past the size cap")
-            zf.extractall(dest)
+                entries.append((info, target))
+            for info, target in entries:
+                if info.is_dir() or stat.S_IFMT(info.external_attr >> 16) == stat.S_IFDIR:
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                with zf.open(info) as source:
+                    extracted = _copy_archive_member(source, target, extracted)
     elif name.endswith((".tgz", ".tar.gz", ".tar", ".tar.bz2", ".tar.xz")):
         with tarfile.open(archive) as tf:
-            members = tf.getmembers()
-            if len(members) > _MAX_EXTRACT_ENTRIES:
-                raise ValueError(f"archive has {len(members)} entries (cap {_MAX_EXTRACT_ENTRIES})")
-            for m in members:
-                total += max(m.size, 0)
-                if total > _MAX_EXTRACT_BYTES:
+            entries: list[tuple[tarfile.TarInfo, Path]] = []
+            declared_total = 0
+            # Stop reading headers at the cap, instead of materializing an
+            # attacker-controlled number of members through getmembers().
+            for index, m in enumerate(tf, start=1):
+                if index > _MAX_EXTRACT_ENTRIES:
+                    raise ValueError(f"archive has more than {_MAX_EXTRACT_ENTRIES} entries")
+                target = _archive_target(root, m.name, seen)
+                if not (m.isreg() or m.isdir()):
+                    raise ValueError(f"archive entry is not a plain file/dir: {m.name}")
+                declared_total += max(m.size, 0)
+                if declared_total > _MAX_EXTRACT_BYTES:
                     raise ValueError("archive expands past the size cap")
-            try:
-                tf.extractall(dest, filter="data")  # rejects traversal/links/devices
-            except TypeError:  # pragma: no cover — pre-3.11.4 fallback
-                for m in members:
-                    target = (dest / m.name).resolve()
-                    if not str(target).startswith(str(dest.resolve())):
-                        raise ValueError(f"archive entry escapes the extraction dir: {m.name}") from None
-                    if not (m.isreg() or m.isdir()):
-                        raise ValueError(f"archive entry is not a plain file/dir: {m.name}") from None
-                tf.extractall(dest)
-            except tarfile.FilterError as exc:
-                # The `data` filter refused an entry (path traversal, an absolute
-                # path, a link or device). That refusal IS the finding — normalize
-                # it to the ValueError this function documents so a caller sees a
-                # verdict, not a traceback.
-                raise ValueError(f"unsafe archive entry refused: {exc}") from None
+                entries.append((m, target))
+            for member, target in entries:
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                source = tf.extractfile(member)
+                if source is None:
+                    raise ValueError(f"archive member could not be read: {member.name}")
+                with source:
+                    extracted = _copy_archive_member(source, target, extracted)
     else:
         raise ValueError(f"unsupported archive type: {archive.name}")
     # npm tarballs wrap everything in package/; a single top dir is the root.
-    entries = [p for p in dest.iterdir() if not p.name.startswith(".")]
-    return entries[0] if len(entries) == 1 and entries[0].is_dir() else dest
+    entries = [p for p in root.iterdir() if not p.name.startswith(".")]
+    return entries[0] if len(entries) == 1 and entries[0].is_dir() else root
 
 
 # ---------------------------------------------------------------------------
@@ -863,7 +1020,7 @@ def analyze_preflight(root: str | Path, *, tool_version: str = "0") -> Preflight
     findings: list[PreflightFinding] = []
     extra_install: list[Path] = []
     for pkg in surface.package_jsons:
-        pkg_findings, refs = _scan_package_json(pkg, root)
+        pkg_findings, refs = _scan_package_json(pkg, root, surface)
         findings.extend(pkg_findings)
         extra_install.extend(refs)
 
@@ -874,7 +1031,7 @@ def analyze_preflight(root: str | Path, *, tool_version: str = "0") -> Preflight
 
     examined = 0
     for f in scan_set.values():
-        text = _read_text(f.path)
+        text = _read_text_accounted(f.path, root, surface)
         if text is None:
             continue
         examined += 1
@@ -889,6 +1046,21 @@ def analyze_preflight(root: str | Path, *, tool_version: str = "0") -> Preflight
             findings.extend(structured)
         else:
             findings.extend(_scan_text(f, text))
+
+    if surface.coverage_issues:
+        details = "; ".join(sorted(surface.coverage_issues))
+        findings.append(
+            PreflightFinding(
+                "I",
+                "scan-coverage-partial",
+                "critical",
+                ".",
+                f"TriDelPhi could not inspect the whole target ({details}). A partial "
+                "scan is not a clean result.",
+                "do not install yet. Remove the coverage obstacle or scan a smaller, "
+                "fully readable source tree.",
+            )
+        )
 
     # Exact duplicates (same rule at the same spot) collapse.
     unique: dict[tuple[str, str], PreflightFinding] = {}

@@ -29,11 +29,11 @@ def test_pwn_request_target_is_critical():
     assert caps == {"U", "P", "E"}, f"expected all three capabilities, got {caps}"
 
 
-def test_tj_actions_supply_chain_takeover_is_caught():
-    """CVE-2025-30066: a SHA-pinned action whose pin was moved to the malicious
-    commit. The trust-lock records the legitimate identity; verify must flag the
-    swap as an error and fail the gate — the change SHA-pinning alone cannot
-    catch."""
+def test_tj_actions_malicious_commit_pin_change_is_caught():
+    """CVE-2025-30066 fixture: the source pin is changed to the disclosed
+    malicious commit. The trust-lock records a previously reviewed source pin;
+    verify must flag that repository diff and fail the gate. Remote tag movement
+    is outside this offline assertion."""
     fixture = FIXTURES / "supply-chain-tj-actions"
     code, doc = run_verify(
         fixture,

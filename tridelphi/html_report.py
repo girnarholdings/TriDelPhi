@@ -15,6 +15,7 @@ import html
 
 from . import __version__
 from .model import AnalysisResult, Finding
+from .sarif import fingerprint
 from .severity import SEVERITY_ORDER as _SEV_ORDER
 
 __all__ = ["render_html"]
@@ -88,18 +89,26 @@ def render_html(
     *,
     repo_label: str,
     external_summary: str | None = None,
+    baseline: set[str] | None = None,
 ) -> str:
+    baseline = baseline or set()
+    live = [f for f in result.findings if fingerprint(f) not in baseline]
+    accepted = len(result.findings) - len(live)
     counts = {"critical": 0, "warning": 0, "note": 0}
-    for f in result.findings:
+    for f in live:
         counts[f.severity] = counts.get(f.severity, 0) + 1
 
     ordered = sorted(
-        result.findings, key=lambda f: (_SEV_ORDER[f.severity], f.sort_key)
+        live, key=lambda f: (_SEV_ORDER[f.severity], f.sort_key)
     )
-    cards = "\n".join(_finding_card(f) for f in ordered) or (
-        '<div class="empty">No findings. Every job holds at most two of the three '
-        "capabilities &mdash; compliant with the Agents Rule of Two.</div>"
+    empty = (
+        f'No new findings. {accepted} unchanged accepted finding(s) remain in the '
+        "baseline and SARIF audit history."
+        if accepted
+        else "No findings. Every job holds at most two of the three capabilities "
+        "&mdash; compliant with the Agents Rule of Two."
     )
+    cards = "\n".join(_finding_card(f) for f in ordered) or f'<div class="empty">{empty}</div>'
 
     ext = f'<div class="ext-note">{_esc(external_summary)}</div>' if external_summary else ""
 

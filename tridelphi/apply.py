@@ -30,12 +30,14 @@ Two generic actions work on any finding with a known location:
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from .api import analyze
+from .fsutil import atomic_write_text
 from .model import Finding
 from .render import SEVERITY_ORDER
 
@@ -63,6 +65,38 @@ def _read_workflow(path: Path) -> str | None:
         return path.read_text(encoding="utf-8")
     except OSError:
         return None
+
+
+def _atomic_write(path: Path, text: str, *, mode: int | None = None) -> None:
+    """Commit a complete same-directory file or leave the old path untouched."""
+    if mode is None:
+        try:
+            mode = path.stat(follow_symlinks=False).st_mode & 0o777
+        except OSError:
+            mode = 0o644
+    atomic_write_text(path, text, mode=mode)
+
+
+def _safe_workflow_path(root: Path, path: Path) -> bool:
+    """Keep every fixer mutation inside a real workflow directory."""
+
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    if (
+        len(relative.parts) < 3
+        or relative.parts[:2] != (".github", "workflows")
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or root.is_symlink()
+    ):
+        return False
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,8 +289,28 @@ def _fix_drop_ref(text: str, finding: Finding) -> str | None:
     `with:` block is removed so the YAML stays valid.
     """
     lines = text.split("\n")
-    span = _job_span(lines, finding.context.job_id)
-    if span is None:
+    job_span = _job_span(lines, finding.context.job_id)
+    if job_span is None:
+        return None
+    job_start, job_end = job_span
+    target_line = (
+        finding.remediation.target_position.line - 1
+        if finding.remediation and finding.remediation.target_position
+        else None
+    )
+    span = _step_span(lines, target_line) if target_line is not None else None
+    if (
+        span is None
+        or span[0] < job_start
+        or span[1] > job_end
+        or not any(_HEAD_REF.match(lines[i]) for i in range(*span))
+    ):
+        match_line = next(
+            (i for i in range(job_start, job_end) if _HEAD_REF.match(lines[i])),
+            None,
+        )
+        span = _step_span(lines, match_line) if match_line is not None else None
+    if span is None or span[0] < job_start or span[1] > job_end:
         return None
     start, end = span
     keep: list[str] = []
@@ -285,7 +339,9 @@ def _fix_drop_ref(text: str, finding: Finding) -> str | None:
 _ASSOCIATION_CONTEXT = (
     ("issue_comment", "github.event.comment.author_association"),
     ("pull_request_review_comment", "github.event.comment.author_association"),
+    ("pull_request_review", "github.event.review.author_association"),
     ("discussion_comment", "github.event.comment.author_association"),
+    ("discussion", "github.event.discussion.author_association"),
     ("issues", "github.event.issue.author_association"),
     ("pull_request_target", "github.event.pull_request.author_association"),
     ("pull_request", "github.event.pull_request.author_association"),
@@ -307,10 +363,13 @@ def _fix_narrow_trigger(text: str, finding: Finding) -> str | None:
     child_indent = " " * (len(body[0]) - len(body[0].lstrip()))
     association = next(
         (ctx for trig, ctx in _ASSOCIATION_CONTEXT if trig in finding.context.triggers),
-        "github.event.comment.author_association",
+        None,
     )
+    if association is None:
+        return None
     gate = (
-        f"{child_indent}if: contains(fromJSON('[\"OWNER\",\"MEMBER\"]'), {association})"
+        f"{child_indent}if: contains(fromJSON('[\"OWNER\",\"MEMBER\","
+        f"\"COLLABORATOR\"]'), {association})"
     )
     return "\n".join([*lines[:start + 1], gate, *lines[start + 1:end], *lines[end:]])
 
@@ -353,11 +412,24 @@ _TRANSFORMS = {
 AUTO_FIXABLE = frozenset(_TRANSFORMS)
 
 
-def _verify_cleared(repo_root: Path, finding: Finding) -> bool:
+def _verify_cleared(
+    repo_root: Path,
+    finding: Finding,
+    require_workflow: bool = True,
+) -> bool:
     """A fix counts only if the same finding no longer appears at its severity."""
     key = finding_key(finding)
     rank = SEVERITY_ORDER[finding.severity]
-    fresh = analyze(repo_root)
+    try:
+        fresh = analyze(repo_root)
+    except Exception:
+        return False
+    if require_workflow:
+        workflow = repo_root / finding.context.workflow_file
+        if not workflow.is_file() or workflow.is_symlink():
+            return False
+        if any(d.path == finding.context.workflow_file for d in fresh.diagnostics):
+            return False
     return not any(
         finding_key(f) == key and SEVERITY_ORDER[f.severity] <= rank
         for f in fresh.findings
@@ -372,27 +444,64 @@ def apply_action(repo_root: str | Path, finding: Finding, action: str) -> FixRes
     """
     root = Path(repo_root)
     workflow = root / finding.context.workflow_file
+    if not _safe_workflow_path(root, workflow):
+        return FixResult(
+            "unavailable", action, "refusing to edit a workflow outside the real workflow directory"
+        )
 
     if action == "disable":
         target = workflow.with_name(workflow.name + ".disabled")
+        if not _safe_workflow_path(root, target):
+            return FixResult("unavailable", action, "refusing an unsafe disabled-workflow path")
+        if target.exists() or target.is_symlink():
+            return FixResult(
+                "unavailable",
+                action,
+                f"{target.name} already exists; refusing to overwrite it",
+            )
         original = _read_workflow(workflow)
         if original is None:
             return FixResult("failed", action, "workflow file is missing or too large to read")
+        try:
+            original_mode = workflow.stat().st_mode & 0o777
+        except OSError as exc:
+            return FixResult("failed", action, f"cannot inspect workflow file: {exc}")
         header = (
             "# tridelphi: workflow disabled — rename back to "
             f"{workflow.name} to re-enable\n"
         )
-        target.write_text(header + original, encoding="utf-8", newline="\n")
-        workflow.unlink()
-        if _verify_cleared(root, finding):
+        target_created = False
+        try:
+            with target.open("x", encoding="utf-8", newline="\n") as handle:
+                target_created = True
+                handle.write(header + original)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(target, original_mode)
+            if not _safe_workflow_path(root, workflow):
+                raise OSError("workflow path changed through a symlink during the edit")
+            workflow.unlink()
+        except OSError as exc:
+            if target_created:
+                target.unlink(missing_ok=True)
+            return FixResult("failed", action, f"could not disable workflow: {exc}")
+        if _verify_cleared(root, finding, False):
             return FixResult(
                 "applied",
                 action,
                 f"renamed to {target.name}; GitHub no longer runs it",
                 (finding.context.workflow_file,),
             )
-        target.unlink()
-        workflow.write_text(original, encoding="utf-8", newline="\n")
+        try:
+            _atomic_write(workflow, original, mode=original_mode)
+            if _safe_workflow_path(root, target):
+                target.unlink()
+        except OSError as exc:
+            return FixResult(
+                "failed",
+                action,
+                f"disabling did not clear the finding and rollback failed: {exc}",
+            )
         return FixResult("failed", action, "disabling did not clear the finding; restored")
 
     if action == "fix":
@@ -415,7 +524,11 @@ def apply_action(repo_root: str | Path, finding: Finding, action: str) -> FixRes
         return FixResult(
             "unavailable", action, "could not locate an unambiguous edit site"
         )
-    workflow.write_text(changed, encoding="utf-8", newline="\n")
+    try:
+        mode = workflow.stat().st_mode & 0o777
+        _atomic_write(workflow, changed, mode=mode)
+    except OSError as exc:
+        return FixResult("failed", action, f"could not write workflow safely: {exc}")
     if _verify_cleared(root, finding):
         return FixResult(
             "applied",
@@ -423,7 +536,14 @@ def apply_action(repo_root: str | Path, finding: Finding, action: str) -> FixRes
             "edited and re-scanned — the finding is gone",
             (finding.context.workflow_file,),
         )
-    workflow.write_text(original, encoding="utf-8", newline="\n")
+    try:
+        _atomic_write(workflow, original, mode=mode)
+    except OSError as exc:
+        return FixResult(
+            "failed",
+            action,
+            f"the edit did not verify and rollback failed: {exc}",
+        )
     return FixResult(
         "failed",
         action,

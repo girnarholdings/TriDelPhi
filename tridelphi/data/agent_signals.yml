@@ -16,6 +16,10 @@
 
 agents:
   - id: claude-code-action
+    restore_state: known
+    reviewed_at: 2026-08-06
+    reviewed_versions: ["v1 family"]
+    evidence: docs/security.md in anthropics/claude-code-action
     uses_prefixes:
       - anthropics/claude-code-action
       - anthropics/claude-code-base-action
@@ -44,6 +48,10 @@ agents:
       - WebSearch
 
   - id: gemini-cli
+    restore_state: none
+    reviewed_at: 2026-08-06
+    reviewed_versions: ["prefix family"]
+    evidence: vendor action definitions; no base-restore behavior documented
     uses_prefixes:
       - google-github-actions/run-gemini-cli
       - google-gemini/gemini-cli-action
@@ -57,6 +65,10 @@ agents:
       - web_fetch
 
   - id: openai-codex
+    restore_state: none
+    reviewed_at: 2026-08-06
+    reviewed_versions: ["prefix family"]
+    evidence: vendor action definition; no base-restore behavior documented
     uses_prefixes:
       - openai/codex-action
     display: OpenAI Codex
@@ -65,6 +77,10 @@ agents:
     network_tools: []
 
   - id: github-ai-inference
+    restore_state: none
+    reviewed_at: 2026-08-06
+    reviewed_versions: ["prefix family"]
+    evidence: vendor action definition; prompt-only model invocation
     uses_prefixes:
       - actions/ai-inference
       - github/ai-inference
@@ -74,6 +90,20 @@ agents:
       A raw model call. Whatever the workflow puts in the prompt is the whole
       trust boundary.
     network_tools: []
+
+# A newly released agent action must not disappear merely because its exact
+# repository is not in the reviewed table yet. These conservative name markers
+# create an explicit `unknown` result and keep PR-controlled files in scope.
+unknown_action_markers:
+  - claude
+  - codex
+  - gemini
+  - copilot
+  - cursor
+  - aider
+  - ai-agent
+  - ai_agent
+  - llm
 
 # Commands that invoke an agent from inside a run block. These never restore
 # anything, so a PR-head tree is fully attacker-controlled.

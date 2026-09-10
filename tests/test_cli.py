@@ -123,6 +123,15 @@ def test_version_and_help(repo_root):
     assert run_cli(["--help"], cwd=repo_root).returncode == 0
 
 
+def test_start_gives_three_plain_english_paths(repo_root):
+    result = run_cli(["start"], cwd=repo_root)
+    assert result.returncode == 0
+    assert "three doors" in result.stdout
+    assert "tridelphi scan" in result.stdout
+    assert "tridelphi core" in result.stdout
+    assert "tridelphi expose" in result.stdout
+
+
 def test_self_check_validates_schema(repo_root):
     result = run_cli([MALICIOUS, "--format", "sarif", "--self-check"], cwd=repo_root)
     assert result.returncode == 1

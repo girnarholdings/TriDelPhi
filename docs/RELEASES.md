@@ -82,8 +82,8 @@ gate.
 - **L4 repo posture** — OSSF scorecard (Apache-2.0)
 - **L5 code SAST** — semgrep (LGPL-2.1)
 - **L6 attest & gate** — native: signed-elsewhere evidence + policy as its own step
-- **L7 trust** — native trust-lock: a consumed action whose signer or SHA
-  changed fails the build — the case SHA-pinning can't see (the tj-actions class)
+- **L7 trust** — native trust-lock: a changed pin or newly introduced action
+  fails after the lock is armed; no remote ownership or tag-resolution claim
 
 ```yaml
 - uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1

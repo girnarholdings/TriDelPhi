@@ -103,6 +103,43 @@ def test_unlocked_actions_are_notes_not_errors(tmp_path):
     assert rules == {"tridelphi-verify/unlocked-action"}
 
 
+def test_new_publisher_gates_once_a_trust_lock_exists(tmp_path):
+    repo = _basic_repo(tmp_path)
+    lock = tmp_path / "trust.lock"
+    assert run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)[0] == 0
+    _wf(
+        repo,
+        "extra.yml",
+        "on: push\njobs:\n  a:\n    steps:\n"
+        "      - uses: new-publisher/action@1111111111111111111111111111111111111111\n",
+    )
+    code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
+    matching = [
+        result
+        for result in doc["runs"][0]["results"]
+        if result["ruleId"] == "tridelphi-verify/unreviewed-action"
+    ]
+    assert code == 1
+    assert len(matching) == 1 and matching[0]["level"] == "error"
+
+
+def test_relock_refuses_ambiguous_publisher_replacement(tmp_path):
+    repo = _basic_repo(tmp_path)
+    lock = tmp_path / "trust.lock"
+    assert run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)[0] == 0
+    before = lock.read_bytes()
+    _wf(
+        repo,
+        "ci.yml",
+        "on: push\njobs:\n  a:\n    steps:\n"
+        "      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262\n"
+        "      - uses: replacement/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065\n",
+    )
+    code, _ = run_verify(repo, trust_lock=str(lock), relock=True, offline=True)
+    assert code == 1
+    assert lock.read_bytes() == before
+
+
 def test_sha_change_under_same_ref_is_a_regression(tmp_path):
     repo = _basic_repo(tmp_path)
     lock = tmp_path / "trust.lock"
@@ -137,7 +174,7 @@ def test_owner_transfer_is_flagged(tmp_path):
     assert code == 1
     owner_changed = [
         r for r in doc["runs"][0]["results"]
-        if r["ruleId"] == "tridelphi-verify/signer-owner-changed"
+        if r["ruleId"] == "tridelphi-verify/recorded-owner-changed"
     ]
     assert owner_changed and owner_changed[0]["level"] == "error"
 
@@ -179,15 +216,16 @@ def test_verify_sarif_passes_the_shape_gate(tmp_path):
     assert doc["runs"][0]["tool"]["driver"]["name"] == "tridelphi-verify"
 
 
-def test_corrupt_lock_is_treated_as_empty(tmp_path):
+def test_corrupt_lock_fails_closed(tmp_path):
     repo = _basic_repo(tmp_path)
     lock = tmp_path / "trust.lock"
     lock.write_text("not json{{{")
     code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
-    # A corrupt lock cannot silently pass everything: it reads as no lock, so
-    # every action becomes an unlocked note, and the run still succeeds.
-    assert code == 0
-    assert all(r["level"] == "note" for r in doc["runs"][0]["results"])
+    # A damaged trust root is a gating error, never an implicit empty lock.
+    assert code == 1
+    results = doc["runs"][0]["results"]
+    assert any(r["ruleId"] == "tridelphi-verify/invalid-trust-lock" for r in results)
+    assert any(r["level"] == "error" for r in results)
 
 
 # --- CLI --------------------------------------------------------------------
@@ -260,8 +298,8 @@ def test_relock_records_an_intentional_bump_and_clears_the_gate(tmp_path):
     assert json.loads(lock.read_text())["actions"]["actions/checkout"]["sha"] == "0" * 40
 
 
-def test_relock_refuses_when_an_action_changed_hands(tmp_path):
-    """A takeover looks exactly like a routine bump. One click must not bless it."""
+def test_relock_refuses_when_lock_owner_disagrees_with_source(tmp_path):
+    """A tampered lock/source owner mismatch must not be auto-approved."""
     repo = _basic_repo(tmp_path)
     lock = tmp_path / "trust.lock"
     run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
@@ -362,7 +400,7 @@ def test_a_takeover_inside_action_yml_is_caught(tmp_path):
     code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
     assert code == 1, "a takeover in action.yml must gate"
     rules = [r["ruleId"] for r in doc["runs"][0]["results"]]
-    assert "tridelphi-verify/signer-owner-changed" in rules
+    assert "tridelphi-verify/recorded-owner-changed" in rules
 
 
 def test_composite_actions_under_dot_github_are_scanned(tmp_path):

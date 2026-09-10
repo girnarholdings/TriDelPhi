@@ -13,6 +13,8 @@
 **[🌐 Website](https://girnarholdings.github.io/TriDelPhi/)** ·
 **[🎛️ Setup Studio](https://girnarholdings.github.io/TriDelPhi/setup.html)** ·
 **[📖 Rules](docs/RULES.md)** ·
+**[🧩 GitHub semantics](docs/GITHUB_SEMANTICS.md)** ·
+**[🤖 Agent signals](docs/AGENT_SIGNALS.md)** ·
 **[🧭 Decisions](docs/DECISIONS.md)** ·
 **[🔑 L7 design](docs/L7_PROPOSAL.md)** ·
 **[⚙️ Setup](docs/REPO_SETUP.md)** ·
@@ -24,7 +26,28 @@
 
 ## Three doors
 
+Want all three native static checks in one offline command?
+
+```console
+tridelphi audit ./your-project.zip
+tridelphi audit ./your-project --format json
+```
+
+This reads a directory or safely extracts a source archive. It does not install
+target dependencies, execute target code, or run the optional external scanner
+ladder. Exit codes: 0 means no warnings/critical findings in the selected checks,
+1 means review findings, and 2 means incomplete coverage or a scan error.
+None of these results certifies that a project is safe.
+
+**Online scan access (deployment rails, not a live service):** the
+[scan portal](portal/README.md) requires GitHub App sign-in and installation.
+Free users can continue to a trusted TriDelPhi Codespace using their own GitHub
+allowance; paid Cloudflare scanning is reserved but disabled until its isolated
+backend is ready. No anonymous scanning and no automatic paid fallback.
+
 TriDelPhi answers three different questions. Start at the one you actually have.
+If you are unsure, run `tridelphi start`: it shows these same choices in plain
+language and does not change anything.
 
 <table>
 <tr>
@@ -131,10 +154,12 @@ default**, emits **SARIF 2.1.0**, and is the **L3 core** of an optional
 seven-rung hardening ladder that wraps best-of-breed open-source scanners into
 one merged report.
 
-> **Proven against real attacks.** TriDelPhi catches the shape of the
-> `tj-actions/changed-files` supply-chain takeover ([CVE-2025-30066][cve], 23,000+
-> repos) and the `pull_request_target` pwn-request secret-exfiltration class
-> (MITRE, Splunk, spotipy, timescale/pgai). Reproductions and unedited output:
+> **Tested against real attack patterns.** TriDelPhi catches the
+> `pull_request_target` pwn-request secret-exfiltration class (MITRE, Splunk,
+> spotipy, timescale/pgai). For the `tj-actions/changed-files` incident
+> ([CVE-2025-30066][cve], 23,000+ repos), L7 rejects the mutable tag pattern and
+> gates a later source pin replacement against a reviewed lock; an offline scan
+> cannot observe a remote tag moving by itself. Reproductions and exact limits:
 > [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md), guarded by `tests/test_realworld.py`.
 
 [cve]: https://www.wiz.io/blog/github-action-tj-actions-changed-files-supply-chain-attack-cve-2025-30066
@@ -383,10 +408,10 @@ tool credited with its own driver metadata and provenance.
 | **L2** | [osv-scanner](https://github.com/google/osv-scanner) | Apache-2.0 | `scan source -r` | known-vulnerable packages in your lockfiles¹ |
 | **L3** | [zizmor](https://github.com/zizmorcore/zizmor) | MIT | `--format sarif --offline` | unpinned actions, template injection, workflow lint |
 | **L3** | **tridelphi core** | Apache-2.0 | native | the U∩P∩E capability intersection — always runs |
-| **L4** | [OSSF scorecard](https://github.com/ossf/scorecard) | Apache-2.0 | `--local --format json` → SARIF adapter | repo posture: branch protection, token perms, pinning¹ |
+| **L4** | [OSSF scorecard](https://github.com/ossf/scorecard) | Apache-2.0 | `--local --format json` → SARIF adapter | advisory repo posture: branch protection, token perms, pinning¹ |
 | **L5** | [semgrep](https://github.com/semgrep/semgrep) | LGPL-2.1 | `scan --config p/security-audit` | rule-based SAST of the application code itself¹ |
 | **L6** | **tridelphi attest / gate** | Apache-2.0 | native | signed in-toto evidence + policy enforcement as its own step |
-| **L7** | **tridelphi verify** + [gh](https://github.com/cli/cli) | Apache-2.0 / MIT | native trust-lock + `gh attestation verify` | signer/SHA-change detection (offline) + upstream provenance |
+| **L7** | **tridelphi verify** | Apache-2.0 | native, strict trust-lock | owner/SHA-change detection (offline) |
 
 ```console
 tridelphi .                # no rung: the core U∩P∩E scan only, offline, no subprocesses
@@ -395,6 +420,11 @@ tridelphi . --level 6      # every rung, then write the evidence statement
 tridelphi . --level 7      # + verify consumed actions against the trust-lock
 tridelphi --credits        # who built what — the wrapped tools, with licenses
 ```
+
+Levels 6–7 need `id-token: write` and `attestations: write` in the calling job
+so GitHub can sign the evidence statement. `tridelphi init` and the Setup Studio
+add those scopes only when you choose one of those levels. Level 7 becomes
+enforcing after you review and commit the lock shown in the L7 section below.
 
 **The CLI has no default rung; the Action defaults to `level: 3`.** That
 asymmetry is deliberate — a local run should not silently shell out to five
@@ -417,15 +447,15 @@ The wrapped scanners read attacker-influenceable repository content, so their
 (`orchestrate.py::sarif_shape_error` + `ladder.py`):
 
 - **Bounded** — output over `MAX_OUTPUT_BYTES` (25 MB) is refused, not parsed.
-- **Structurally gated** — one shared shape check (`runs`/`results`/`tool.driver`/
-  `locations` types) rejects malformed SARIF; anything that fails becomes a
-  diagnostic, never a crash.
-- **Path-safe URI normalization** — external URIs are rewritten to repo-relative
-  paths; a `../`-escaping or percent-encoded traversal is neutralized to an
-  unambiguous absolute `file://` so it can never masquerade as an in-repo path.
+- **Structurally gated** — one shared shape check bounds runs, results, rules,
+  locations, object nodes and string sizes, then validates every field
+  TriDelPhi consumes; invalid output becomes a diagnostic, never a crash.
+- **Path-safe URI normalization** — in-repo URIs become repo-relative paths;
+  every absolute, out-of-root, hosted, control-character or encoded traversal
+  URI is replaced with the inert `README.md` repository anchor.
 - **Honest severity** — gitleaks emits no `level` (SARIF-defaults to warning); a
-  live secret is escalated to **error**. scorecard's 0–10 scores map 0–3→warning,
-  4–7→note, 8+→dropped.
+  live secret is escalated to **error**. Scorecard is explicitly advisory
+  posture: 0–3→warning, 4–7→note, 8+→dropped.
 
 This containment layer was hardened by two adversarial subagent passes (164
 hostile-output tests); see the [red-team corpus](#-harden-it-further).
@@ -451,25 +481,27 @@ action feeds the evidence to
 drops [step-security/harden-runner](https://github.com/step-security/harden-runner)
 (Apache-2.0) into the generated workflow to audit the scan job's own egress.
 
-### 🔑 L7 — trust: the pawl SHA-pinning can't provide
+### 🔑 L7 — trust: make dependency changes deliberate
 
-L6 *produces* signed evidence; L7 is the **consumer** half — it asks the one
-question the content rungs don't: *is what I consume still pinned to who it
-claims to be?*
+L6 produces signed scan evidence. L7 is a separate, offline dependency-change
+pawl: *does every third-party action source still use the owner path and full
+commit SHA a reviewer recorded?* It does not resolve GitHub ownership or claim
+that a matching SHA proves safe behavior.
 
 ```console
 tridelphi verify --write-trust-lock   # once: record each action's owner + pinned SHA
 git add .tridelphi/trust.lock          # commit the pawl
-tridelphi verify .                     # from now on, a changed signer/SHA fails the build
+tridelphi verify .                     # changed pins/new publishers now fail the build
 tridelphi verify . --relock            # after an intentional bump: re-record and go green
 ```
 
 **When you *meant* to update a tool.** A Dependabot bump (or your own) trips the
 pawl by design — it cannot tell a wanted update from a swap. `--relock` is the
 on-ramp back to green: it re-records the pins that moved and leaves the pawl armed
-on the **new** identity. It **refuses**, writing nothing at all, if an action
-changed *owner* — a repo transfer and a takeover look identical from here, so that
-one needs a human (confirm, then `--write-trust-lock` deliberately). It also
+on the **new** pin. It **refuses**, writing nothing at all, when the same change
+removes a locked action identity and introduces another: offline inspection
+cannot safely decide whether that is an unrelated add/remove or a publisher
+replacement. Review it, then use `--write-trust-lock --yes` deliberately. It also
 refuses if one action is pinned to two different versions across your workflows,
 naming both spots, rather than "succeeding" into a state that stays red.
 
@@ -490,20 +522,20 @@ re-scans for you.
 > If `^{}` returns nothing the tag is lightweight and the plain ref is already the
 > commit. We shipped a tag-object pin this way once; Dependabot caught it.
 
-The **trust-lock** (`verify_cmd.py`) records the resolved owner and pinned SHA of
+The **trust-lock** (`verify_cmd.py`) records the written owner path and pinned SHA of
 every third-party `uses:` you consume — in your **workflows** and in any **action
 definition** you publish (`action.yml`, `.github/actions/*/action.yml`), because a
 composite action ships its dependencies to everyone who uses it. On a later run,
-an action whose SHA changed *under the
-same ref* — or whose owner changed (a repo transfer) — is an **error**. This is
-the case SHA-pinning cannot see: pinning defeats tag *mutation*, but a hijacked or
-transferred upstream repo (the **tj-actions class**) looks like a legitimate new
-SHA. The lock is **offline and deterministic** — no crypto, just the diff between
-what you locked and what the workflow says now. A **tampered or corrupt lock reads
-as empty** (every action becomes an unlocked `note`), never as "matches
-everything." Where `gh` is present and online it also verifies upstream SLSA
-provenance, reported at `note` because most 2026 actions publish none. Full
-design and honest limits: [`docs/L7_PROPOSAL.md`](docs/L7_PROPOSAL.md).
+an action whose SHA changes under the same owner/repository path is an **error**.
+After a lock exists, a newly introduced action is also an error until reviewed
+and re-locked; an ambiguous remove-plus-add publisher replacement cannot be
+auto-relocked. The lock is **offline and deterministic** — no crypto and no
+GitHub ownership lookup, just the diff between what you locked and what the
+repository says now. Mutable tags/branches cannot be recorded, duplicate or
+malformed keys fail closed, stale entries stay visible, and a corrupt lock is a
+gating error. Writes are atomic; replacing an existing lock requires explicit
+confirmation. Full design and honest limits:
+[`docs/L7_PROPOSAL.md`](docs/L7_PROPOSAL.md).
 
 ## 📄 Output contract
 
@@ -649,8 +681,9 @@ A comment-triggered workflow holding `contents: write` is exactly the U∩P∩E
 shape this tool exists to catch, so the bot is built the way our own
 remediation demands, and it passes the scanner that ships it:
 
-- only **OWNER / MEMBER / COLLABORATOR** comment authors can trigger it (the
-  `author_association` gate — spoofable `github.actor` names don't count);
+- **OWNER / MEMBER / COLLABORATOR** is the early event gate (spoofable
+  `github.actor` names don't count), and a live GitHub API check then requires
+  current **write / maintain / admin** permission before any checkout or edit;
 - the comment body is read **only inside `if:` expressions**, which GitHub
   evaluates before any shell exists — event text never reaches a shell;
 - **fork PRs are skipped before checkout**: it only scans and pushes branches
@@ -695,11 +728,12 @@ without you choosing to. And the verdict is honest about its own limits: a clean
 result means *no known-bad patterns in the source and config we read* — it cannot
 vouch for a compiled binary or predict what a server sends tomorrow.
 
-Registry fetches (`npm:` / `pypi:`) are the tool's only network use. They
-download the artifact without installing or executing it — `npm pack` runs no
-scripts, and the PyPI path is a plain HTTP GET, never `pip download` (which can
-execute a hostile `setup.py` just to resolve metadata) — and they say so on
-stderr before they connect.
+Registry fetches (`npm:` / `pypi:`) are this pre-install scan's only network use.
+Both use size-capped HTTPS downloads and check registry-provided digests, never
+`npm` or `pip download` (which can execute package code to resolve metadata).
+They announce the connection first. Only the public registries are supported;
+npm packages without SHA-512/SHA-256 integrity metadata are refused. A matching
+digest proves the download matches the metadata, not that the publisher is safe.
 
 Every rule, with its severity and the context that grades it, is in
 **[`docs/SCAN_RULES.md`](docs/SCAN_RULES.md)**.
@@ -825,7 +859,8 @@ Don't want to write YAML? The **[Setup Studio](https://girnarholdings.github.io/
 is a graphical, click-and-choose page: pick your ladder level, toggle `expose`, set
 the fail threshold and PR comments, and it live-generates the workflow — then
 **“Create this file on GitHub”** opens the editor pre-filled so you commit in one
-click. It's fully static; your choices never leave your browser.
+click. The page is fully static and has no account or backend; clicking the
+GitHub button opens GitHub with the generated workflow encoded in that URL.
 
 The same click-through in the terminal:
 
@@ -882,7 +917,6 @@ name, rules and provenance as a separate SARIF run — as well as documented her
 | [semgrep](https://github.com/semgrep/semgrep) | LGPL-2.1 | L5 — application-code SAST |
 | [step-security/harden-runner](https://github.com/step-security/harden-runner) | Apache-2.0 | L6 — runtime egress audit in the generated workflow |
 | [actions/attest-build-provenance](https://github.com/actions/attest-build-provenance) | MIT | L6 — signs the evidence statement (OIDC) |
-| [gh CLI](https://github.com/cli/cli) | MIT | L7 — upstream SLSA provenance verification |
 | [ruamel.yaml](https://pypi.org/project/ruamel.yaml/) | MIT | the round-trip YAML parse with source positions |
 | [OASIS SARIF 2.1.0 schema](https://docs.oasis-open.org/sarif/sarif/v2.1.0/) | — | vendored for output self-validation |
 | [pytest](https://github.com/pytest-dev/pytest) · [ruff](https://github.com/astral-sh/ruff) · [jsonschema](https://github.com/python-jsonschema/jsonschema) | MIT | dev: tests, lint, schema checks |
@@ -904,7 +938,7 @@ Concrete, high-value entry points:
 | **Teach it a new AI action's restore semantics** | the tables in `tables.py` / `detect_agent_ingress.py` | a fixture proving CLAUDE-restore is *not* flagged, AGENTS-not-restored *is* |
 | **Red-team the analyzer** | `tests/redteam_corpus.py`, `scripts/redteam.py` | add an attack shape it currently misses (then we fix it) |
 | **Attack the containment layer** | `orchestrate.py::sarif_shape_error`, `ladder.py` | a hostile wrapped-tool output that crashes/escapes/mis-gates |
-| **Harden the trust-lock** | `verify_cmd.py` (two takeover-hiding bugs already found here) | a `uses:`/lock shape where a real takeover reports clean |
+| **Harden the trust-lock** | `verify_cmd.py` (identity-evasion bugs have already been found here) | a `uses:`/lock shape where a changed or new source identity reports clean |
 | **Add a ladder rung** | a `ToolSpec` in `ladder.py` + pinned installer entry | pinned + checksum-verified, degrades gracefully when absent |
 | **Close an ADR `gap`** | `coverage.py` + `data/adr_techniques.yml` | a real rule, not a re-labelling |
 
@@ -954,6 +988,8 @@ script from *outside* the checkout, catching missing `package-data` before a use
 | 🌐 [**Website**](https://girnarholdings.github.io/TriDelPhi/) | The plain-English landing page, deployed from [`site/`](site/) |
 | 🎯 [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md) | TriDelPhi run against real disclosed attacks (tj-actions CVE-2025-30066, pwn-request), with output |
 | 📖 [`docs/RULES.md`](docs/RULES.md) | Every rule, its ADR technique, why it fires |
+| 🧩 [`docs/GITHUB_SEMANTICS.md`](docs/GITHUB_SEMANTICS.md) | Tested trigger, permission, reusable-workflow, checkout, and unknown-state matrix |
+| 🤖 [`docs/AGENT_SIGNALS.md`](docs/AGENT_SIGNALS.md) | Versioned AI-action evidence and review process |
 | 🧭 [`docs/DECISIONS.md`](docs/DECISIONS.md) | What adversarial reviews changed before a line was written |
 | 🔑 [`docs/L7_PROPOSAL.md`](docs/L7_PROPOSAL.md) | The senior-audit-engineer L7 design and its honest limits |
 | 🗺️ [`docs/OSS_LANDSCAPE.md`](docs/OSS_LANDSCAPE.md) | Prior art: zizmor, poutine, Raven, octoscan, TaintAWI |

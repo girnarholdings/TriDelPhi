@@ -24,16 +24,23 @@ from pathlib import Path
 
 from . import __version__
 from .api import AnalysisError, analyze
-from .baseline import DEFAULT_BASELINE, load_baseline, partition, write_baseline
+from .baseline import (
+    DEFAULT_BASELINE,
+    annotate_external_baseline,
+    load_baseline,
+    partition,
+    write_baseline,
+)
 from .checklist import ExternalStatus as ChecklistStatus
 from .checklist import items_from_sarif, render_checklist, render_checklist_markdown
 from .coverage import render_coverage
+from .fsutil import atomic_write_text
 from .html_report import render_html
 from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
 from .model import RULES
 from .orchestrate import merge_runs
 from .render import render_text
-from .sarif import dumps, to_sarif
+from .sarif import dumps, fingerprint, severity_counts, to_sarif
 from .severity import SARIF_LEVEL_TO_SEVERITY, should_fail
 from .severity import SEVERITIES as _SEVERITIES
 
@@ -44,15 +51,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tridelphi",
         description=(
-            "Static Agents Rule of Two checker for GitHub Actions. Flags jobs that "
-            "hold untrusted input, privilege and egress at once."
+            "Security guardrails for first-time builders: check code before installing "
+            "it, check GitHub robots for secret-stealing paths, or check what your app ships."
         ),
-        epilog="Offline by design: no network calls, no account, no API token.",
+        epilog=(
+            "Run `tridelphi start` for the three plain-English starting points. "
+            "Core/expose are local; registry targets and requested ladder tools say "
+            "when they need the network."
+        ),
     )
     parser.add_argument(
         "path", nargs="?", default=".",
         help=(
-            "repository root, or a command: `init` adds the scan workflow, `scan` "
+            "repository root, or a command: `start` shows the three beginner paths, "
+            "`init` adds the scan workflow, `audit` runs all three native checks offline, `scan` "
             "audits someone else's code BEFORE you install it (a dir, an archive, "
             "npm:<pkg> or pypi:<pkg>), `fix` prints a remediation plan, `guard` "
             "fixes interactively, `expose` audits shipped-asset/DB/data exposure, "
@@ -95,7 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-y", "--yes", action="store_true",
-        help="with `guard`: apply automatic fixes without prompting (never disables workflows)",
+        help="with `guard`: apply verified fixes; with `verify --write-trust-lock`: "
+             "deliberately replace an existing lock (never enables privatize)",
     )
     parser.add_argument(
         "--build-cmd", metavar="CMD",
@@ -109,6 +122,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--privatize-out", metavar="DIR",
         help="with `privatize`: the built-output directory to obfuscate (default: dist/build/out)",
+    )
+    parser.add_argument(
+        "--asset-root",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "with `expose`: also treat this repo-relative directory as shipped output; "
+            "repeat for monorepos or custom build folders"
+        ),
     )
     parser.add_argument(
         "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default=None,
@@ -164,7 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--write-trust-lock", action="store_true",
-        help="with `verify`: record today's action identities and exit",
+        help="with `verify`: record full-SHA action identities and exit; replacing an "
+             "existing lock also requires --yes (prefer --relock for normal updates)",
     )
     parser.add_argument(
         "--relock", action="store_true",
@@ -252,6 +276,30 @@ def _cmd_init(args) -> int:
     )
 
 
+def _cmd_start(args) -> int:
+    target = args.command or "."
+    print(
+        """TriDelPhi has three doors. Pick the sentence that sounds like your worry:
+
+1. I am about to install code someone sent me.
+   tridelphi scan ./download
+   (Use npm:name or pypi:name only when you want TriDelPhi to download a package.)
+
+2. I use GitHub Actions or an AI coding robot.
+   tridelphi core TARGET
+   (Reads TARGET/.github/workflows locally. Add --level 3 for downloaded scanners.)
+
+3. I shipped a web app and worry I leaked a key, source map, or database.
+   tridelphi expose TARGET
+   (Reads committed/build files locally; it is not a live penetration test.)
+
+Nothing is installed or changed by these checks. `tridelphi init TARGET` adds CI later.
+""".replace("TARGET", target),
+        end="",
+    )
+    return 0
+
+
 def _cmd_scan(args) -> int:
     # The pre-install trust audit: read someone else's code — install hooks,
     # droppers, poisoned agent files, dishonest links — before the installer
@@ -286,6 +334,7 @@ def _cmd_expose(args) -> int:
         sarif_file=args.sarif_file,
         checklist_md_file=args.checklist_md_file,
         fail_on=args.fail_on,
+        asset_roots=tuple(args.asset_root),
         tool_version=__version__,
     )
 
@@ -352,9 +401,9 @@ def _cmd_attest(args) -> int:
 
 
 def _cmd_verify(args) -> int:
-    # L7: `tridelphi verify [repo]` checks the trust-lock (and, when gh is
-    # present and online, upstream provenance). It scans the workflows, not
-    # a SARIF file, so its argument is a repo root like a normal scan.
+    # L7: `tridelphi verify [repo]` checks the offline owner/SHA trust-lock.
+    # Source action refs are not fabricated into artifact subjects for an
+    # unrelated provenance protocol. It scans workflows, not a SARIF file.
     from .verify_cmd import run_verify
 
     want_sarif = args.format in ("sarif", "json")
@@ -363,6 +412,7 @@ def _cmd_verify(args) -> int:
         args.command or ".",
         trust_lock=args.trust_lock,
         write_lock=args.write_trust_lock,
+        confirm_write=args.yes,
         relock=args.relock,
         offline=args.offline,
         fail_on=args.fail_on,
@@ -379,6 +429,7 @@ def _cmd_verify(args) -> int:
 # handler imports its implementation lazily so `tridelphi .` never pays for —
 # or gains the capabilities of — the siblings it did not run.
 _SUBCOMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
+    "start": _cmd_start,
     "init": _cmd_init,
     "scan": _cmd_scan,
     "expose": _cmd_expose,
@@ -392,6 +443,11 @@ _SUBCOMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_args = sys.argv[1:] if argv is None else argv
+    if raw_args and raw_args[0] == "audit":
+        from .audit import main as audit_main
+
+        return audit_main(raw_args[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.format is None:
@@ -456,15 +512,6 @@ def main(argv: list[str] | None = None) -> int:
         baseline = load_baseline(baseline_path)
     new, _unchanged, stale = partition(list(result.findings), baseline)
 
-    # --write-baseline records fingerprints and exits before the ladder: no
-    # subprocess (or osv.dev query) should be spent on output that a recording
-    # run immediately discards.
-    if args.write_baseline is not None:
-        target = Path(args.write_baseline)
-        count = write_baseline(target, result.findings, __version__)
-        print(f"wrote {count} fingerprints to {target}", file=sys.stderr)
-        return 0
-
     # Optional ladder orchestration. This is the only path that spawns
     # subprocesses, and only when explicitly requested — the default scan stays
     # offline and pure. `--level N` runs every rung up to N; `--with-zizmor`
@@ -479,7 +526,6 @@ def main(argv: list[str] | None = None) -> int:
 
     external_summary: str | None = None
     external_sarifs = []
-    external_counts = {s: 0 for s in _SEVERITIES}
     # Per-tool status for the checklist renderer: did the rung run, and with
     # what result. A skipped (uninstalled) tool has ran=False.
     external_status: dict = {}
@@ -493,16 +539,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         if ext.sarif is not None:
             external_sarifs.append(ext.sarif)
-            for severity, count in ext.severity_counts.items():
-                external_counts[severity] += count
-    summary_parts = [summarize_run(ext) for ext in external_runs]
+    trust_summary: str | None = None
 
     # L7 · trust runs after the content rungs: it consumes the same workflows
     # core parsed and folds its findings into the merged SARIF and the gate.
     if args.level is not None and args.level >= 7:
         from .verify_cmd import run_verify
 
-        _code, verify_doc = run_verify(
+        verify_code, verify_doc = run_verify(
             path,
             trust_lock=args.trust_lock,
             offline=args.offline,
@@ -510,22 +554,75 @@ def main(argv: list[str] | None = None) -> int:
             tool_version=__version__,
             out=sys.stderr,
         )
+        if verify_code == 2 or (verify_code != 0 and verify_doc is None):
+            print("tridelphi: L7 trust verification could not complete", file=sys.stderr)
+            return 2
         if verify_doc is not None:
             external_sarifs.append(verify_doc)
             trust_counts = {s: 0 for s in _SEVERITIES}
             for result_obj in verify_doc["runs"][0]["results"]:
                 sev = SARIF_LEVEL_TO_SEVERITY.get(result_obj.get("level"), "note")
-                external_counts[sev] += 1
                 trust_counts[sev] += 1
             external_status["trust"] = ChecklistStatus(
                 ran=True, counts=trust_counts, items=items_from_sarif(verify_doc)
             )
             n = len(verify_doc["runs"][0]["results"])
-            summary_parts.append(f"trust: {n} finding{'s' if n != 1 else ''}")
+            trust_summary = f"trust: {n} finding{'s' if n != 1 else ''}"
+
+    # Record after requested ladder tools run so their stable fingerprints are
+    # part of the same ratchet. Missing/skipped tools contribute nothing and are
+    # still named by their diagnostics. Gitleaks findings are never recordable.
+    if args.write_baseline is not None:
+        target = Path(args.write_baseline)
+        try:
+            count = write_baseline(target, result.findings, __version__, external_sarifs)
+        except OSError as exc:
+            print(f"tridelphi: could not write baseline: {exc}", file=sys.stderr)
+            return 2
+        print(f"wrote {count} fingerprints to {target}", file=sys.stderr)
+        return 0
+
+    external_gating, external_seen = annotate_external_baseline(
+        external_sarifs, baseline if baseline else set()
+    )
+    # Baseline annotation happens after all rung documents exist. Rebuild each
+    # beginner-facing status now so accepted external findings remain visible
+    # in SARIF history without being presented as live problems.
+    for ext in external_runs:
+        if ext.sarif is None:
+            continue
+        live_counts = {s: 0 for s in _SEVERITIES}
+        for run in ext.sarif.get("runs", []):
+            for severity, count in severity_counts(run.get("results", [])).items():
+                live_counts[severity] += count
+        external_status[ext.spec.name] = ChecklistStatus(
+            ran=ext.ok,
+            counts=live_counts,
+            items=items_from_sarif(ext.sarif),
+        )
+
+    summary_parts: list[str] = []
+    for ext in external_runs:
+        if not ext.ok:
+            summary_parts.append(summarize_run(ext))
+            continue
+        status = external_status[ext.spec.name]
+        live_count = sum(status.counts.values())
+        accepted_count = max(0, ext.finding_count - live_count)
+        noun = "finding" if ext.finding_count == 1 else "findings"
+        detail = f"{ext.finding_count} {noun} ({live_count} new"
+        if accepted_count:
+            detail += f", {accepted_count} accepted"
+        detail += ")"
+        summary_parts.append(f"{ext.spec.name}: {detail} (merged into SARIF output)")
+    if trust_summary is not None:
+        summary_parts.append(trust_summary)
 
     if summary_parts:
         external_summary = " · ".join(summary_parts)
 
+    native_seen = {fingerprint(finding) for finding in result.findings}
+    stale = len(baseline - native_seen - external_seen) if baseline else 0
     if stale:
         print(
             f"tridelphi: {stale} baseline entr{'y' if stale == 1 else 'ies'} no longer "
@@ -553,7 +650,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(dumps(build_sarif()))
     elif args.format == "html":
         sys.stdout.write(
-            render_html(result, repo_label=repo_label, external_summary=external_summary)
+            render_html(
+                result,
+                repo_label=repo_label,
+                external_summary=external_summary,
+                baseline=baseline,
+            )
         )
     elif args.format == "checklist":
         render_checklist(
@@ -564,6 +666,7 @@ def main(argv: list[str] | None = None) -> int:
             elapsed=elapsed,
             fail_on=args.fail_on,
             external=external_status,
+            baseline=baseline,
             stream=sys.stdout,
         )
     elif not args.quiet:
@@ -576,30 +679,45 @@ def main(argv: list[str] | None = None) -> int:
             no_color=args.no_color,
             new_count=len(new) if baseline else None,
             external_summary=external_summary,
+            baseline=baseline,
         )
     else:
-        counts = {s: sum(1 for f in result.findings if f.severity == s) for s in _SEVERITIES}
+        counts = {s: sum(1 for f in gating if f.severity == s) for s in _SEVERITIES}
         print(
             f"tridelphi {__version__} · {result.files_scanned} workflows, "
             f"{result.contexts_scanned} jobs · {counts['critical']} critical, "
             f"{counts['warning']} warning",
         )
 
-    if args.checklist_md_file:
-        Path(args.checklist_md_file).write_text(
-            render_checklist_markdown(
-                result,
-                repo_label=repo_label,
-                files_scanned=result.files_scanned,
-                jobs_scanned=result.contexts_scanned,
-                fail_on=args.fail_on,
-                external=external_status,
-            ),
-            encoding="utf-8",
-            newline="\n",
-        )
-    if args.sarif_file:
-        Path(args.sarif_file).write_text(dumps(build_sarif()), encoding="utf-8", newline="\n")
+    try:
+        if args.checklist_md_file:
+            atomic_write_text(
+                args.checklist_md_file,
+                render_checklist_markdown(
+                    result,
+                    repo_label=repo_label,
+                    files_scanned=result.files_scanned,
+                    jobs_scanned=result.contexts_scanned,
+                    fail_on=args.fail_on,
+                    external=external_status,
+                    baseline=baseline,
+                ),
+            )
+        if args.sarif_file:
+            atomic_write_text(args.sarif_file, dumps(build_sarif()))
+        if args.html_file:
+            atomic_write_text(
+                args.html_file,
+                render_html(
+                    result,
+                    repo_label=repo_label,
+                    external_summary=external_summary,
+                    baseline=baseline,
+                ),
+            )
+    except OSError as exc:
+        print(f"tridelphi: could not write report output: {exc}", file=sys.stderr)
+        return 2
     # L6: the attest half runs inline when the scan reaches rung 6 and there is
     # a SARIF file on disk to attest over. The gate half is this process's own
     # exit code (and `tridelphi gate` re-checks it as a separate step).
@@ -607,25 +725,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.sarif_file:
             from .gate_cmd import run_attest
 
-            run_attest(args.sarif_file, evidence_path=args.evidence_file, out=sys.stderr)
+            if run_attest(
+                args.sarif_file, evidence_path=args.evidence_file, out=sys.stderr
+            ) != 0:
+                return 2
         else:
             print("tridelphi: --level 6 attestation needs --sarif-file; skipped", file=sys.stderr)
-    if args.html_file:
-        Path(args.html_file).write_text(
-            render_html(result, repo_label=repo_label, external_summary=external_summary),
-            encoding="utf-8",
-            newline="\n",
-        )
-
     if should_fail((f.severity for f in gating), args.fail_on):
         return 1
     # The gate covers the wrapped rungs too: a gitleaks secret or a zizmor error
     # fails the build under the same --fail-on threshold as a native finding.
-    # External findings are not baselined — they come from tools whose output
-    # has no stable fingerprint, and a committed secret should never be waived.
-    if should_fail(
-        (severity for severity, count in external_counts.items() if count), args.fail_on
-    ):
+    # Wrapped findings use stable line-insensitive fingerprints too. Gitleaks
+    # credentials are the exception: they can never be waived into a baseline.
+    if should_fail(external_gating, args.fail_on):
         return 1
     return 0
 

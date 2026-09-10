@@ -144,40 +144,49 @@ def test_wrong_case_uses_key_is_not_a_match(tmp_path):
     assert enumerate_uses(repo) == []
 
 
-def test_flow_mapping_uses_is_not_misparsed(tmp_path):
-    """`{uses: owner/repo@ref}` (flow style) is not the line-prefix shape the
-    scanner expects. It must not be silently mis-recorded as a bogus action
-    whose owner is literally `{uses`; it should simply not match."""
+def test_flow_mapping_uses_is_enumerated(tmp_path):
+    """Valid flow-style steps are executable and must stay inside the pawl."""
     repo = tmp_path / "repo"
-    _wf(repo, "r.yml", "on: push\njobs:\n  a:\n    steps:\n" "      - uses: {a: b}\n")
+    _wf(
+        repo,
+        "r.yml",
+        "on: push\njobs:\n  a:\n    steps:\n"
+        f"      - {{name: checkout, uses: actions/checkout@{SHA_A}}}\n",
+    )
+    refs = enumerate_uses(repo)
+    assert len(refs) == 1
+    assert refs[0].slug == "actions/checkout"
+
+
+def test_non_executable_uses_key_in_env_is_not_enumerated(tmp_path):
+    repo = tmp_path / "repo"
+    _wf(
+        repo,
+        "r.yml",
+        "on: push\nenv:\n  uses: evil/not-a-step@" + SHA_A + "\njobs: {}\n",
+    )
     assert enumerate_uses(repo) == []
 
 
 def test_path_traversal_shaped_owner_repo_does_not_crash_or_escape(tmp_path):
-    """`../../../etc/passwd@ref` matches the owner/repo *character class*
-    (`.` and `-` are permitted). It must be recorded as an inert, distinct
-    slug — never used to touch the filesystem — and never crash."""
+    """Traversal-shaped action identities are rejected and made visible."""
     repo = tmp_path / "repo"
     _wf(repo, "r.yml", "on: push\njobs:\n  a:\n    steps:\n" "      - uses: ../../../etc/passwd@deadbeef\n")
-    refs = enumerate_uses(repo)
-    assert len(refs) == 1
-    assert refs[0].owner == ".."
-    assert refs[0].repo == ".."
-    assert refs[0].subpath == "/../etc/passwd"
+    assert enumerate_uses(repo) == []
+    code, doc = run_verify(repo, offline=True)
+    assert code == 0
+    assert doc["runs"][0]["results"][0]["ruleId"] == "tridelphi-verify/unresolved-action-reference"
 
 
-def test_unicode_homoglyph_owner_is_a_distinct_slug_not_a_silent_match(tmp_path):
-    """Cyrillic small letter A (U+0430) visually resembles Latin 'a'. `\\w`
-    matches Unicode word characters, so this must not crash — and
-    critically, it must NOT be treated as the same lock identity as ASCII
-    `actions/checkout`."""
+def test_unicode_homoglyph_owner_is_rejected_not_silently_matched(tmp_path):
+    """Confusable Unicode owners are rejected by the strict ASCII grammar."""
     repo = tmp_path / "repo"
     homoglyph_owner = "\u0430ctions"  # U+0430 (Cyrillic) + "ctions"
     _wf(repo, "r.yml", "on: push\njobs:\n  a:\n    steps:\n" f"      - uses: {homoglyph_owner}/checkout@{SHA_A}\n")
-    refs = enumerate_uses(repo)
-    assert len(refs) == 1
-    assert refs[0].owner == homoglyph_owner
-    assert refs[0].lock_key != "actions/checkout"
+    assert enumerate_uses(repo) == []
+    code, doc = run_verify(repo, offline=True)
+    assert code == 0
+    assert doc["runs"][0]["results"][0]["ruleId"] == "tridelphi-verify/unresolved-action-reference"
 
 
 def test_line_numbers_are_correct_across_multiple_workflows(tmp_path):
@@ -375,9 +384,9 @@ def test_lock_entry_non_string_owner_is_dropped(tmp_path):
 def test_lock_entry_extra_keys_are_ignored_not_fatal(tmp_path):
     p = tmp_path / "trust.lock"
     p.write_text(
-        json.dumps({"actions": {"a/b": {"owner": "a", "sha": "x" * 40, "extra": "z", "nested": {"k": 1}}}})
+        json.dumps({"actions": {"a/b": {"owner": "a", "sha": "a" * 40, "extra": "z", "nested": {"k": 1}}}})
     )
-    assert _load_lock(p) == {"a/b": {"sha": "x" * 40, "owner": "a"}}
+    assert _load_lock(p) == {"a/b": {"sha": "a" * 40, "owner": "a"}}
 
 
 def test_lock_top_level_not_an_object_reads_empty(tmp_path):
@@ -391,7 +400,7 @@ def test_lock_missing_file_reads_empty(tmp_path):
     assert _load_lock(tmp_path / "nope.lock") == {}
 
 
-def test_huge_lock_loads_quickly_and_does_not_crash(tmp_path):
+def test_huge_lock_is_rejected_quickly_and_does_not_crash(tmp_path):
     p = tmp_path / "trust.lock"
     huge = {"actions": {f"owner{i}/repo{i}": {"owner": f"owner{i}", "sha": "a" * 40} for i in range(50000)}}
     p.write_text(json.dumps(huge))
@@ -399,24 +408,22 @@ def test_huge_lock_loads_quickly_and_does_not_crash(tmp_path):
     loaded = _load_lock(p)
     elapsed = time.time() - start
     assert elapsed < 5.0
-    assert len(loaded) == 50000
+    assert loaded == {}
 
 
 def test_corrupt_lock_never_silently_matches_everything(tmp_path):
     """The critical property: a malformed lock must not accidentally make a
     real, malicious change look 'already locked and unchanged'. It must fall
-    back to empty, which means every action becomes a visible `note` — never
-    a silent pass-through with zero findings and no trace."""
+    fail closed with an explicit gating error."""
     repo = tmp_path / "repo"
     _wf(repo, "ci.yml", "on: push\njobs:\n  a:\n    steps:\n" f"      - uses: attacker/action@{SHA_B}\n")
     lock = tmp_path / "trust.lock"
     lock.write_text("{not even valid json")
     code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
-    assert code == 0
+    assert code == 1
     results = doc["runs"][0]["results"]
-    assert len(results) == 1
-    assert results[0]["ruleId"] == "tridelphi-verify/unlocked-action"
-    assert results[0]["level"] == "note"
+    invalid = next(r for r in results if r["ruleId"] == "tridelphi-verify/invalid-trust-lock")
+    assert invalid["level"] == "error"
 
 
 # =============================================================================
@@ -449,7 +456,7 @@ def test_case_swap_plus_sha_change_is_still_a_gating_regression_GENUINE_BUG_FIXE
 def test_case_only_change_with_unchanged_sha_is_clean(tmp_path):
     """The corollary: pure casing with the SAME pinned identity is cosmetic
     (GitHub routes it to the same repo) and must not raise a false
-    'signer-owner-changed' alarm."""
+    'recorded-owner-changed' alarm."""
     repo = tmp_path / "repo"
     _wf(repo, "ci.yml", "on: push\njobs:\n  a:\n    steps:\n" f"      - uses: actions/checkout@{SHA_A}\n")
     lock = tmp_path / "trust.lock"
@@ -478,7 +485,7 @@ def test_tampered_lock_key_casing_does_not_evade_matching(tmp_path):
 
 def test_owner_transfer_still_detected_case_insensitively(tmp_path):
     """A genuine owner transfer (different owner entirely, not just casing)
-    must still be caught as `signer-owner-changed`, unaffected by the
+    must still be caught as `recorded-owner-changed`, unaffected by the
     case-insensitivity fix."""
     repo = tmp_path / "repo"
     _wf(repo, "ci.yml", "on: push\njobs:\n  a:\n    steps:\n" f"      - uses: actions/checkout@{SHA_A}\n")
@@ -491,7 +498,7 @@ def test_owner_transfer_still_detected_case_insensitively(tmp_path):
     code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
     assert code == 1
     results = doc["runs"][0]["results"]
-    assert results[0]["ruleId"] == "tridelphi-verify/signer-owner-changed"
+    assert results[0]["ruleId"] == "tridelphi-verify/recorded-owner-changed"
     assert results[0]["level"] == "error"
 
 
@@ -531,7 +538,7 @@ def test_owner_change_gates(tmp_path):
     lock.write_text(json.dumps(data))
     code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
     assert code == 1
-    assert doc["runs"][0]["results"][0]["ruleId"] == "tridelphi-verify/signer-owner-changed"
+    assert doc["runs"][0]["results"][0]["ruleId"] == "tridelphi-verify/recorded-owner-changed"
 
 
 def test_unlocked_action_is_a_note_and_does_not_gate_at_default(tmp_path):
@@ -544,10 +551,8 @@ def test_unlocked_action_is_a_note_and_does_not_gate_at_default(tmp_path):
     assert doc["runs"][0]["results"][0]["level"] == "note"
 
 
-def test_action_removed_from_workflow_but_still_in_lock_produces_no_finding(tmp_path):
-    """An action no longer used at all is simply not checked — it is not a
-    'removed trust root' the pawl needs to warn about, since it can no
-    longer run. Document the actual (silent) behavior explicitly."""
+def test_action_removed_from_workflow_is_reported_as_stale_lock_entry(tmp_path):
+    """Stale trust entries stay visible until an intentional relock prunes them."""
     repo = tmp_path / "repo"
     _wf(
         repo,
@@ -561,21 +566,24 @@ def test_action_removed_from_workflow_but_still_in_lock_produces_no_finding(tmp_
     _wf(repo, "ci.yml", "on: push\njobs:\n  a:\n    steps:\n" f"      - uses: actions/checkout@{SHA_A}\n")
     code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
     assert code == 0
-    assert doc["runs"][0]["results"] == []
+    results = doc["runs"][0]["results"]
+    assert len(results) == 1
+    assert results[0]["ruleId"] == "tridelphi-verify/stale-trust-lock-entry"
+    assert results[0]["level"] == "warning"
 
 
-def test_unpinned_ref_locked_then_changed_is_a_regression(tmp_path):
-    """An action pinned only to a branch/tag (no SHA) is still lockable: the
-    ref text itself is the identity to watch, and a later change is still a
-    regression worth flagging even though SHA-pinning was never in play."""
+def test_unpinned_ref_cannot_be_written_to_trust_lock(tmp_path):
+    """Mutable tags and branches can never become an approved trust root."""
     repo = tmp_path / "repo"
     _wf(repo, "ci.yml", "on: push\njobs:\n  a:\n    steps:\n" "      - uses: foo/bar@main\n")
     lock = tmp_path / "trust.lock"
-    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
-    _wf(repo, "ci.yml", "on: push\njobs:\n  a:\n    steps:\n" "      - uses: foo/bar@dev\n")
+    code, doc = run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    assert code == 1
+    assert doc is None
+    assert not lock.exists()
     code, doc = run_verify(repo, trust_lock=str(lock), offline=True)
     assert code == 1
-    assert doc["runs"][0]["results"][0]["ruleId"] == "tridelphi-verify/trust-lock-regression"
+    assert doc["runs"][0]["results"][0]["ruleId"] == "tridelphi-verify/unpinned-action"
 
 
 def test_fail_on_note_gates_on_unlocked_actions_too(tmp_path):
@@ -643,12 +651,15 @@ def test_written_lock_round_trips_byte_stable_keys(tmp_path):
     assert doc["runs"][0]["results"] == []
 
 
-def test_write_trust_lock_overwrites_an_existing_lock(tmp_path):
+def test_write_trust_lock_requires_confirmation_to_overwrite(tmp_path):
     repo = tmp_path / "repo"
     _wf(repo, "ci.yml", "on: push\njobs:\n  a:\n    steps:\n" f"      - uses: actions/checkout@{SHA_A}\n")
     lock = tmp_path / "trust.lock"
     lock.write_text(json.dumps({"actions": {"stale/entry": {"owner": "x", "sha": "y" * 40}}}))
-    run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    code, doc = run_verify(repo, trust_lock=str(lock), write_lock=True, offline=True)
+    assert code == 2 and doc is None
+    assert "stale/entry" in json.loads(lock.read_text())["actions"]
+    run_verify(repo, trust_lock=str(lock), write_lock=True, confirm_write=True, offline=True)
     data = json.loads(lock.read_text())
     assert "stale/entry" not in data["actions"]
     assert "actions/checkout" in data["actions"]
@@ -804,3 +815,107 @@ def test_cli_level_7_sarif_file_contains_both_runs(tmp_path, repo_root):
     names = [r["tool"]["driver"]["name"] for r in doc["runs"]]
     assert "tridelphi" in names and "tridelphi-verify" in names
     assert result.returncode in (0, 1)
+
+
+def test_symlinked_workflow_fails_closed_and_cannot_be_locked(tmp_path):
+    repo = tmp_path / "repo"
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    outside = tmp_path / "outside.yml"
+    outside.write_text(
+        "on: push\njobs:\n  x:\n    uses: attacker/action@" + "1" * 40 + "\n",
+        encoding="utf-8",
+    )
+    (workflows / "linked.yml").symlink_to(outside)
+
+    code, doc = run_verify(repo, offline=True)
+    assert code == 1
+    assert any(
+        result["ruleId"] == "tridelphi-verify/unreadable-action-source"
+        for result in doc["runs"][0]["results"]
+    )
+    code, _ = run_verify(repo, write_lock=True, offline=True)
+    assert code == 1
+    assert not (repo / ".tridelphi" / "trust.lock").exists()
+
+
+def test_symlinked_github_parent_fails_closed(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside-github"
+    workflows = outside / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text(
+        "on: push\njobs:\n  x:\n    steps:\n"
+        f"      - uses: attacker/action@{'1' * 40}\n",
+        encoding="utf-8",
+    )
+    (repo / ".github").symlink_to(outside, target_is_directory=True)
+    code, doc = run_verify(repo, offline=True)
+    assert code == 1
+    assert any(
+        result["ruleId"] == "tridelphi-verify/unreadable-action-source"
+        and "metadata directory is a symlink" in result["message"]["text"]
+        for result in doc["runs"][0]["results"]
+    )
+
+
+def test_symlinked_default_lock_parent_is_not_followed(tmp_path):
+    repo = tmp_path / "repo"
+    _wf(
+        repo,
+        "ci.yml",
+        "on: push\njobs:\n  x:\n    steps:\n"
+        f"      - uses: actions/checkout@{SHA_A}\n",
+    )
+    outside = tmp_path / "outside-lock"
+    outside.mkdir()
+    (outside / "trust.lock").write_text(
+        json.dumps(
+            {"actions": {"actions/checkout": {"owner": "actions", "sha": SHA_A}}}
+        ),
+        encoding="utf-8",
+    )
+    (repo / ".tridelphi").symlink_to(outside, target_is_directory=True)
+
+    code, doc = run_verify(repo, offline=True)
+
+    assert code == 1
+    assert any(
+        result["ruleId"] == "tridelphi-verify/invalid-trust-lock"
+        for result in doc["runs"][0]["results"]
+    )
+
+
+def test_oversized_workflow_fails_closed_and_cannot_be_locked(tmp_path):
+    repo = tmp_path / "repo"
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "huge.yml").write_text("#" * (8 * 1024 * 1024 + 1), encoding="utf-8")
+    code, doc = run_verify(repo, offline=True)
+    assert code == 1
+    assert any("safety limit" in result["message"]["text"] for result in doc["runs"][0]["results"])
+    assert run_verify(repo, write_lock=True, offline=True)[0] == 1
+
+
+def test_excessive_workflow_entries_fail_closed(tmp_path, monkeypatch):
+    import tridelphi.verify_cmd as verify_module
+
+    repo = tmp_path / "repo"
+    workflows = repo / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    for index in range(4):
+        _wf(
+            repo,
+            f"{index}.yml",
+            "on: push\njobs:\n  x:\n    steps:\n"
+            f"      - uses: owner/action@{'1' * 40}\n",
+        )
+    monkeypatch.setattr(verify_module, "_MAX_SOURCE_ENTRIES", 2)
+    code, doc = run_verify(repo, offline=True)
+    assert code == 1
+    assert any(
+        result["ruleId"] == "tridelphi-verify/unreadable-action-source"
+        and "directory entries" in result["message"]["text"]
+        for result in doc["runs"][0]["results"]
+    )

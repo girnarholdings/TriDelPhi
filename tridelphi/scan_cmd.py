@@ -9,8 +9,8 @@ Targets, in order of trust required:
   a directory        — a cloned repo or unpacked download. Pure file reads.
   an archive         — .tgz / .tar.gz / .zip / .whl, extracted safely to a
                        temp dir first. Still no execution.
-  npm:<package>      — fetches the registry tarball via `npm pack` (which
-                       downloads without running any scripts) and scans it.
+  npm:<package>      — downloads the npmjs registry tarball via a bounded
+                       HTTPS GET, checks its digest, and scans it. Never npm.
   pypi:<package>     — downloads the sdist/wheel straight from PyPI's JSON API
                        with a plain HTTP GET and scans it. Deliberately NOT
                        `pip download`, which can execute a hostile setup.py
@@ -22,9 +22,10 @@ happen *before* the install, and they say so out loud before connecting.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
-import shutil
-import subprocess
+import re
 import sys
 import tempfile
 import urllib.parse
@@ -32,6 +33,7 @@ import urllib.request
 from pathlib import Path
 from typing import TextIO
 
+from .fsutil import atomic_write_text
 from .preflight import (
     CATEGORIES,
     PreflightFinding,
@@ -52,6 +54,14 @@ _SCOPE = (
 )
 _MAX_ITEMS = 6
 _ARCHIVE_EXTS = (".tgz", ".tar.gz", ".tar", ".tar.bz2", ".tar.xz", ".zip", ".whl")
+_MAX_METADATA_BYTES = 2 * 1024 * 1024
+_MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
+_NPM_NAME_SEGMENT = r"[A-Za-z0-9](?:[A-Za-z0-9._~-]{0,212}[A-Za-z0-9._~-])?"
+_NPM_SPEC = re.compile(
+    rf"^(?P<name>(?:@{_NPM_NAME_SEGMENT}/{_NPM_NAME_SEGMENT}|{_NPM_NAME_SEGMENT}))"
+    r"(?:@(?P<version>[A-Za-z0-9](?:[A-Za-z0-9._+~-]{0,126}[A-Za-z0-9._+~-])?))?$",
+    re.ASCII,
+)
 
 _NAME_HELP = """\
 tridelphi: {arg!r} is not a path here. To scan something you haven't downloaded:
@@ -74,28 +84,55 @@ Both registry forms use the network, once, to download only. Nothing installs.
 
 
 def _fetch_npm(spec: str, tmp: Path, err: TextIO) -> Path | None:
-    """`npm pack <spec>` downloads the published tarball exactly as the
-    registry serves it — and, unlike `npm install`, runs none of its scripts."""
-    npm = shutil.which("npm")
-    if npm is None:
-        print("tridelphi: npm is not on PATH; download the tarball yourself and "
-              "run `tridelphi scan <file.tgz>`", file=err)
+    """Download one registry package tarball without executing lifecycle scripts."""
+    match = _NPM_SPEC.fullmatch(spec)
+    if match is None or len(match.group("name")) > 214:
+        print(
+            "tridelphi: npm target must be a registry package name, optionally "
+            "followed by one exact version or tag (URLs, paths and ranges are refused)",
+            file=err,
+        )
         return None
     print(f"tridelphi: fetching {spec} from the npm registry (network; download "
           "only, no scripts run)…", file=err)
+    name = match.group("name")
+    version = match.group("version") or "latest"
+    url = (
+        "https://registry.npmjs.org/" + urllib.parse.quote(name, safe="")
+        + "/" + urllib.parse.quote(version, safe="")
+    )
+    target = tmp / "npm-package.tgz"
+    downloaded = False
     try:
-        proc = subprocess.run(
-            [npm, "pack", spec, "--pack-destination", str(tmp)],
-            capture_output=True, text=True, timeout=180, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"tridelphi: npm pack failed: {exc}", file=err)
+        with _open_https(url, timeout=60, allow_hosts={"registry.npmjs.org"}) as response:
+            meta = json.loads(_read_limited(response, _MAX_METADATA_BYTES))
+        if not isinstance(meta, dict) or meta.get("name") != name or not isinstance(meta.get("dist"), dict):
+            raise ValueError("npm returned malformed or mismatched package metadata")
+        dist = meta["dist"]
+        artifact_url = dist.get("tarball")
+        integrity = dist.get("integrity")
+        if not isinstance(artifact_url, str) or not isinstance(integrity, str):
+            raise ValueError("npm returned no tarball with a strong integrity digest")
+        # Require SHA-512 or SHA-256 instead of silently falling back to SHA-1.
+        tokens = integrity.split()
+        token = next((item for algorithm in ("sha512", "sha256") for item in tokens if item.startswith(algorithm + "-")), None)
+        if token is None:
+            raise ValueError("npm artifact needs a SHA-512 or SHA-256 integrity digest")
+        algorithm, encoded = token.split("-", 1)
+        expected = base64.b64decode(encoded, validate=True)
+        if len(expected) != hashlib.new(algorithm).digest_size:
+            raise ValueError("npm returned a malformed integrity digest")
+        with _open_https(artifact_url, timeout=180, allow_hosts={"registry.npmjs.org"}) as response:
+            actual = _copy_limited(response, target, _MAX_DOWNLOAD_BYTES, algorithm=algorithm)
+        downloaded = True
+        if actual != expected.hex():
+            raise ValueError("download integrity does not match npm metadata")
+    except Exception as exc:
+        if downloaded:
+            target.unlink(missing_ok=True)
+        print(f"tridelphi: npm download refused: {exc}", file=err)
         return None
-    if proc.returncode != 0:
-        print(f"tridelphi: npm pack failed: {proc.stderr.strip()[:400]}", file=err)
-        return None
-    tarballs = sorted(tmp.glob("*.tgz"))
-    return tarballs[-1] if tarballs else None
+    return target
 
 
 # The only hosts this tool will fetch from. A scan target is untrusted by
@@ -104,6 +141,31 @@ def _fetch_npm(spec: str, tmp: Path, err: TextIO) -> Path | None:
 # URL is validated against this set, not trusted because PyPI returned it.
 _PYPI_METADATA_HOST = "pypi.org"
 _PYPI_ARTIFACT_HOSTS = frozenset({"files.pythonhosted.org", "pypi.org"})
+
+
+def _validate_https_url(url: str, allow_hosts: frozenset[str] | set[str]) -> None:
+    parsed = urllib.parse.urlparse(url)
+    try:
+        port = parsed.port
+    except ValueError:
+        port = -1
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in allow_hosts
+        or port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError(f"refusing a non-https or off-allowlist URL: {url[:80]}")
+
+
+class _AllowlistedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, allow_hosts: frozenset[str] | set[str]) -> None:
+        self._allow_hosts = allow_hosts
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_https_url(newurl, self._allow_hosts)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _open_https(url: str, *, timeout: int, allow_hosts: frozenset[str] | set[str]):
@@ -115,15 +177,62 @@ def _open_https(url: str, *, timeout: int, allow_hosts: frozenset[str] | set[str
     "download from PyPI" and "fetch whatever a hostile response names": the
     scheme must be https and the host must be one we chose, or it does not open.
     """
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname not in allow_hosts:
-        raise ValueError(f"refusing a non-https or off-allowlist URL: {url[:80]}")
+    _validate_https_url(url, allow_hosts)
     # Audited (semgrep dynamic-urllib-use): the two lines above ARE the mitigation
     # this rule asks for — the scheme is pinned to https and the host to a caller-
     # supplied allowlist, so a file:// or off-host URL never reaches urlopen. This
     # is the sole urlopen in the tool, funnelled here so the check can't be bypassed.
     # nosemgrep
-    return urllib.request.urlopen(url, timeout=timeout)
+    opener = urllib.request.build_opener(_AllowlistedRedirectHandler(allow_hosts))
+    return opener.open(url, timeout=timeout)
+
+
+def _content_length(response) -> int | None:
+    value = response.headers.get("Content-Length")
+    if value is None:
+        return None
+    try:
+        length = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("server returned an invalid Content-Length") from None
+    if length < 0:
+        raise ValueError("server returned a negative Content-Length")
+    return length
+
+
+def _read_limited(response, limit: int) -> bytes:
+    declared = _content_length(response)
+    if declared is not None and declared > limit:
+        raise ValueError(f"response exceeds the {limit // (1024 * 1024)} MiB size cap")
+    payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise ValueError(f"response exceeds the {limit // (1024 * 1024)} MiB size cap")
+    return payload
+
+
+def _copy_limited(response, target: Path, limit: int, *, algorithm: str = "sha256") -> str:
+    declared = _content_length(response)
+    if declared is not None and declared > limit:
+        raise ValueError(f"download exceeds the {limit // (1024 * 1024)} MiB size cap")
+    digest = hashlib.new(algorithm)
+    written = 0
+    created = False
+    try:
+        with target.open("xb") as output:
+            created = True
+            while chunk := response.read(1024 * 1024):
+                written += len(chunk)
+                if written > limit:
+                    raise ValueError(
+                        f"download exceeds the {limit // (1024 * 1024)} MiB size cap"
+                    )
+                digest.update(chunk)
+                output.write(chunk)
+    except Exception:
+        if created:
+            target.unlink(missing_ok=True)
+        raise
+    return digest.hexdigest()
 
 
 def _fetch_pypi(spec: str, tmp: Path, err: TextIO) -> Path | None:
@@ -145,32 +254,62 @@ def _fetch_pypi(spec: str, tmp: Path, err: TextIO) -> Path | None:
           "only, nothing executed)…", file=err)
     try:
         with _open_https(url, timeout=60, allow_hosts={_PYPI_METADATA_HOST}) as resp:
-            meta = json.load(resp)
+            meta = json.loads(_read_limited(resp, _MAX_METADATA_BYTES))
     except Exception as exc:
         print(f"tridelphi: PyPI lookup failed for {name}: {exc}", file=err)
         return None
-    urls = meta.get("urls") or []
+    if not isinstance(meta, dict) or not isinstance(meta.get("urls"), list):
+        print(f"tridelphi: PyPI returned malformed metadata for {spec}", file=err)
+        return None
+    urls = [entry for entry in meta["urls"] if isinstance(entry, dict)]
     chosen = next((u for u in urls if u.get("packagetype") == "sdist"),
                   next(iter(urls), None))
-    if not chosen or not chosen.get("url"):
+    if not chosen or not isinstance(chosen.get("url"), str):
         print(f"tridelphi: PyPI lists no downloadable artifact for {spec}", file=err)
         return None
     # PyPI serves artifacts from files.pythonhosted.org; a URL pointing anywhere
     # else — least of all a file:// or an internal host — is a red flag, not a
     # download target.
-    artifact_url = str(chosen["url"])
-    filename = Path(str(chosen.get("filename") or "artifact")).name  # never a path
+    artifact_url = chosen["url"]
+    filename_value = chosen.get("filename")
+    if (
+        not isinstance(filename_value, str)
+        or not filename_value
+        or Path(filename_value).name != filename_value
+        or "\\" in filename_value
+        or not filename_value.lower().endswith(_ARCHIVE_EXTS)
+    ):
+        print(f"tridelphi: PyPI returned an unsafe artifact filename for {spec}", file=err)
+        return None
+    digests = chosen.get("digests")
+    expected_sha256 = digests.get("sha256") if isinstance(digests, dict) else None
+    if (
+        not isinstance(expected_sha256, str)
+        or re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256) is None
+    ):
+        print(f"tridelphi: PyPI returned no valid sha256 digest for {spec}", file=err)
+        return None
+    filename = filename_value
     target = tmp / filename
+    if target.exists() or target.is_symlink():
+        print(f"tridelphi: refusing to overwrite an existing file named {filename}", file=err)
+        return None
+    downloaded = False
     try:
-        with _open_https(artifact_url, timeout=180, allow_hosts=_PYPI_ARTIFACT_HOSTS) as resp, \
-                target.open("wb") as fh:
-            shutil.copyfileobj(resp, fh, length=1 << 16)
+        with _open_https(artifact_url, timeout=180, allow_hosts=_PYPI_ARTIFACT_HOSTS) as resp:
+            actual_sha256 = _copy_limited(resp, target, _MAX_DOWNLOAD_BYTES)
+        downloaded = True
+        if actual_sha256.lower() != expected_sha256.lower():
+            raise ValueError("download sha256 does not match PyPI metadata")
     except ValueError as exc:
+        if downloaded:
+            target.unlink(missing_ok=True)
         print(f"tridelphi: {exc}", file=err)
-        print(f"tridelphi: PyPI returned an unexpected download host for {spec}; "
-              "refusing to fetch it.", file=err)
+        print(f"tridelphi: refusing the PyPI artifact for {spec}.", file=err)
         return None
     except Exception as exc:
+        if downloaded:
+            target.unlink(missing_ok=True)
         print(f"tridelphi: download failed: {exc}", file=err)
         return None
     return target
@@ -394,10 +533,13 @@ def run_scan(
         else:
             _render_text(result, label, out)
 
-        if sarif_file and result.sarif is not None:
-            Path(sarif_file).write_text(dumps(result.sarif), encoding="utf-8", newline="\n")
-        if checklist_md_file:
-            Path(checklist_md_file).write_text(_render_markdown(result, label),
-                                               encoding="utf-8", newline="\n")
+        try:
+            if sarif_file and result.sarif is not None:
+                atomic_write_text(sarif_file, dumps(result.sarif))
+            if checklist_md_file:
+                atomic_write_text(checklist_md_file, _render_markdown(result, label))
+        except OSError as exc:
+            print(f"tridelphi: could not write scan output: {exc}", file=err)
+            return 2
 
     return 1 if should_fail((f.severity for f in result.findings), fail_on) else 0

@@ -13,6 +13,7 @@ import os
 from typing import TextIO
 
 from .model import AnalysisResult, Finding
+from .sarif import fingerprint
 from .severity import SEVERITY_ORDER
 
 __all__ = ["SEVERITY_ORDER", "render_text"]
@@ -120,17 +121,21 @@ def render_text(
     no_color: bool = False,
     new_count: int | None = None,
     external_summary: str | None = None,
+    baseline: set[str] | None = None,
 ) -> None:
     style = _Style(_color_enabled(stream, no_color))
     threshold = SEVERITY_ORDER[min_severity]
-    shown = [f for f in result.findings if SEVERITY_ORDER[f.severity] <= threshold]
-    hidden = len(result.findings) - len(shown)
+    baseline = baseline or set()
+    live = [f for f in result.findings if fingerprint(f) not in baseline]
+    accepted = len(result.findings) - len(live)
+    shown = [f for f in live if SEVERITY_ORDER[f.severity] <= threshold]
+    hidden = len(live) - len(shown)
 
     header = (
         f"tridelphi {tool_version} · Agents Rule of Two · "
         f"{result.files_scanned} workflow{'s' if result.files_scanned != 1 else ''}, "
         f"{result.contexts_scanned} job{'s' if result.contexts_scanned != 1 else ''}, "
-        f"{elapsed:.1f}s, offline"
+        f"{elapsed:.1f}s, core scan local/offline"
     )
     print(header, file=stream)
 
@@ -146,7 +151,7 @@ def render_text(
         print("", file=stream)
 
     counts = {"critical": 0, "warning": 0, "note": 0}
-    for finding in result.findings:
+    for finding in live:
         counts[finding.severity] += 1
 
     summary = (
@@ -170,12 +175,20 @@ def render_text(
         )
     if result.suppressed:
         print(style.dim(f"  {result.suppressed} suppressed inline"), file=stream)
+    if accepted:
+        print(
+            style.dim(
+                f"  {accepted} unchanged baseline finding{'s' if accepted != 1 else ''} "
+                "kept for audit history, not shown"
+            ),
+            file=stream,
+        )
     if result.diagnostics:
         print(
             style.dim(f"  {len(result.diagnostics)} file(s) could not be analysed"),
             file=stream,
         )
-    if not result.findings:
+    if not live:
         # Distinguish "we looked and it was clean" from "there was nothing to
         # look at". Both used to print the same reassuring line, so a repo with
         # no CI at all — the common case for a deployed web app — got a clean
@@ -186,6 +199,14 @@ def render_text(
                     "  nothing scanned — no .github/workflows here. This checks GitHub\n"
                     "  Actions only; it has not looked at your app. For what your app\n"
                     "  ships, run: tridelphi expose ."
+                ),
+                file=stream,
+            )
+        elif accepted:
+            print(
+                style.dim(
+                    "  no new findings — unchanged accepted findings remain in the "
+                    "baseline and SARIF audit history."
                 ),
                 file=stream,
             )

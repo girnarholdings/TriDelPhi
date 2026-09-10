@@ -15,6 +15,8 @@ distinction right is the whole difference between this and a filename grep.
 
 from __future__ import annotations
 
+import fnmatch
+import posixpath
 from collections.abc import Iterator
 
 from .model import CapabilityHit, ExecutionContext
@@ -22,16 +24,25 @@ from .steps import iter_steps, uses_name
 from .tables import Tables
 from .yamlnode import YamlNode
 
-__all__ = ["AgentStep", "agent_steps", "detect"]
+__all__ = ["AgentStep", "agent_steps", "detect", "detect_unknown_semantics"]
 
 
 class AgentStep:
-    __slots__ = ("invocation", "node", "spec")
+    __slots__ = ("invocation", "node", "spec", "state")
 
-    def __init__(self, node: YamlNode, spec: dict | None, invocation: str) -> None:
+    def __init__(
+        self,
+        node: YamlNode,
+        spec: dict | None,
+        invocation: str,
+        *,
+        state: str | None = None,
+    ) -> None:
         self.node = node
         self.spec = spec or {}
         self.invocation = invocation
+        declared = state or self.spec.get("restore_state")
+        self.state = declared if declared in {"known", "none", "unknown"} else "unknown"
 
     @property
     def display(self) -> str:
@@ -40,15 +51,29 @@ class AgentStep:
     def restores(self) -> tuple[str, ...]:
         return tuple(self.spec.get("restores_from_base") or ())
 
+    @property
+    def semantics_known(self) -> bool:
+        return self.state != "unknown"
+
     def covers(self, path: str) -> bool:
         """Is ``path`` replaced with base-branch content before the agent reads it?"""
+        candidate = posixpath.normpath(path.replace("\\", "/")).lstrip("./")
         for restored in self.restores():
-            if restored.endswith("/"):
-                if path == restored.rstrip("/") or path.startswith(restored):
+            pattern = posixpath.normpath(str(restored).replace("\\", "/")).lstrip("./")
+            if str(restored).endswith("/"):
+                if candidate == pattern or candidate.startswith(f"{pattern}/"):
                     return True
-            elif path == restored:
+            elif any(char in pattern for char in "*?["):
+                if fnmatch.fnmatchcase(candidate, pattern):
+                    return True
+            elif candidate == pattern:
                 return True
         return False
+
+
+def _looks_agent_like(action: str, tables: Tables) -> bool:
+    lowered = action.lower()
+    return any(marker.lower() in lowered for marker in tables.tuple_of("agent_signals", "unknown_action_markers"))
 
 
 def agent_steps(context: ExecutionContext, tables: Tables) -> Iterator[AgentStep]:
@@ -57,20 +82,51 @@ def agent_steps(context: ExecutionContext, tables: Tables) -> Iterator[AgentStep
     for step in iter_steps(context.body):
         name = uses_name(step)
         if name:
+            matched = False
             for spec in agents:
                 for prefix in spec.get("uses_prefixes") or ():
                     if name == prefix or name.startswith(prefix):
                         yield AgentStep(step, dict(spec), name)
+                        matched = True
                         break
                 else:
                     continue
                 break
+            if not matched and _looks_agent_like(name, tables):
+                # Unknown agent-like actions are modeled as agents with unknown
+                # restoration. Treating unknown as an empty restore set keeps
+                # attacker-controlled files visible while a separate finding
+                # explains the uncertainty to the user.
+                yield AgentStep(step, None, name, state="unknown")
         run = step.get("run")
         if run is not None and run.text:
             for invocation in invocations:
                 if invocation in run.text:
-                    yield AgentStep(step, None, invocation)
+                    yield AgentStep(step, None, invocation, state="none")
                     break
+
+
+def detect_unknown_semantics(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
+    """Agent invocations whose checkout/config hardening cannot be verified.
+
+    This is an explicit unknown state, not a claim of vulnerability. Security
+    tools must not turn an unmodeled new vendor action into a clean result.
+    """
+
+    return [
+        CapabilityHit(
+            capability="U",
+            kind="agent-semantics-unknown",
+            reason=(
+                f"`{agent.invocation}` looks like an AI-agent action, but TriDelPhi "
+                "has no reviewed restore/config model for it; assume repository "
+                "instructions remain attacker-controlled until verified"
+            ),
+            position=agent.node.position(),
+        )
+        for agent in agent_steps(context, tables)
+        if not agent.semantics_known
+    ]
 
 
 def _pr_writable_configs(context: ExecutionContext, agent: AgentStep):
@@ -189,6 +245,22 @@ def detect(context: ExecutionContext, tables: Tables) -> list[CapabilityHit]:
                         position=agent.node.position(),
                     )
                 )
+
+        for path in context.repo.unknown_config_paths:
+            if agent.covers(path):
+                continue
+            hits.append(
+                CapabilityHit(
+                    capability="U",
+                    kind="agent-mcp-ingress",
+                    reason=(
+                        f"`{path}` is an MCP/agent config file but could not be "
+                        "parsed as JSON or JSONC. Its tools are unknown, so it is "
+                        "not treated as safe on a pull-request working tree"
+                    ),
+                    position=agent.node.position(),
+                )
+            )
 
     return sorted(hits, key=lambda h: h.sort_key)
 

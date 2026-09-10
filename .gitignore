@@ -15,7 +15,9 @@ tridelphi.sarif
 # bot (Cloudflare Worker) local artifacts
 bot/node_modules/
 bot/.wrangler/
-bot/package-lock.json
+bot/.dev.vars
+portal/.dev.vars
+portal/.wrangler/
 
 # L6 scan artifacts
 tridelphi-evidence.json

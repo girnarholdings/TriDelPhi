@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import TextIO
 
 from .expose import CATEGORIES, ExposeFinding, ExposureResult, analyze_exposure
-from .reportutil import grouped_lines, wrap
+from .fsutil import atomic_write_text
+from .reportutil import grouped_lines, md_escape, wrap
 from .sarif import dumps
 from .severity import should_fail
 
@@ -79,11 +80,27 @@ def _render_text(result: ExposureResult, repo: str, out: TextIO) -> None:
     print(bar, file=out)
     print("", file=out)
 
+    if not result.coverage.complete:
+        reasons = "; ".join(result.coverage.incomplete_reasons)
+        print("  ⬜  Coverage: PARTIAL — this is not a clean result.", file=out)
+        for line in wrap(reasons or "one or more files could not be fully checked", 66):
+            print(f"      {line}", file=out)
+        print("", file=out)
+
     by_cat, cross_cat = _by_category(result.findings)
 
-    icon = {"pass": "✅", "warn": "⚠️ ", "fail": "🚫", "note": "🔎", "skip": "⬜"}
+    icon = {
+        "pass": "✅",
+        "warn": "⚠️ ",
+        "fail": "🚫",
+        "note": "🔎",
+        "skip": "⬜",
+        "unknown": "⬜",
+    }
     for letter, question, _gloss in CATEGORIES:
         st, note = _status(by_cat.get(letter, []), cross_cat.get(letter))
+        if st == "pass" and not result.coverage.complete:
+            st, note = "unknown", "not fully checked"
         q = question if len(question) <= 52 else question[:51] + "…"
         print(f"  {icon[st]}  {q.ljust(52)}  {note}", file=out)
     if not result.semgrep_ran:
@@ -136,9 +153,13 @@ def _render_text(result: ExposureResult, repo: str, out: TextIO) -> None:
         print("", file=out)
 
     print(f"  {'─' * 54}\n", file=out)
-    if crits:
+    if not result.coverage.complete:
+        print("  Result:  ⬜  PARTIAL — some files were not fully checked.", file=out)
+    elif crits:
         n = len(crits)
         print(f"  Result:  ⚠️  NOT YET SAFE — fix the {n} item{'s' if n != 1 else ''} above.", file=out)
+    elif result.semgrep_note:
+        print("  Result:  ⬜  Native checks finished; code-pattern add-on did not run.", file=out)
     elif warns:
         print("  Result:  ✅  Nothing urgent leaking — a few items worth tidying above.", file=out)
     else:
@@ -150,21 +171,32 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
     crits = [f for f in result.findings if f.severity == "critical"]
     warns = [f for f in result.findings if f.severity == "warning"]
     out: list[str] = []
-    if crits:
+    if not result.coverage.complete:
+        out.append("### 🔺 TriDelPhi exposure audit — ⬜ partial scan")
+    elif crits:
         out.append(f"### 🔺 TriDelPhi exposure audit — 🚫 {len(crits)} to fix")
+    elif result.semgrep_note:
+        out.append("### 🔺 TriDelPhi exposure audit — ⬜ native checks only")
     elif warns:
         out.append("### 🔺 TriDelPhi exposure audit — ✅ nothing urgent, a few to tidy")
     else:
         out.append("### 🔺 TriDelPhi exposure audit — ✅ nothing looks exposed")
-    out.append(f"_{repo} · {_SCOPE}_")
+    out.append(f"_{md_escape(repo)} · {_SCOPE}_")
     out.append("")
+    if not result.coverage.complete:
+        reasons = md_escape("; ".join(result.coverage.incomplete_reasons))
+        out.append(f"> ⬜ **Partial scan:** {reasons}. Do not treat this as a clean result.")
+        out.append("")
     out.append("| Check | Result |")
     out.append("|---|---|")
     by_cat, cross_cat = _by_category(result.findings)
     for letter, question, _gloss in CATEGORIES:
         st, note = _status(by_cat.get(letter, []), cross_cat.get(letter))
+        if st == "pass" and not result.coverage.complete:
+            st, note = "unknown", "not fully checked"
         cell = {"fail": f"🚫 **{note}**", "warn": f"⚠️ {note}",
-                "note": f"🔎 {note}", "pass": "✅ all clear"}[st]
+                "note": f"🔎 {note}", "pass": "✅ all clear",
+                "unknown": f"⬜ {note}"}[st]
         out.append(f"| {question} | {cell} |")
     out.append("")
     if crits:
@@ -203,6 +235,7 @@ def run_expose(
     sarif_file: str | None = None,
     checklist_md_file: str | None = None,
     fail_on: str = "critical",
+    asset_roots: tuple[str, ...] = (),
     tool_version: str = "0",
     out: TextIO | None = None,
     err: TextIO | None = None,
@@ -212,11 +245,15 @@ def run_expose(
     out = out or sys.stdout
     err = err or sys.stderr
     root = Path(path)
-    if not root.is_dir():
+    if root.is_symlink() or not root.is_dir():
         print(f"tridelphi: {root} is not a directory", file=err)
         return 2
 
-    result = analyze_exposure(root, tool_version=tool_version)
+    try:
+        result = analyze_exposure(root, tool_version=tool_version, asset_roots=asset_roots)
+    except ValueError as exc:
+        print(f"tridelphi: {exc}", file=err)
+        return 2
     repo = root.resolve().name or path
 
     if fmt in ("sarif", "json"):
@@ -226,10 +263,15 @@ def run_expose(
     else:
         _render_text(result, repo, out)
 
-    if sarif_file and result.sarif is not None:
-        Path(sarif_file).write_text(dumps(result.sarif), encoding="utf-8", newline="\n")
-    if checklist_md_file:
-        Path(checklist_md_file).write_text(_render_markdown(result, repo),
-                                           encoding="utf-8", newline="\n")
+    try:
+        if sarif_file and result.sarif is not None:
+            atomic_write_text(sarif_file, dumps(result.sarif))
+        if checklist_md_file:
+            atomic_write_text(checklist_md_file, _render_markdown(result, repo))
+    except OSError as exc:
+        print(f"tridelphi: could not write exposure output: {exc}", file=err)
+        return 2
 
+    if not result.coverage.complete:
+        return 2
     return 1 if should_fail((f.severity for f in result.findings), fail_on) else 0

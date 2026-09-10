@@ -1,7 +1,7 @@
-# Reproduces CVE-2025-30066: a consumer that SHA-pinned tj-actions/changed-files,
-# whose pin was then moved to the malicious commit
-# 0e58ed8671d6b60d0890c21b07f8835ace038e67. The committed trust-lock below
-# records the legitimate identity, so `tridelphi verify` flags the swap.
+# Uses the real CVE-2025-30066 malicious commit to test a source pin replacement.
+# The committed lock records a previously reviewed pin, so `tridelphi verify`
+# flags the repository diff. This does not claim an offline scan sees remote tag
+# movement; mutable tags are rejected separately as unpinned.
 name: CI
 on: [push]
 jobs:

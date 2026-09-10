@@ -20,7 +20,7 @@ from typing import TextIO
 from .model import AnalysisResult
 from .reportutil import compact_wheres as _compact_wheres
 from .reportutil import md_escape as _md_escape
-from .sarif import is_suppressed
+from .sarif import fingerprint, is_suppressed
 from .severity import SARIF_LEVEL_TO_SEVERITY, SEVERITY_ORDER
 
 __all__ = [
@@ -75,8 +75,8 @@ _RUNG_GLOSS = {
         "tighten — each line names the file and the setting."
     ),
     "scorecard": (
-        "A repository setting that could follow safer defaults. These are "
-        "changed on GitHub's Settings pages, not in your code."
+        "An advisory repository-habit check, not a vulnerability verdict. These "
+        "settings are changed on GitHub's Settings pages, not in your code."
     ),
     "semgrep": (
         "A pattern in your app code that can be risky in some situations — "
@@ -153,7 +153,7 @@ def items_from_sarif(sarif: dict) -> list[tuple[str, str, str]]:
         for result in run.get("results") or []:
             if not isinstance(result, dict):
                 continue
-            if is_suppressed(result):
+            if is_suppressed(result) or result.get("baselineState") == "unchanged":
                 continue  # audited & accepted in source; not a live item
             level = result.get("level")
             severity = _SARIF_LEVEL.get(level if isinstance(level, str) else "", "warning")
@@ -279,14 +279,22 @@ def render_checklist(
     elapsed: float,
     fail_on: str,
     external: dict[str, ExternalStatus] | None = None,
+    baseline: set[str] | None = None,
     stream: TextIO,
 ) -> None:
     external = external or {}
+    baseline = baseline or set()
     threshold = SEVERITY_ORDER.get(fail_on, 0) if fail_on != "none" else 99
 
-    core_findings = [f for f in result.findings if f.rule_id != "tridelphi/parse-error"]
+    core_findings = [
+        f
+        for f in result.findings
+        if f.rule_id != "tridelphi/parse-error" and fingerprint(f) not in baseline
+    ]
+    accepted = sum(1 for f in result.findings if fingerprint(f) in baseline)
     core_crit = [f for f in core_findings if f.severity == "critical"]
     core_warn = [f for f in core_findings if f.severity == "warning"]
+    core_unknown = [f for f in core_findings if f.rule_id == "tridelphi/unresolved-context"]
 
     bar = "─" * 60
     print(bar, file=stream)
@@ -297,7 +305,9 @@ def render_checklist(
         f"· scanned in {elapsed:.1f}s"
     )
     print(scanned, file=stream)
-    print("  ✓ Ran entirely on your machine. Nothing was uploaded, copied, or shared.", file=stream)
+    print("  ✓ Core read local workflow files. TriDelPhi did not upload your source.", file=stream)
+    if any(name in external and external[name].ran for name in ("osv-scanner", "scorecard", "semgrep")):
+        print("  Info: requested add-on scanners may query public databases; their rows are marked.", file=stream)
     print(bar, file=stream)
     print("", file=stream)
 
@@ -324,6 +334,14 @@ def render_checklist(
         status, cnote = "fail", f"{len(core_crit)} to fix"
     elif core_warn:
         status, cnote = "warn", f"{len(core_warn)} worth a look"
+    elif result.diagnostics:
+        status, cnote = "skip", "partial — one or more workflow files could not be read"
+        unchecked.append("core-partial")
+    elif core_unknown:
+        status, cnote = "skip", f"{len(core_unknown)} runtime setting(s) unknown"
+        unchecked.append("core-unknown")
+    elif result.suppressed or accepted:
+        status, cnote = "pass", f"passed · {result.suppressed + accepted} accepted"
     else:
         status, cnote = "pass", "all clear"
     any_warn = any_warn or status == "warn"
@@ -381,7 +399,7 @@ def render_checklist(
             "zizmor": "unsafe workflow setting(s)",
             "scorecard": "weak repo setting(s)",
             "semgrep": "risky code pattern(s)",
-            "trust": "outside tool(s) that changed hands",
+            "trust": "outside tool identity change(s) needing review",
         }.get(name, "issue(s)")
         print(f"  🚫 {n} {label} — see the full report for the exact spots.", file=stream)
 
@@ -463,6 +481,9 @@ def render_checklist(
         print("           ships — keys inlined into browser bundles, source maps,", file=stream)
         print("           open database rules, committed credentials — run:", file=stream)
         print("               tridelphi expose .", file=stream)
+    elif result.diagnostics:
+        print("  Result:  ⬜  PARTIAL — unreadable workflow input means this is not a pass.", file=stream)
+        print("           Fix the parse/read note below, then run the scan again.", file=stream)
     elif unchecked:
         n = len(unchecked)
         print("  Result:  ✅  NOTHING WRONG IN WHAT WE CHECKED — and we did not", file=stream)
@@ -484,6 +505,12 @@ def render_checklist(
     if result.diagnostics:
         n = len(result.diagnostics)
         print(f"\n  Note: {n} file{'s' if n != 1 else ''} couldn't be read and were skipped.", file=stream)
+    if accepted:
+        print(
+            f"\n  Note: {accepted} unchanged finding{'s' if accepted != 1 else ''} "
+            "remain in the baseline for audit history; only new findings are shown.",
+            file=stream,
+        )
 
 
 # Short nouns for the email-visible summary of the folded minor items.
@@ -505,6 +532,7 @@ def render_checklist_markdown(
     jobs_scanned: int,
     fail_on: str,
     external: dict[str, ExternalStatus] | None = None,
+    baseline: set[str] | None = None,
 ) -> str:
     """The checklist as GitHub-flavored Markdown — the PR comment, and
     therefore the notification email.
@@ -516,11 +544,18 @@ def render_checklist_markdown(
     Same findings as every other format; nothing is hidden — only folded.
     """
     external = external or {}
+    baseline = baseline or set()
     threshold = SEVERITY_ORDER.get(fail_on, 0) if fail_on != "none" else 99
 
-    core_findings = [f for f in result.findings if f.rule_id != "tridelphi/parse-error"]
+    core_findings = [
+        f
+        for f in result.findings
+        if f.rule_id != "tridelphi/parse-error" and fingerprint(f) not in baseline
+    ]
+    accepted = sum(1 for f in result.findings if fingerprint(f) in baseline)
     core_crit = [f for f in core_findings if f.severity == "critical"]
     core_warn = [f for f in core_findings if f.severity == "warning"]
+    core_unknown = [f for f in core_findings if f.rule_id == "tridelphi/unresolved-context"]
 
     def status_cell(counts: dict[str, int]) -> str:
         if counts["critical"]:
@@ -544,6 +579,10 @@ def render_checklist_markdown(
     ]
     if files_scanned == 0:
         unchecked.insert(0, "core")
+    elif result.diagnostics:
+        unchecked.insert(0, "core-partial")
+    elif core_unknown:
+        unchecked.insert(0, "core-unknown")
 
     out: list[str] = []
     if total_to_fix:
@@ -551,24 +590,31 @@ def render_checklist_markdown(
         out.append(f"### 🔺 TriDelPhi — 🚫 {total_to_fix} {item} to fix before this is safe")
     elif files_scanned == 0:
         out.append("### 🔺 TriDelPhi — ⬜ nothing was checked (no GitHub Actions here)")
+    elif result.diagnostics:
+        out.append("### 🔺 TriDelPhi — ⬜ partial scan; fix unreadable workflow input")
     elif unchecked:
         out.append("### 🔺 TriDelPhi — ✅ nothing wrong in what we checked")
     else:
         out.append("### 🔺 TriDelPhi — ✅ every check ran and passed")
     out.append(
-        f"_{repo_label} · {jobs_scanned} job{'s' if jobs_scanned != 1 else ''} across "
-        f"{files_scanned} workflow{'s' if files_scanned != 1 else ''} · ran on the runner, "
-        "nothing uploaded or shared_"
+        f"_{_md_escape(repo_label)} · {jobs_scanned} job{'s' if jobs_scanned != 1 else ''} across "
+        f"{files_scanned} workflow{'s' if files_scanned != 1 else ''} · core read local files; "
+        "TriDelPhi did not upload source_"
     )
     out.append("")
     out.append("| Check | Result |")
     out.append("|---|---|")
     core_counts = {"critical": len(core_crit), "warning": len(core_warn), "note": 0}
-    core_cell = (
-        "⬜ no GitHub Actions here — nothing was checked"
-        if files_scanned == 0
-        else status_cell(core_counts)
-    )
+    if files_scanned == 0:
+        core_cell = "⬜ no GitHub Actions here — nothing was checked"
+    elif result.diagnostics:
+        core_cell = "⬜ partial — a workflow could not be read"
+    elif core_unknown and not core_crit and not core_warn:
+        core_cell = f"⬜ {len(core_unknown)} runtime setting(s) unknown"
+    elif (result.suppressed or accepted) and not core_crit and not core_warn:
+        core_cell = f"✅ passed · {result.suppressed + accepted} accepted"
+    else:
+        core_cell = status_cell(core_counts)
     out.append(f"| Can a stranger trick a robot into leaking your keys? | {core_cell} |")
     for name, level, question in _LADDER_ROWS:
         st = external.get(name)
@@ -582,6 +628,12 @@ def render_checklist_markdown(
     else:
         out.append(f"| {_APP_ROW[2]} | {status_cell(app_st.counts)} |")
     out.append("")
+    if accepted:
+        out.append(
+            f"> {accepted} unchanged finding{'s' if accepted != 1 else ''} remain in "
+            "the baseline for audit history. Only new findings are listed below."
+        )
+        out.append("")
     if unchecked:
         # Spelled out in prose, not only as ⬜ in a table: a reader skimming an
         # email sees the heading and the first paragraph, and a row of empty

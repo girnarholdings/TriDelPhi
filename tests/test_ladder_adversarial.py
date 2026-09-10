@@ -338,15 +338,14 @@ def _finding_with_uri(uri: str) -> dict:
     }
 
 
-def test_etc_passwd_file_uri_is_left_untouched_not_relativized(stub_path):
+def test_etc_passwd_file_uri_is_neutralized(stub_path):
     bin_dir, repo = stub_path
     make_stub(
         bin_dir, "osv-scanner", stub_sarif("osv-scanner", [_finding_with_uri("file:///etc/passwd")])
     )
     res = run_tool(OSV_SCANNER, repo)
     uri = _extract_uri(res)
-    assert uri == "file:///etc/passwd"
-    assert not uri.startswith("../")
+    assert uri == "README.md"
 
 
 def test_relative_dotdot_traversal_uri_is_never_produced(stub_path):
@@ -354,9 +353,8 @@ def test_relative_dotdot_traversal_uri_is_never_produced(stub_path):
     the one out-of-root shape that is indistinguishable, to a naive resolver,
     from a legitimate in-repo path: unlike an absolute or file:// URI (which
     is unambiguous), a "../"-prefixed relative URI still *looks* repo-relative.
-    It must never be emitted as-is; it is rewritten to an unambiguous absolute
-    file:// URI instead, so nothing downstream can mistake it for a path
-    inside the scanned root."""
+    It must never be emitted as-is; it is replaced with a safe repo-level
+    anchor so downstream viewers cannot dereference outside the scan."""
     bin_dir, repo = stub_path
     make_stub(
         bin_dir,
@@ -367,8 +365,7 @@ def test_relative_dotdot_traversal_uri_is_never_produced(stub_path):
     uri = _extract_uri(res)
     assert not uri.startswith("../")
     assert uri != "../../../etc/passwd"
-    assert uri.startswith("file://")
-    assert uri.endswith("/etc/passwd")
+    assert uri == "README.md"
 
 
 def test_file_uri_with_host_is_contained(stub_path):
