@@ -22,6 +22,7 @@ for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redir
         PUBLIC_ORIGIN: origin, GITHUB_CLIENT_ID: "fake-client",
         GITHUB_CLIENT_SECRET: "fake-secret", GITHUB_APP_ID: "123",
         GITHUB_APP_SLUG: "tridelphi-test", PAID_ENTITLEMENTS: "{}",
+        SCANNER_REPO: "girnarholdings/TriDelPhi", SCANNER_REF: "b".repeat(40),
       },
       durableObjects: { PORTAL_STATE: { className: "PortalState", useSQLite: true } },
       ratelimits: { RATE_LIMITER: { namespace_id: "1001", simple: { limit: 30, period: 60 } } },
@@ -44,11 +45,24 @@ for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redir
         if (request.url === "https://api.github.com/user/installations?per_page=100&page=1") {
           return Response.json({ installations: scenario === "install-required" ? [] : [{ app_id: 123, suspended_at: null }] });
         }
+        const path = new URL(request.url).pathname;
+        if (path === "/repos/girnarholdings/TriDelPhi") return Response.json({ id: 1234, full_name: "girnarholdings/TriDelPhi", private: false });
+        if (path.endsWith("/codespaces/new")) return Response.json({ billable_owner: { id: 7 } });
+        if (path.endsWith("/codespaces/machines")) return Response.json({ machines: [{ name: "basicLinux", cpus: 2 }] });
+        if (path === "/repos/girnarholdings/TriDelPhi/codespaces") {
+          assert.equal(request.method, "POST");
+          assert.equal(request.headers.get("content-type"), "application/json");
+          assert.deepEqual(await request.json(), { ref: "b".repeat(40), machine: "basicLinux",
+            devcontainer_path: ".devcontainer/scan/devcontainer.json", multi_repo_permissions_opt_out: true,
+            idle_timeout_minutes: 5, retention_period_minutes: 60, display_name: "TriDelPhi security scan" });
+          return Response.json({ owner: { id: 7 }, billable_owner: { id: 7 }, repository: { id: 1234 },
+            machine: { cpus: 2 }, name: "test-workspace", web_url: "https://test-workspace.github.dev/" }, { status: 201 });
+        }
         assert.fail("Unexpected outbound destination; redirects must not be followed");
       },
     });
     try {
-      const worker = await mf.getWorker();
+      const worker = { fetch: (...args) => mf.dispatchFetch(...args) };
       const headers = { "CF-Connecting-IP": "192.0.2.1" };
       const login = await worker.fetch(origin + "/auth/login", { headers, redirect: "manual" });
       assert.equal(login.status, 303);
@@ -67,6 +81,15 @@ for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redir
         const session = await worker.fetch(origin + "/api/session", { headers: { ...headers, Cookie: sessionCookie } });
         assert.equal(session.status, 200);
         assert.deepEqual(await session.json(), { login: "builder", tier: "free", paidScanningAvailable: false });
+        const create = () => worker.fetch(origin + "/api/codespaces", { method: "POST", headers: {
+          ...headers, Cookie: sessionCookie, Origin: origin, "Content-Type": "application/json",
+        }, body: JSON.stringify({ acceptGitHubBilling: true, createWorkspace: true }) });
+        const attempts = await Promise.all([create(), create()]);
+        assert.ok(attempts.every(r => [200, 409].includes(r.status)), JSON.stringify(await Promise.all(attempts.map(async r => ({ status: r.status, body: await r.clone().text() })))));
+        assert.ok(attempts.some(r => r.status === 200));
+        assert.equal(calls.filter(url => url === "https://api.github.com/repos/girnarholdings/TriDelPhi/codespaces").length, 1);
+        assert.equal((await create()).status, 200);
+        assert.equal(calls.filter(url => url === "https://api.github.com/repos/girnarholdings/TriDelPhi/codespaces").length, 1);
       } else if (scenario === "install-required") {
         assert.equal(response.headers.get("location"), "https://github.com/apps/tridelphi-test/installations/new");
         assert.ok(!response.headers.get("set-cookie").includes("ghu_fakeToken"));

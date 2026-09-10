@@ -6,6 +6,20 @@ export class PortalState {
   async fetch(request) {
     const { op, record } = await request.json();
     const now = Date.now();
+    if (op === "reserve") {
+      if (!record || !Number.isSafeInteger(record.expires) ||
+          record.expires <= now || record.expires > now + 30 * 60_000) {
+        return new Response(null, { status: 400 });
+      }
+      // Per-user creation lock. Persist atomically before any external POST.
+      return Response.json(await this.ctx.storage.transaction(async txn => {
+        const previous = await txn.get("record");
+        if (previous?.expires > now) return { acquired: false, record: previous };
+        await txn.setAlarm(record.expires);
+        await txn.put("record", record);
+        return { acquired: true };
+      }));
+    }
     if (op === "put") {
       if (!record || !Number.isSafeInteger(record.expires) ||
           record.expires <= now || record.expires > now + 30 * 60_000) {

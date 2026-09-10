@@ -1,5 +1,34 @@
 # GitHub App scan portal
 
+## Current behavior — 2026-09-10
+
+The portal now **creates** the trusted Codespace after explicit visitor
+confirmation, instead of returning GitHub's manual creation form. The owner
+approved this product policy; it is not approval to incur operator charges or
+create a live test machine. Cloud and local scanning are alternatives; the cloud
+path has two steps: connect GitHub, then create a workspace.
+
+The server selects only a GitHub-reported 2-core machine, pins the trusted ref
+and devcontainer, checks the own-account payer, opts out of additional repository
+permissions, requests 5-minute idle shutdown and deletion 60 minutes after stop,
+and validates the returned workspace URL. A 30-minute per-user transactional
+reservation prevents concurrent/replayed creation. Uncertain outcomes stay
+locked and are never retried automatically. No unrelated workspace is deleted.
+Users must save their report before cleanup. Tokens and short-lived workspace
+links stay server-side; source still goes directly into the user's Codespace.
+
+GitHub Free personal accounts include 120 core-hours (60 running hours at 2 cores)
+and 15 GB-month storage, shared with other Codespaces. There is no documented
+free-only creation flag; the page states the conditional allowance and uses a
+concise creation/billing confirmation. Local scanning avoids cloud compute costs.
+Full sources, safeguards and unresolved live checks: [Codespaces research](../docs/CODESPACES_RESEARCH.md).
+
+**Earlier manual-handoff descriptions below are historical deployment context,
+not the current creation endpoint contract.** The App configuration and privacy
+rules remain applicable. Current tests: 45 frontend/unit + 5 workerd = 50 passing.
+Static localhost previews never call production APIs or create compute; they
+show a preview notice and link to the live portal for sign-in.
+
 Deployment rails for a separate scan subdomain. Keep the main static website on
 its existing host; **do not route source uploads, credentials or scan jobs through cPanel**.
 This Worker handles authentication and eligibility metadata, not scanning compute.

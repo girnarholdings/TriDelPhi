@@ -61,12 +61,14 @@ async function boundedJson(response, max = 256 * 1024, client = false) {
   catch { fail(client ? 400 : 502, "Invalid JSON. Try again."); }
 }
 
-async function github(path, token, fetcher) {
+async function github(path, token, fetcher, body) {
   const response = await fetcher(API + path, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       "User-Agent": "TriDelPhi-Portal", "X-GitHub-Api-Version": "2026-03-10" },
     // Workers supports manual, not error. The !ok gate below rejects every 3xx.
     redirect: "manual", signal: AbortSignal.timeout(15_000),
+    ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
   });
   if (!response.ok) {
     await response.body?.cancel();
@@ -244,10 +246,43 @@ export function createPortal(fetcher = fetch) {
           if (defaults.billable_owner?.id !== user.id) {
             fail(403, "This Codespace would bill another account. Free TriDelPhi scans require your own GitHub compute.");
           }
-          const target = new URL("https://github.com/codespaces/new");
-          target.search = new URLSearchParams({ repo: String(repo.id), ref: env.SCANNER_REF,
-            devcontainer_path: ".devcontainer/scan/devcontainer.json" });
-          response = json({ url: target.href, message: "GitHub will confirm availability and billing before creation. No Codespace has been created yet." });
+          if (input.createWorkspace !== true) fail(400, "Confirm workspace creation to continue.");
+          const machines = await github(`/repos/${env.SCANNER_REPO}/codespaces/machines?ref=${env.SCANNER_REF}`, session.token, fetcher);
+          const machine = Array.isArray(machines.machines) && machines.machines.find(m =>
+            m.cpus === 2 && typeof m.name === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(m.name));
+          if (!machine) fail(409, "A 2-core workspace is not available. We will not choose a larger machine. Try scanning locally.");
+          const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`workspace:${user.id}`)));
+          const slot = [...digest].map(x => x.toString(16).padStart(2, "0")).join("");
+          const expires = Date.now() + 30 * 60_000;
+          const reservation = await state(env, slot, "reserve", { kind: "creating", expires });
+          if (!reservation.acquired) {
+            if (reservation.record?.kind === "workspace") return secure(json(reservation.record.result));
+            fail(409, "A workspace request is already in progress or its result is uncertain. Check github.com/codespaces before trying again. Creation is paused here for up to 30 minutes to avoid duplicates.");
+          }
+          // Never retry this POST: a timeout can still mean GitHub created it.
+          try {
+            const workspace = await github(`/repos/${env.SCANNER_REPO}/codespaces`, session.token, fetcher, {
+              ref: env.SCANNER_REF, machine: machine.name,
+              devcontainer_path: ".devcontainer/scan/devcontainer.json",
+              multi_repo_permissions_opt_out: true, idle_timeout_minutes: 5,
+              retention_period_minutes: 60, display_name: "TriDelPhi security scan",
+            });
+            if (workspace.owner?.id !== user.id || workspace.billable_owner?.id !== user.id ||
+                workspace.repository?.id !== repo.id || workspace.machine?.cpus !== 2 ||
+                typeof workspace.name !== "string" || !/^[a-z0-9-]{1,100}$/.test(workspace.name)) {
+              throw new Error("Unverified workspace");
+            }
+            const target = new URL(workspace.web_url);
+            if (target.protocol !== "https:" || target.hostname !== `${workspace.name}.github.dev` ||
+                target.port || target.username || target.password || target.pathname !== "/" || target.search || target.hash) {
+              throw new Error("Unverified workspace URL");
+            }
+            const result = { url: target.href, created: true, message: "Your workspace is being prepared. Open it below. Save your report before deleting it; idle workspaces are scheduled for cleanup." };
+            await state(env, slot, "put", { kind: "workspace", result, expires });
+            response = json(result);
+          } catch {
+            fail(503, "GitHub did not confirm workspace creation. A workspace may already exist: check github.com/codespaces. We will not retry automatically; creation is paused here for up to 30 minutes to avoid duplicates.");
+          }
         }
       } else fail(404, "Not found.");
       return secure(response);

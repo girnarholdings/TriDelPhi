@@ -1,5 +1,26 @@
 # TriDelPhi deployment and GitHub publication handoff
 
+## Current flow update — user-confirmed creation (2026-09-10)
+
+This section supersedes earlier manual-handoff descriptions below. The owner
+explicitly approved creating Codespaces after each visitor confirms allowance
+and billing settings. This does not authorize a live test on the owner's account.
+The portal now has cloud/local alternatives and two cloud steps; `/api/codespaces`
+creates a pinned 2-core workspace with a 5-minute idle timeout and 60-minute
+retention request. There is no larger-machine fallback and no “free-only” API
+guarantee. See [current research and implementation](CODESPACES_RESEARCH.md).
+50 frontend/unit/workerd tests pass, including local-preview isolation and real storage locking during
+concurrent mocked creation. No real workspace was created in these tests.
+Cloudflare remains owner-confirmed Workers Free; paid scanning remains disabled.
+The creation/redesign deployment is `7074449f-a968-4edf-b19f-d5ca27ddff62`,
+version `d1b5b292-a848-43f9-a05d-713c3fbb23b0`, deployed 2026-09-10 14:12 UTC.
+The later local-preview asset fix and publication receipts are in PR #71.
+
+Live acceptance is still required. The user's latest real OAuth attempt reached
+the missing-installation gate, confirming token exchange/identity now work.
+Complete the existing App Setup URL configuration described below. Do not bypass
+browser-bound OAuth or treat installation_id as authentication.
+
 Updated: 2026-09-10. **The callback runtime fix is deployed; fresh real-user
 sign-in acceptance is still pending. The App secret is configured.**
 [PR #70](https://github.com/girnarholdings/TriDelPhi/pull/70) is merged as

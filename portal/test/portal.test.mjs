@@ -21,6 +21,11 @@ function fixture(options = {}) {
       idFromName: id => id,
       get: id => ({ fetch: async (_url, init) => {
         const { op, record } = JSON.parse(init.body);
+        if (op === "reserve") {
+          const previous = records.get(id);
+          if (previous?.expires > Date.now()) return Response.json({ acquired: false, record: previous });
+          records.set(id, record); return Response.json({ acquired: true });
+        }
         if (op === "put") { records.set(id, record); return Response.json({ ok: true }); }
         if (op === "delete") { records.delete(id); return Response.json({ ok: true }); }
         const value = records.get(id);
@@ -41,6 +46,13 @@ function fixture(options = {}) {
     if (options.revoked) return new Response("sensitive GitHub detail", { status: 401 });
     if (options.oversized) return new Response("x".repeat(300 * 1024));
     const path = new URL(url).pathname;
+    if (path.endsWith("/codespaces/machines")) return Response.json({ machines: [{ name: "basicLinux", cpus: options.noSmall ? 4 : 2 }] });
+    if (path === "/repos/girnarholdings/TriDelPhi/codespaces") {
+      if (options.createTimeout) throw new Error("timeout");
+      return Response.json({ owner: { id: 7 }, billable_owner: { id: options.createWrongPayer ? 99 : 7 },
+        repository: { id: 1234 }, machine: { cpus: 2 }, name: "tridelphi-test-space",
+        web_url: options.evilUrl ? "https://evil.test/" : "https://tridelphi-test-space.github.dev/" }, { status: 201 });
+    }
     if (path === "/user") return Response.json({ id: options.userId ?? 7, login: "builder" });
     if (path === "/user/installations") return Response.json({ installations: options.noInstall ? [] : [
       { app_id: options.wrongApp ? 456 : 123, suspended_at: options.suspended ? "today" : null },
@@ -64,7 +76,7 @@ function fixture(options = {}) {
       ...opts.headers,
     };
     return worker.fetch(new Request(origin + path, { method, headers,
-      ...(method === "POST" ? { body: JSON.stringify(opts.body ?? { acceptGitHubBilling: true }) } : {}) }), env);
+      ...(method === "POST" ? { body: JSON.stringify(opts.body ?? { acceptGitHubBilling: true, createWorkspace: true }) } : {}) }), env);
   };
   return { env, request, worker, records, calls };
 }
@@ -118,19 +130,46 @@ for (const options of [{ noInstall: true }, { wrongApp: true }, { suspended: tru
   });
 }
 
-test("Codespaces handoff is pinned to trusted scanner, never requested target", async () => {
+test("Codespaces creation is pinned and bounded, never requested target", async () => {
   const f = fixture();
   const response = await f.request("/api/codespaces", { body: {
-    acceptGitHubBilling: true, repo: "attacker/evil", ref: "evil", returnTo: "https://evil.test",
+    acceptGitHubBilling: true, createWorkspace: true, repo: "attacker/evil", ref: "evil", returnTo: "https://evil.test",
   } });
   assert.equal(response.status, 200);
   const url = new URL((await response.json()).url);
-  assert.equal(url.origin, "https://github.com");
-  assert.equal(url.pathname, "/codespaces/new");
-  assert.equal(url.searchParams.get("repo"), "1234");
-  assert.equal(url.searchParams.get("ref"), f.env.SCANNER_REF);
-  assert.equal(url.searchParams.get("devcontainer_path"), ".devcontainer/scan/devcontainer.json");
-  assert.ok(f.calls.every(c => !c.init.method || c.init.method === "GET"));
+  assert.equal(url.href, "https://tridelphi-test-space.github.dev/");
+  const writes = f.calls.filter(c => c.init.method === "POST");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].url, "https://api.github.com/repos/girnarholdings/TriDelPhi/codespaces");
+  assert.deepEqual(JSON.parse(writes[0].init.body), { ref: f.env.SCANNER_REF, machine: "basicLinux",
+    devcontainer_path: ".devcontainer/scan/devcontainer.json", multi_repo_permissions_opt_out: true,
+    idle_timeout_minutes: 5, retention_period_minutes: 60, display_name: "TriDelPhi security scan" });
+  assert.equal((await f.request("/api/codespaces")).status, 200);
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+});
+
+test("concurrent workspace clicks create at most one workspace", async () => {
+  const f = fixture();
+  const responses = await Promise.all([f.request("/api/codespaces"), f.request("/api/codespaces")]);
+  assert.ok(responses.every(r => [200, 409].includes(r.status)));
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+});
+for (const options of [{ createTimeout: true }, { createWrongPayer: true }, { evilUrl: true }]) {
+  test(`uncertain creation stays locked and never automatically retries: ${JSON.stringify(options)}`, async () => {
+    const f = fixture(options);
+    const response = await f.request("/api/codespaces");
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /may already exist/);
+    assert.equal((await f.request("/api/codespaces")).status, 409);
+    assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+  });
+}
+test("no automatic larger machine or missing creation confirmation", async () => {
+  const f = fixture({ noSmall: true });
+  assert.equal((await f.request("/api/codespaces")).status, 409);
+  const g = fixture();
+  assert.equal((await g.request("/api/codespaces", { body: { acceptGitHubBilling: true } })).status, 400);
+  assert.ok([...f.calls, ...g.calls].every(c => c.init.method !== "POST"));
 });
 
 for (const options of [{ otherPayer: true }, { codespacesDenied: true }]) {
