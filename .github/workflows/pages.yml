@@ -12,6 +12,7 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'
+      - 'scripts/check-site.py'
   workflow_dispatch:
 
 # Deploy credentials are scoped to the deploy job below; the build job runs
@@ -40,23 +41,7 @@ jobs:
         #
         # Prose hyperlinks are fine and expected — only *asset* references
         # (scripts, stylesheets, fonts, images) have to be local.
-        run: |
-          python3 - <<'PY'
-          import pathlib, re, sys
-          page = pathlib.Path("site/index.html").read_text()
-          problems = []
-          problems += [f"remote src: {m}" for m in
-                       re.findall(r'\bsrc\s*=\s*["\'](https?://[^"\']+)', page)]
-          problems += [f"remote <link>: {m}" for m in
-                       re.findall(r'<link\b[^>]*href\s*=\s*["\'](https?://[^"\']+)', page)]
-          problems += [f"CSS @import: {m}" for m in
-                       re.findall(r'@import\s+(?:url\()?["\']?(https?://[^"\')\s]+)', page)]
-          if "<title>" not in page:
-              problems.append("missing <title>")
-          if problems:
-              print("\n".join(problems)); sys.exit(1)
-          print(f"site/index.html OK ({len(page)} bytes, no external assets)")
-          PY
+        run: python3 scripts/check-site.py
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

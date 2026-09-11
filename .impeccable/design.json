@@ -1,0 +1,596 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-11T00:09:13.806Z",
+  "title": "Design System: TriDelPhi",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Bg",
+        "tonalRamp": [
+          "oklch(15% 0.05253 263.27)",
+          "oklch(26.43% 0.05253 263.27)",
+          "oklch(37.86% 0.05253 263.27)",
+          "oklch(49.29% 0.05253 263.27)",
+          "oklch(60.71% 0.05253 263.27)",
+          "oklch(72.14% 0.05253 263.27)",
+          "oklch(83.57% 0.05253 263.27)",
+          "oklch(95% 0.05253 263.27)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "tonalRamp": [
+          "oklch(15% 0.05802 258.93)",
+          "oklch(26.43% 0.05802 258.93)",
+          "oklch(37.86% 0.05802 258.93)",
+          "oklch(49.29% 0.05802 258.93)",
+          "oklch(60.71% 0.05802 258.93)",
+          "oklch(72.14% 0.05802 258.93)",
+          "oklch(83.57% 0.05802 258.93)",
+          "oklch(95% 0.05802 258.93)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "tonalRamp": [
+          "oklch(15% 0.00574 264.53)",
+          "oklch(26.43% 0.00574 264.53)",
+          "oklch(37.86% 0.00574 264.53)",
+          "oklch(49.29% 0.00574 264.53)",
+          "oklch(60.71% 0.00574 264.53)",
+          "oklch(72.14% 0.00574 264.53)",
+          "oklch(83.57% 0.00574 264.53)",
+          "oklch(95% 0.00574 264.53)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "tonalRamp": [
+          "oklch(15% 0.03732 255.97)",
+          "oklch(26.43% 0.03732 255.97)",
+          "oklch(37.86% 0.03732 255.97)",
+          "oklch(49.29% 0.03732 255.97)",
+          "oklch(60.71% 0.03732 255.97)",
+          "oklch(72.14% 0.03732 255.97)",
+          "oklch(83.57% 0.03732 255.97)",
+          "oklch(95% 0.03732 255.97)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "tonalRamp": [
+          "oklch(15% 0.05425 254.80)",
+          "oklch(26.43% 0.05425 254.80)",
+          "oklch(37.86% 0.05425 254.80)",
+          "oklch(49.29% 0.05425 254.80)",
+          "oklch(60.71% 0.05425 254.80)",
+          "oklch(72.14% 0.05425 254.80)",
+          "oklch(83.57% 0.05425 254.80)",
+          "oklch(95% 0.05425 254.80)"
+        ]
+      },
+      "manual": {
+        "role": "primary",
+        "displayName": "Manual",
+        "tonalRamp": [
+          "oklch(15% 0.14269 85.83)",
+          "oklch(26.43% 0.14269 85.83)",
+          "oklch(37.86% 0.14269 85.83)",
+          "oklch(49.29% 0.14269 85.83)",
+          "oklch(60.71% 0.14269 85.83)",
+          "oklch(72.14% 0.14269 85.83)",
+          "oklch(83.57% 0.14269 85.83)",
+          "oklch(95% 0.14269 85.83)"
+        ]
+      },
+      "cloud": {
+        "role": "secondary",
+        "displayName": "Cloud",
+        "tonalRamp": [
+          "oklch(15% 0.09456 211.21)",
+          "oklch(26.43% 0.09456 211.21)",
+          "oklch(37.86% 0.09456 211.21)",
+          "oklch(49.29% 0.09456 211.21)",
+          "oklch(60.71% 0.09456 211.21)",
+          "oklch(72.14% 0.09456 211.21)",
+          "oklch(83.57% 0.09456 211.21)",
+          "oklch(95% 0.09456 211.21)"
+        ]
+      },
+      "manual-ink": {
+        "role": "primary",
+        "displayName": "Manual Ink",
+        "tonalRamp": [
+          "oklch(15% 0.04713 261.24)",
+          "oklch(26.43% 0.04713 261.24)",
+          "oklch(37.86% 0.04713 261.24)",
+          "oklch(49.29% 0.04713 261.24)",
+          "oklch(60.71% 0.04713 261.24)",
+          "oklch(72.14% 0.04713 261.24)",
+          "oklch(83.57% 0.04713 261.24)",
+          "oklch(95% 0.04713 261.24)"
+        ]
+      },
+      "cloud-ink": {
+        "role": "secondary",
+        "displayName": "Cloud Ink",
+        "tonalRamp": [
+          "oklch(15% 0.04818 254.34)",
+          "oklch(26.43% 0.04818 254.34)",
+          "oklch(37.86% 0.04818 254.34)",
+          "oklch(49.29% 0.04818 254.34)",
+          "oklch(60.71% 0.04818 254.34)",
+          "oklch(72.14% 0.04818 254.34)",
+          "oklch(83.57% 0.04818 254.34)",
+          "oklch(95% 0.04818 254.34)"
+        ]
+      },
+      "section": {
+        "role": "neutral",
+        "displayName": "Section",
+        "tonalRamp": [
+          "oklch(15% 0.00741 260.73)",
+          "oklch(26.43% 0.00741 260.73)",
+          "oklch(37.86% 0.00741 260.73)",
+          "oklch(49.29% 0.00741 260.73)",
+          "oklch(60.71% 0.00741 260.73)",
+          "oklch(72.14% 0.00741 260.73)",
+          "oklch(83.57% 0.00741 260.73)",
+          "oklch(95% 0.00741 260.73)"
+        ]
+      },
+      "section-ink": {
+        "role": "neutral",
+        "displayName": "Section Ink",
+        "tonalRamp": [
+          "oklch(15% 0.05604 258.30)",
+          "oklch(26.43% 0.05604 258.30)",
+          "oklch(37.86% 0.05604 258.30)",
+          "oklch(49.29% 0.05604 258.30)",
+          "oklch(60.71% 0.05604 258.30)",
+          "oklch(72.14% 0.05604 258.30)",
+          "oklch(83.57% 0.05604 258.30)",
+          "oklch(95% 0.05604 258.30)"
+        ]
+      },
+      "section-muted": {
+        "role": "neutral",
+        "displayName": "Section Muted",
+        "tonalRamp": [
+          "oklch(15% 0.04785 255.48)",
+          "oklch(26.43% 0.04785 255.48)",
+          "oklch(37.86% 0.04785 255.48)",
+          "oklch(49.29% 0.04785 255.48)",
+          "oklch(60.71% 0.04785 255.48)",
+          "oklch(72.14% 0.04785 255.48)",
+          "oklch(83.57% 0.04785 255.48)",
+          "oklch(95% 0.04785 255.48)"
+        ]
+      },
+      "light-bg": {
+        "role": "neutral",
+        "displayName": "Light Bg",
+        "tonalRamp": [
+          "oklch(15% 0.00574 264.53)",
+          "oklch(26.43% 0.00574 264.53)",
+          "oklch(37.86% 0.00574 264.53)",
+          "oklch(49.29% 0.00574 264.53)",
+          "oklch(60.71% 0.00574 264.53)",
+          "oklch(72.14% 0.00574 264.53)",
+          "oklch(83.57% 0.00574 264.53)",
+          "oklch(95% 0.00574 264.53)"
+        ]
+      },
+      "light-surface": {
+        "role": "neutral",
+        "displayName": "Light Surface",
+        "tonalRamp": [
+          "oklch(15% 0.01372 258.35)",
+          "oklch(26.43% 0.01372 258.35)",
+          "oklch(37.86% 0.01372 258.35)",
+          "oklch(49.29% 0.01372 258.35)",
+          "oklch(60.71% 0.01372 258.35)",
+          "oklch(72.14% 0.01372 258.35)",
+          "oklch(83.57% 0.01372 258.35)",
+          "oklch(95% 0.01372 258.35)"
+        ]
+      },
+      "light-ink": {
+        "role": "neutral",
+        "displayName": "Light Ink",
+        "tonalRamp": [
+          "oklch(15% 0.05307 256.90)",
+          "oklch(26.43% 0.05307 256.90)",
+          "oklch(37.86% 0.05307 256.90)",
+          "oklch(49.29% 0.05307 256.90)",
+          "oklch(60.71% 0.05307 256.90)",
+          "oklch(72.14% 0.05307 256.90)",
+          "oklch(83.57% 0.05307 256.90)",
+          "oklch(95% 0.05307 256.90)"
+        ]
+      },
+      "light-muted": {
+        "role": "neutral",
+        "displayName": "Light Muted",
+        "tonalRamp": [
+          "oklch(15% 0.05315 254.75)",
+          "oklch(26.43% 0.05315 254.75)",
+          "oklch(37.86% 0.05315 254.75)",
+          "oklch(49.29% 0.05315 254.75)",
+          "oklch(60.71% 0.05315 254.75)",
+          "oklch(72.14% 0.05315 254.75)",
+          "oklch(83.57% 0.05315 254.75)",
+          "oklch(95% 0.05315 254.75)"
+        ]
+      },
+      "light-line": {
+        "role": "neutral",
+        "displayName": "Light Line",
+        "tonalRamp": [
+          "oklch(15% 0.02790 255.11)",
+          "oklch(26.43% 0.02790 255.11)",
+          "oklch(37.86% 0.02790 255.11)",
+          "oklch(49.29% 0.02790 255.11)",
+          "oklch(60.71% 0.02790 255.11)",
+          "oklch(72.14% 0.02790 255.11)",
+          "oklch(83.57% 0.02790 255.11)",
+          "oklch(95% 0.02790 255.11)"
+        ]
+      },
+      "light-manual": {
+        "role": "primary",
+        "displayName": "Light Manual",
+        "tonalRamp": [
+          "oklch(15% 0.10230 78.07)",
+          "oklch(26.43% 0.10230 78.07)",
+          "oklch(37.86% 0.10230 78.07)",
+          "oklch(49.29% 0.10230 78.07)",
+          "oklch(60.71% 0.10230 78.07)",
+          "oklch(72.14% 0.10230 78.07)",
+          "oklch(83.57% 0.10230 78.07)",
+          "oklch(95% 0.10230 78.07)"
+        ]
+      },
+      "light-cloud": {
+        "role": "secondary",
+        "displayName": "Light Cloud",
+        "tonalRamp": [
+          "oklch(15% 0.08360 217.60)",
+          "oklch(26.43% 0.08360 217.60)",
+          "oklch(37.86% 0.08360 217.60)",
+          "oklch(49.29% 0.08360 217.60)",
+          "oklch(60.71% 0.08360 217.60)",
+          "oklch(72.14% 0.08360 217.60)",
+          "oklch(83.57% 0.08360 217.60)",
+          "oklch(95% 0.08360 217.60)"
+        ]
+      },
+      "light-action-ink": {
+        "role": "neutral",
+        "displayName": "Light Action Ink",
+        "tonalRamp": [
+          "oklch(15% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95% 0.00000 89.88)"
+        ]
+      },
+      "light-section": {
+        "role": "neutral",
+        "displayName": "Light Section",
+        "tonalRamp": [
+          "oklch(15% 0.01545 257.20)",
+          "oklch(26.43% 0.01545 257.20)",
+          "oklch(37.86% 0.01545 257.20)",
+          "oklch(49.29% 0.01545 257.20)",
+          "oklch(60.71% 0.01545 257.20)",
+          "oklch(72.14% 0.01545 257.20)",
+          "oklch(83.57% 0.01545 257.20)",
+          "oklch(95% 0.01545 257.20)"
+        ]
+      },
+      "setup-bg3": {
+        "role": "neutral",
+        "displayName": "Setup Bg3",
+        "tonalRamp": [
+          "oklch(15% 0.06224 258.00)",
+          "oklch(26.43% 0.06224 258.00)",
+          "oklch(37.86% 0.06224 258.00)",
+          "oklch(49.29% 0.06224 258.00)",
+          "oklch(60.71% 0.06224 258.00)",
+          "oklch(72.14% 0.06224 258.00)",
+          "oklch(83.57% 0.06224 258.00)",
+          "oklch(95% 0.06224 258.00)"
+        ]
+      },
+      "setup-line2": {
+        "role": "neutral",
+        "displayName": "Setup Line2",
+        "tonalRamp": [
+          "oklch(15% 0.05439 252.52)",
+          "oklch(26.43% 0.05439 252.52)",
+          "oklch(37.86% 0.05439 252.52)",
+          "oklch(49.29% 0.05439 252.52)",
+          "oklch(60.71% 0.05439 252.52)",
+          "oklch(72.14% 0.05439 252.52)",
+          "oklch(83.57% 0.05439 252.52)",
+          "oklch(95% 0.05439 252.52)"
+        ]
+      },
+      "setup-faint": {
+        "role": "neutral",
+        "displayName": "Setup Faint",
+        "tonalRamp": [
+          "oklch(15% 0.04332 255.04)",
+          "oklch(26.43% 0.04332 255.04)",
+          "oklch(37.86% 0.04332 255.04)",
+          "oklch(49.29% 0.04332 255.04)",
+          "oklch(60.71% 0.04332 255.04)",
+          "oklch(72.14% 0.04332 255.04)",
+          "oklch(83.57% 0.04332 255.04)",
+          "oklch(95% 0.04332 255.04)"
+        ]
+      },
+      "setup-soft": {
+        "role": "primary",
+        "displayName": "Setup Soft",
+        "tonalRamp": [
+          "oklch(15% 0.14269 85.83)",
+          "oklch(26.43% 0.14269 85.83)",
+          "oklch(37.86% 0.14269 85.83)",
+          "oklch(49.29% 0.14269 85.83)",
+          "oklch(60.71% 0.14269 85.83)",
+          "oklch(72.14% 0.14269 85.83)",
+          "oklch(83.57% 0.14269 85.83)",
+          "oklch(95% 0.14269 85.83)"
+        ]
+      },
+      "setup-light-line2": {
+        "role": "neutral",
+        "displayName": "Setup Light Line2",
+        "tonalRamp": [
+          "oklch(15% 0.03376 254.04)",
+          "oklch(26.43% 0.03376 254.04)",
+          "oklch(37.86% 0.03376 254.04)",
+          "oklch(49.29% 0.03376 254.04)",
+          "oklch(60.71% 0.03376 254.04)",
+          "oklch(72.14% 0.03376 254.04)",
+          "oklch(83.57% 0.03376 254.04)",
+          "oklch(95% 0.03376 254.04)"
+        ]
+      },
+      "setup-light-soft": {
+        "role": "primary",
+        "displayName": "Setup Light Soft",
+        "tonalRamp": [
+          "oklch(15% 0.10230 78.07)",
+          "oklch(26.43% 0.10230 78.07)",
+          "oklch(37.86% 0.10230 78.07)",
+          "oklch(49.29% 0.10230 78.07)",
+          "oklch(60.71% 0.10230 78.07)",
+          "oklch(72.14% 0.10230 78.07)",
+          "oklch(83.57% 0.10230 78.07)",
+          "oklch(95% 0.10230 78.07)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "display",
+        "purpose": "Homepage role; responsive overrides are documented in Layout."
+      },
+      "headline": {
+        "displayName": "headline",
+        "purpose": "Homepage role; responsive overrides are documented in Layout."
+      },
+      "title": {
+        "displayName": "title",
+        "purpose": "Homepage role; responsive overrides are documented in Layout."
+      },
+      "body": {
+        "displayName": "body",
+        "purpose": "Homepage role; responsive overrides are documented in Layout."
+      },
+      "route-label": {
+        "displayName": "route-label",
+        "purpose": "Homepage role; responsive overrides are documented in Layout."
+      },
+      "setup-heading": {
+        "displayName": "setup-heading",
+        "purpose": "Retained Manual Setup Studio role; see DESIGN.md."
+      },
+      "setup-body": {
+        "displayName": "setup-body",
+        "purpose": "Retained Manual Setup Studio role; see DESIGN.md."
+      },
+      "setup-field": {
+        "displayName": "setup-field",
+        "purpose": "Retained Manual Setup Studio role; see DESIGN.md."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "station-fill",
+        "value": "fill .18s ease-out",
+        "purpose": "Homepage route hover/focus-within."
+      },
+      {
+        "name": "route-active",
+        "value": "translateY(1px)",
+        "purpose": "Homepage pressed link; removed for reduced motion."
+      },
+      {
+        "name": "setup-choice",
+        "value": "border-color .15s,background .15s",
+        "purpose": "Retained choice feedback."
+      },
+      {
+        "name": "setup-fold",
+        "value": "grid-template-rows .3s ease,opacity .25s ease",
+        "purpose": "Retained rung expansion."
+      },
+      {
+        "name": "setup-marker",
+        "value": "pop .3s ease",
+        "purpose": "Completion: scale(.3) at 0%, scale(1.2) at 70%, scale(1) at 100%."
+      },
+      {
+        "name": "setup-filebar",
+        "value": "background .45s",
+        "purpose": "Returns from manual soft wash; flash enters in .1s and is cleared after 150ms."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "homepage-intermediate",
+        "value": "1000px"
+      },
+      {
+        "name": "homepage-stack",
+        "value": "760px"
+      },
+      {
+        "name": "setup-stack",
+        "value": "900px"
+      },
+      {
+        "name": "setup-heading",
+        "value": "640px"
+      },
+      {
+        "name": "setup-small",
+        "value": "560px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Manual Route Action",
+      "kind": "button",
+      "refersTo": "manual-action",
+      "description": "Homepage destination link; source: site/index.html and site/assets/site.css.",
+      "html": "<a class=\"ds-manual-action\" href=\"https://tridelphi.com/setup.html\">Set up repository checks <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14m-6-6 6 6-6 6\"/></svg></a>",
+      "css": ".ds-manual-action{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.7rem 1rem;min-height:48px;background:var(--manual,#f6c550);color:var(--manual-ink,#17243b);text-decoration:none;font-family:var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);font-size:1rem;line-height:1.65;font-weight:650;border-radius:3px}.ds-manual-action svg{width:1.4rem;height:1.4rem;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ds-manual-action:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:.3em}.ds-manual-action:focus-visible{outline:3px solid var(--cloud,#64c5d7);outline-offset:5px}.ds-manual-action:active{transform:translateY(1px)}@media(prefers-reduced-motion:reduce){.ds-manual-action:active{transform:none}}"
+    },
+    {
+      "name": "Cloud Route Action",
+      "kind": "button",
+      "refersTo": "cloud-action",
+      "description": "Homepage destination link; source: site/index.html and site/assets/site.css.",
+      "html": "<a class=\"ds-cloud-action\" href=\"https://scan.tridelphi.com/\">Open Cloud Scan Studio <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14m-6-6 6 6-6 6\"/></svg></a>",
+      "css": ".ds-cloud-action{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.7rem 1rem;min-height:48px;background:var(--cloud,#64c5d7);color:var(--cloud-ink,#12243a);text-decoration:none;font-family:var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);font-size:1rem;line-height:1.65;font-weight:650;border-radius:3px}.ds-cloud-action svg{width:1.4rem;height:1.4rem;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ds-cloud-action:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:.3em}.ds-cloud-action:focus-visible{outline:3px solid var(--cloud,#64c5d7);outline-offset:5px}.ds-cloud-action:active{transform:translateY(1px)}@media(prefers-reduced-motion:reduce){.ds-cloud-action:active{transform:none}}"
+    },
+    {
+      "name": "Homepage Theme Button",
+      "kind": "button",
+      "refersTo": "theme-button",
+      "description": "Visible destination-theme control; source: site/assets/site.css. Theme switching requires the existing site.js.",
+      "html": "<button class=\"ds-theme-button\" type=\"button\" aria-label=\"Use light theme\">Light theme</button>",
+      "css": ".ds-theme-button{padding:.55rem .85rem;min-height:44px;border:1px solid var(--line,#3a506c);border-radius:4px;background:transparent;color:var(--ink,#f6f8fc);font-family:var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);font-size:.875rem;line-height:1.65;cursor:pointer}.ds-theme-button:hover{background:var(--surface,#122440)}.ds-theme-button:focus-visible{outline:3px solid var(--cloud,#64c5d7);outline-offset:5px}"
+    },
+    {
+      "name": "Setup Create Action",
+      "kind": "button",
+      "refersTo": "setup-primary",
+      "description": "Existing disabled initial create link; generator supplies href only after repository validation.",
+      "html": "<a class=\"ds-setup-primary\" aria-disabled=\"true\" target=\"_blank\" rel=\"noopener\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"/></svg>Create this file on GitHub</a>",
+      "css": ".ds-setup-primary{display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:11px;font-weight:600;font-size:16px;text-decoration:none;cursor:pointer;border:1px solid var(--line2,#58718e);background:var(--bg3,#1c3150);color:var(--ink,#f6f8fc);font-family:var(--sans,system-ui,-apple-system,\"Helvetica Neue\",Arial,sans-serif);max-width:100%;overflow-wrap:anywhere;background:var(--grn,#f6c550);border-color:var(--grn,#f6c550);color:var(--bg,#0b1730)}.ds-setup-primary svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ds-setup-primary[aria-disabled=\"true\"]{opacity:.5;pointer-events:none}.ds-setup-primary:hover{border-color:var(--grn,#f6c550)}.ds-setup-primary:focus-visible{outline:2px solid var(--grn,#f6c550);outline-offset:2px;border-radius:6px}"
+    },
+    {
+      "name": "Setup Copy Button",
+      "kind": "button",
+      "refersTo": "setup-secondary",
+      "description": "Existing secondary control; visual snippet does not run clipboard code.",
+      "html": "<button class=\"ds-setup-copy\" type=\"button\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"9\" y=\"9\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"/></svg>Copy</button>",
+      "css": ".ds-setup-copy{display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:11px;font-weight:600;font-size:16px;text-decoration:none;cursor:pointer;border:1px solid var(--line2,#58718e);background:var(--bg3,#1c3150);color:var(--ink,#f6f8fc);font-family:var(--sans,system-ui,-apple-system,\"Helvetica Neue\",Arial,sans-serif);max-width:100%;overflow-wrap:anywhere}.ds-setup-copy svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.ds-setup-copy:hover{border-color:var(--grn,#f6c550)}.ds-setup-copy:focus-visible{outline:2px solid var(--grn,#f6c550);outline-offset:2px;border-radius:6px}"
+    },
+    {
+      "name": "Setup Repository Field",
+      "kind": "input",
+      "refersTo": "setup-field",
+      "description": "Source label, placeholder, and status hook from site/setup.html; validation remains application behavior.",
+      "html": "<div class=\"ds-repo-row\"><label for=\"ds-repo\">Your repository <span>(unlocks one-click create)</span></label><input type=\"text\" id=\"ds-repo\" placeholder=\"owner/name, e.g. octocat/hello-world\" autocomplete=\"off\" spellcheck=\"false\" aria-describedby=\"ds-repo-status\"><span id=\"ds-repo-status\" role=\"status\" aria-live=\"polite\"></span></div>",
+      "css": ".ds-repo-row{margin:16px 0 0;font-family:var(--sans,system-ui,-apple-system,\"Helvetica Neue\",Arial,sans-serif);font-size:16px;line-height:1.6;color:var(--ink,#f6f8fc)}.ds-repo-row label{display:block;font-weight:600;font-size:14px;margin-bottom:6px}.ds-repo-row label span{color:var(--faint,#a4b8d2);font-weight:400}.ds-repo-row input{width:100%;padding:11px 12px;border:1px solid var(--line2,#58718e);border-radius:10px;background:var(--bg,#0b1730);color:var(--ink,#f6f8fc);font-family:var(--mono,ui-monospace,\"SF Mono\",\"JetBrains Mono\",Menlo,Consolas,monospace);font-size:16px;caret-color:var(--grn,#f6c550);margin-top:2px}.ds-repo-row input::placeholder{color:var(--faint,#a4b8d2);opacity:1}.ds-repo-row input:focus-visible{outline:2px solid var(--grn,#f6c550);outline-offset:2px;border-radius:6px}"
+    },
+    {
+      "name": "Setup Choice Card",
+      "kind": "card",
+      "refersTo": "setup-choice",
+      "description": "Existing checked app-path radio card; hover and keyboard focus are preserved.",
+      "html": "<label class=\"ds-opt\"><input type=\"radio\" name=\"ds-path\" value=\"app\" checked><span class=\"ds-card\"><b>My app’s published files</b><span>Builds your app, then reports what the build actually ships: inlined keys, source maps, open database rules. Advisory — it never fails your build.</span></span></label>",
+      "css": ".ds-opt{cursor:pointer;position:relative;font-family:var(--sans,system-ui,-apple-system,\"Helvetica Neue\",Arial,sans-serif);font-size:16px;line-height:1.6;color:var(--ink,#f6f8fc)}.ds-opt input{position:absolute;opacity:0;width:0;height:0}.ds-opt .ds-card{display:block;border:1px solid var(--line2,#58718e);border-radius:12px;background:var(--bg,#0b1730);padding:12px 14px;transition:border-color .15s,background .15s}.ds-card b{display:block;font-size:16px;margin-bottom:2px}.ds-card span{color:var(--mute,#b7c8df);font-size:14px;line-height:1.5;display:block}.ds-opt:hover .ds-card{border-color:var(--grn,#f6c550)}.ds-opt input:checked+.ds-card{border:2px solid var(--grn,#f6c550);background:var(--grn-soft,rgba(246,197,80,.12));padding:11px 13px}.ds-opt input:focus-visible+.ds-card{outline:2px solid var(--grn,#f6c550);outline-offset:2px}@media(prefers-reduced-motion:reduce){.ds-card{transition:none}}"
+    },
+    {
+      "name": "Homepage Studio Navigation",
+      "kind": "nav",
+      "description": "The actual three navigation links, without the surrounding brand/header wrapper.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main navigation\"><a href=\"https://tridelphi.com/setup.html\" class=\"ds-manual-link\" aria-label=\"Manual Setup Studio\">Manual studio</a><a href=\"https://scan.tridelphi.com/\" class=\"ds-cloud-link\" aria-label=\"Cloud Scan Studio\">Cloud studio</a><a href=\"https://github.com/girnarholdings/TriDelPhi#readme\">Docs &amp; source</a></nav>",
+      "css": ".ds-nav{display:flex;flex-wrap:wrap;gap:.5rem 1.7rem;margin-left:auto;font-family:var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);line-height:1.65;color:var(--ink,#f6f8fc)}.ds-nav a{padding:.5rem 0;text-decoration:none;font-size:.925rem;color:inherit;text-underline-offset:.22em}.ds-nav .ds-manual-link{color:var(--manual,#f6c550)}.ds-nav .ds-cloud-link{color:var(--cloud,#64c5d7)}.ds-nav a:hover{text-decoration:underline;text-decoration-thickness:2px}.ds-nav a:focus-visible{outline:3px solid var(--cloud,#64c5d7);outline-offset:5px}@media(max-width:1000px){.ds-nav{gap:1rem}}@media(max-width:760px){.ds-nav{order:3;width:100%;margin:0;justify-content:space-between;gap:.5rem}}"
+    },
+    {
+      "name": "Local Command Container",
+      "kind": "card",
+      "refersTo": "command",
+      "description": "Actual local-audit command block, not a generic marketing card.",
+      "html": "<div class=\"ds-command\"><p>With Python 3.11+ and pipx installed</p><pre><code>pipx install git+https://github.com/girnarholdings/TriDelPhi\ntridelphi audit ./your-project</code></pre><p>Works with source ZIP archives too.</p></div>",
+      "css": ".ds-command{border:1px solid var(--line,#3a506c);padding:1.5rem;background:var(--surface,#122440);min-width:0;font-family:var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);line-height:1.65}.ds-command p{font-size:.875rem;margin:0;color:var(--muted,#b7c8df);max-width:68ch;overflow-wrap:anywhere}.ds-command pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:1rem 0}.ds-command code{font-family:ui-monospace,\"SFMono-Regular\",Consolas,monospace;font-size:.95rem;color:var(--ink,#f6f8fc)}"
+    },
+    {
+      "name": "Manual Route Directory",
+      "kind": "custom",
+      "refersTo": "route-symbol",
+      "description": "Signature route including its actual SVG geometry, labels, action, requirements, and station hover/focus feedback.",
+      "html": "<article class=\"ds-route\" aria-labelledby=\"ds-manual-title\"><h3 id=\"ds-manual-title\"><span class=\"ds-route-symbol\" aria-hidden=\"true\">M</span><a href=\"https://tridelphi.com/setup.html\">Manual Setup Studio</a></h3><p>Add repeatable checks to your GitHub repository. Choose what to check, then review and commit the generated workflow.</p><svg class=\"ds-route-track\" viewBox=\"0 0 560 40\" aria-hidden=\"true\"><path d=\"M8 30H164L186 8H552\"/><circle cx=\"8\" cy=\"30\" r=\"5\"/><circle cx=\"280\" cy=\"8\" r=\"5\"/><circle cx=\"552\" cy=\"8\" r=\"5\"/></svg><ol class=\"ds-stations\" aria-label=\"Manual setup route\"><li>Choose checks</li><li>Review the file</li><li>Commit on GitHub</li></ol><a class=\"ds-manual-action\" href=\"https://tridelphi.com/setup.html\">Set up repository checks <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14m-6-6 6 6-6 6\"/></svg></a><p class=\"ds-requirement\">No sign-in to use the builder. GitHub access needed to commit.</p></article>",
+      "css": ".ds-route{padding:0 0 1.5rem;position:relative;font-family:var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);font-size:1rem;line-height:1.65;color:var(--ink,#f6f8fc)}.ds-route h3{display:flex;align-items:center;gap:.7rem;color:var(--manual,#f6c550);font-family:var(--display,Barlow,\"Arial Narrow\",sans-serif);font-weight:700;line-height:1.08;margin:0;text-wrap:balance;letter-spacing:-.015em;font-size:1.9rem;overflow-wrap:anywhere}.ds-route h3 a{color:inherit;text-decoration:none}.ds-route h3 a:hover{text-decoration:underline}.ds-route a:focus-visible{outline:3px solid var(--cloud,#64c5d7);outline-offset:5px}.ds-route-symbol{display:inline-grid;place-items:center;width:1.85rem;height:1.85rem;border:2px solid currentColor;border-radius:50%;font:700 .875rem/1 var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);flex:none}.ds-route>p{margin:.8rem 0;color:var(--muted,#b7c8df);font-size:.975rem;max-width:68ch;overflow-wrap:anywhere}.ds-route-track{display:block;width:100%;height:auto;margin:1rem 0 .3rem;fill:none;stroke:var(--manual,#f6c550);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;overflow:visible}.ds-route-track circle{fill:var(--bg,#0b1730);stroke:var(--ink,#f6f8fc);stroke-width:2;transition:fill .18s ease-out}.ds-route:focus-within .ds-route-track circle,.ds-route:hover .ds-route-track circle{fill:var(--manual,#f6c550)}.ds-stations{list-style:none;padding:0;margin:0 0 1.2rem;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));font-size:.875rem;line-height:1.4;gap:.5rem}.ds-stations li{min-width:0;overflow-wrap:anywhere}.ds-stations li:nth-child(2){text-align:center}.ds-stations li:last-child{text-align:right}.ds-route .ds-requirement{font-size:.875rem;margin:.7rem 0 0;line-height:1.5}.ds-manual-action{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.7rem 1rem;min-height:48px;background:var(--manual,#f6c550);color:var(--manual-ink,#17243b);text-decoration:none;font-family:var(--body,system-ui,-apple-system,\"Segoe UI\",sans-serif);font-size:1rem;line-height:1.65;font-weight:650;border-radius:3px}.ds-manual-action svg{width:1.4rem;height:1.4rem;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ds-manual-action:hover{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:.3em}.ds-manual-action:focus-visible{outline:3px solid var(--cloud,#64c5d7);outline-offset:5px}.ds-manual-action:active{transform:translateY(1px)}@media(prefers-reduced-motion:reduce){.ds-manual-action:active{transform:none}}@media(max-width:760px){.ds-route h3{font-size:1.8rem}}@media(prefers-reduced-motion:reduce){.ds-route-track circle{transition:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Transit Wayfinding",
+    "overview": "Transit wayfinding gives TriDelPhi a clear, practical identity: midnight signage, porcelain type, amber manual routes, and cyan cloud routes. Condensed headings and ordinary sentence-case explanations make a technical choice readable without theatrical security imagery.\n\nThe built world is flat and directional. Ruled divisions, station circles, and short angled tracks organize information; color identifies a destination rather than claiming a security result. This record covers the homepage and shared Manual Setup Studio chrome, with existing setup controls recorded as local variants—not a redesign mandate for the portal or cloudserver UI.",
+    "keyCharacteristics": [
+      "Condensed Barlow headings with system-sans reading text.",
+      "Amber manual identity and cyan cloud identity in both themes.",
+      "Flat ruled surfaces, circular stations, and restrained state feedback.",
+      "Existing setup controls retain their own geometry and focus treatment."
+    ],
+    "rules": [
+      {
+        "name": "Destination Color",
+        "body": "Amber identifies manual setup; cyan identifies cloud scanning. Neither route color is a safety verdict.",
+        "section": "colors"
+      },
+      {
+        "name": "Display Has a Job",
+        "body": "Use the bundled Barlow bold face for headings and the wordmark; keep explanations and controls in the surface’s system-sans stack.",
+        "section": "typography"
+      },
+      {
+        "name": "Flat Signage",
+        "body": "Use borders and tonal surfaces for separation; the shipped system has no box-shadow vocabulary.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do retain text labels alongside route color and station symbols.",
+      "Do keep requirements and limitations readable next to the action they qualify.",
+      "Do preserve both theme mappings and the surface-specific focus outlines.",
+      "Do retain the actual setup control geometry and generated-file review flow."
+    ],
+    "donts": [
+      "Don't turn the manual and cloud alternatives into consecutive steps.",
+      "Don't add glow, fake monitoring, city backdrops, or ornamental dashboards.",
+      "Don't promote retained setup-only styling into a universal homepage component.",
+      "Don't apply this record to the portal or cloudserver interface."
+    ]
+  }
+}

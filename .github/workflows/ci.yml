@@ -209,6 +209,8 @@ jobs:
       - name: Scan portal — login, authorization, billing and Codespaces boundaries
         working-directory: portal
         run: npm test
+      - name: Website — theme preferences and blocked-storage fallback
+        run: node --test tests/site-theme.test.mjs
 
   # A single check to require in branch protection. Adding a job above without
   # listing it here would silently widen what can merge, so it is spelled out.
