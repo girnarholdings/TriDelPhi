@@ -146,6 +146,7 @@ test("Codespaces creation is pinned and bounded, never requested target", async 
     idle_timeout_minutes: 5, retention_period_minutes: 60, display_name: "TriDelPhi security scan" });
   assert.equal((await f.request("/api/codespaces")).status, 200);
   assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+  assert.equal(f.calls.length, 8, "repeat needs only identity + installation, not three preflight calls");
 });
 
 test("concurrent workspace clicks create at most one workspace", async () => {
@@ -169,6 +170,7 @@ test("no automatic larger machine or missing creation confirmation", async () =>
   assert.equal((await f.request("/api/codespaces")).status, 409);
   const g = fixture();
   assert.equal((await g.request("/api/codespaces", { body: { acceptGitHubBilling: true } })).status, 400);
+  assert.equal(g.calls.length, 2, "missing confirmation must not run Codespaces preflight");
   assert.ok([...f.calls, ...g.calls].every(c => c.init.method !== "POST"));
 });
 
@@ -324,6 +326,7 @@ test("real storage object consumes records once and purges by alarm", async () =
     get: async k => data.get(k), put: async (k, v) => { data.set(k, v); },
     delete: async k => data.delete(k), deleteAll: async () => data.clear(),
     setAlarm: async time => { alarm = time; },
+    deleteAlarm: async () => { alarm = null; },
     transaction: async fn => fn(storage),
   };
   const object = new PortalState({ storage });
@@ -334,8 +337,44 @@ test("real storage object consumes records once and purges by alarm", async () =
   await call("put", session());
   assert.ok(alarm > Date.now());
   assert.equal((await (await call("take")).json()).token, token);
+  assert.equal(alarm, null);
   assert.equal(await (await call("take")).json(), null);
   await call("put", session());
   await object.alarm();
+  assert.equal((await (await call("get")).json()).token, token, "early alarm preserves live record");
+  data.set("record", { ...session(), expires: Date.now() - 1 });
+  await object.alarm();
   assert.equal(await (await call("get")).json(), null);
+  assert.equal(alarm, null);
+});
+
+test("logout revokes a pending OAuth callback, not only browser cookies", async () => {
+  const f = fixture();
+  const login = await f.request("/auth/login");
+  const id = new URL(login.headers.get("location")).searchParams.get("state");
+  const headers = { Cookie: `__Host-tridelphi-login=${id}; __Host-tridelphi-session=${sessionId}` };
+  assert.equal((await f.request("/auth/logout", { headers })).status, 200);
+  assert.equal(f.records.size, 0);
+  assert.equal((await f.request(`/auth/callback?state=${id}&code=late-code`, { headers })).status, 401);
+  assert.equal(f.calls.length, 0);
+});
+
+test("cached workspace never bypasses revocation or renewed consent", async () => {
+  const options = {};
+  const f = fixture(options);
+  assert.equal((await f.request("/api/codespaces")).status, 200);
+  assert.equal((await f.request("/api/codespaces", { body: { acceptGitHubBilling: true } })).status, 400);
+  options.suspended = true;
+  assert.equal((await f.request("/api/codespaces")).status, 403);
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+});
+
+test("empty Codespaces request is a client error, not an upstream failure", async () => {
+  const f = fixture();
+  const response = await f.worker.fetch(new Request(origin + "/api/codespaces", {
+    method: "POST", headers: { Origin: origin, "CF-Connecting-IP": "192.0.2.1",
+      Cookie: `__Host-tridelphi-session=${sessionId}`, "Content-Type": "application/json" },
+  }), f.env);
+  assert.equal(response.status, 400);
+  assert.equal(f.calls.length, 2);
 });

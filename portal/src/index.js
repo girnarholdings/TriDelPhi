@@ -41,7 +41,7 @@ function secure(response) {
 }
 
 async function boundedJson(response, max = 256 * 1024, client = false) {
-  if (!response.body) fail(502, "GitHub returned an empty response. Try again.");
+  if (!response.body) fail(client ? 400 : 502, client ? "Send a JSON request." : "GitHub returned an empty response. Try again.");
   const reader = response.body.getReader();
   let total = 0;
   const chunks = [];
@@ -84,6 +84,11 @@ async function state(env, id, op, record) {
     "https://state.internal/", { method: "POST", body: JSON.stringify({ op, record }) });
   if (!response.ok) fail(503, "Sign-in storage is unavailable. No scan was started.");
   return response.json();
+}
+
+function workspaceResult(record) {
+  if (record?.kind === "workspace") return json(record.result);
+  fail(409, "A workspace request is already in progress or its result is uncertain. Check github.com/codespaces before trying again. Creation is paused here for up to 30 minutes to avoid duplicates.");
 }
 
 function configured(env) {
@@ -213,6 +218,8 @@ export function createPortal(fetcher = fetch) {
       } else if (url.pathname === "/auth/logout" && request.method === "POST") {
         const id = getCookie(request, SESSION);
         if (HEX.test(id)) await state(env, id, "delete");
+        const loginId = getCookie(request, LOGIN);
+        if (HEX.test(loginId)) await state(env, loginId, "delete");
         response = json({ ok: true });
         response.headers.append("Set-Cookie", cookie(SESSION, "", 0));
         response.headers.append("Set-Cookie", cookie(LOGIN, "", 0));
@@ -236,9 +243,16 @@ export function createPortal(fetcher = fetch) {
           if (request.headers.get("content-type") !== "application/json") fail(415, "Send a JSON request.");
           const input = await boundedJson(request, 1024, true);
           if (input?.acceptGitHubBilling !== true) fail(400, "Acknowledge GitHub compute and storage billing before continuing.");
+          if (input.createWorkspace !== true) fail(400, "Confirm workspace creation to continue.");
           if (!REPO.test(env.SCANNER_REPO || "") || !SHA.test(env.SCANNER_REF || "")) {
             fail(503, "The trusted scanner release has not been configured yet.");
           }
+          const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`workspace:${user.id}`)));
+          const slot = [...digest].map(x => x.toString(16).padStart(2, "0")).join("");
+          const existing = await state(env, slot, "get");
+          // Identity and installation were revalidated above. Reuse only this
+          // user's result; do not repeat GitHub preflight for a locked request.
+          if (existing) return secure(workspaceResult(existing));
           const repo = await github(`/repos/${env.SCANNER_REPO}`, session.token, fetcher);
           if (repo.full_name?.toLowerCase() !== env.SCANNER_REPO.toLowerCase() ||
               !Number.isSafeInteger(repo.id) || repo.id <= 0 || repo.private !== false) fail(503, "The trusted scanner repository could not be verified.");
@@ -246,18 +260,14 @@ export function createPortal(fetcher = fetch) {
           if (defaults.billable_owner?.id !== user.id) {
             fail(403, "This Codespace would bill another account. Free TriDelPhi scans require your own GitHub compute.");
           }
-          if (input.createWorkspace !== true) fail(400, "Confirm workspace creation to continue.");
           const machines = await github(`/repos/${env.SCANNER_REPO}/codespaces/machines?ref=${env.SCANNER_REF}`, session.token, fetcher);
           const machine = Array.isArray(machines.machines) && machines.machines.find(m =>
             m.cpus === 2 && typeof m.name === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(m.name));
           if (!machine) fail(409, "A 2-core workspace is not available. We will not choose a larger machine. Try scanning locally.");
-          const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`workspace:${user.id}`)));
-          const slot = [...digest].map(x => x.toString(16).padStart(2, "0")).join("");
           const expires = Date.now() + 30 * 60_000;
           const reservation = await state(env, slot, "reserve", { kind: "creating", expires });
           if (!reservation.acquired) {
-            if (reservation.record?.kind === "workspace") return secure(json(reservation.record.result));
-            fail(409, "A workspace request is already in progress or its result is uncertain. Check github.com/codespaces before trying again. Creation is paused here for up to 30 minutes to avoid duplicates.");
+            return secure(workspaceResult(reservation.record));
           }
           // Never retry this POST: a timeout can still mean GitHub created it.
           try {

@@ -1,5 +1,37 @@
 # TriDelPhi deployment and GitHub publication handoff
 
+## Final workflow hardening — 2026-09-11
+
+Deployed version `11247069-1522-462a-a013-99754885c56d` at
+2026-09-11 11:05:32 UTC (deployment `29321efa-5300-4dcd-b500-dd61fb57f53f`).
+This supersedes older deployment receipts below. Existing assets, secret,
+Durable Object namespace, rate limit, compatibility date and disabled logging
+were retained. Paid scanning remains disabled; no paid services or real
+Codespaces were created.
+
+- Stale alarms preserve a newly reserved creation slot instead of deleting it.
+- Record writes and expiry changes are transactional; consumed records and
+  logout cancel obsolete alarms. Logout also invalidates pending OAuth state.
+- Duplicate creation requests revalidate identity/installation but reuse the
+  existing result without three unnecessary GitHub preflight calls.
+- Missing explicit creation consent stops before Codespaces preflight; an empty
+  request returns a client error.
+
+Validation: 48 Node frontend/unit tests plus two complete local workerd/SQLite
+flows passed (successful and uncertain creation). They cover initial install,
+fresh OAuth, replay rejection, concurrent requests, no automatic retry, App
+revocation, logout and stale alarms. All outbound requests are mocked.
+Wrangler dry-run passed. Live `/api/config` returned 200 and anonymous
+`/api/session` returned 401 with security headers. Public assets were checked
+against local hashes after deployment.
+
+To repeat: `npm test --prefix portal`; then `npm ci --prefix bot` and
+`npm run test:runtime --prefix portal`. For dependencies in another checkout,
+set `PORTAL_TEST_PACKAGE_JSON` to that checkout's absolute `bot/package.json`.
+The runtime harness has no real GitHub credentials and rejects unexpected
+outbound requests. Live authenticated creation still requires separate owner
+authorization because GitHub cannot guarantee zero charges.
+
 ## Current flow update — user-confirmed creation (2026-09-10)
 
 This section supersedes earlier manual-handoff descriptions below. The owner
