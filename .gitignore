@@ -30,3 +30,9 @@ tridelphi.sarif
 .cursor/agents/impeccable-*.md
 .cursor/hooks.json
 node_modules/
+
+# Local design review sessions and captures; durable briefs/config stay tracked.
+.impeccable/questions/
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/direction-options.json

@@ -209,6 +209,8 @@ jobs:
       - name: Scan portal — login, authorization, billing and Codespaces boundaries
         working-directory: portal
         run: npm test
+      - name: Website — theme preferences and blocked-storage fallback
+        run: node --test tests/site-theme.test.mjs
       - name: Install pinned local Workers test runtime (no lifecycle scripts)
         working-directory: bot
         run: npm ci --ignore-scripts
