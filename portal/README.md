@@ -1,5 +1,34 @@
 # GitHub App scan portal
 
+## Current behavior — 2026-09-10
+
+The portal now **creates** the trusted Codespace after explicit visitor
+confirmation, instead of returning GitHub's manual creation form. The owner
+approved this product policy; it is not approval to incur operator charges or
+create a live test machine. Cloud and local scanning are alternatives; the cloud
+path has two steps: connect GitHub, then create a workspace.
+
+The server selects only a GitHub-reported 2-core machine, pins the trusted ref
+and devcontainer, checks the own-account payer, opts out of additional repository
+permissions, requests 5-minute idle shutdown and deletion 60 minutes after stop,
+and validates the returned workspace URL. A 30-minute per-user transactional
+reservation prevents concurrent/replayed creation. Uncertain outcomes stay
+locked and are never retried automatically. No unrelated workspace is deleted.
+Users must save their report before cleanup. Tokens and short-lived workspace
+links stay server-side; source still goes directly into the user's Codespace.
+
+GitHub Free personal accounts include 120 core-hours (60 running hours at 2 cores)
+and 15 GB-month storage, shared with other Codespaces. There is no documented
+free-only creation flag; the page states the conditional allowance and uses a
+concise creation/billing confirmation. Local scanning avoids cloud compute costs.
+Full sources, safeguards and unresolved live checks: [Codespaces research](../docs/CODESPACES_RESEARCH.md).
+
+**Earlier manual-handoff descriptions below are historical deployment context,
+not the current creation endpoint contract.** The App configuration and privacy
+rules remain applicable. Current tests: 45 frontend/unit + 5 workerd = 50 passing.
+Static localhost previews never call production APIs or create compute; they
+show a preview notice and link to the live portal for sign-in.
+
 Deployment rails for a separate scan subdomain. Keep the main static website on
 its existing host; **do not route source uploads, credentials or scan jobs through cPanel**.
 This Worker handles authentication and eligibility metadata, not scanning compute.
@@ -10,8 +39,10 @@ Cloudflare **scan compute** is reserved for the future paid tier.
 `https://scan.tridelphi.com/auth/callback`. The existing homepage at
 `https://tridelphi.com` remains on its current host (currently reported as GitHub
 Pages). App identity is configured and GitHub connector write access works.
-Deployment is on hold pending Cloudflare account/zone and billing verification,
-the App secret, and live acceptance checks.
+The portal is deployed on the owner-confirmed Workers Free account and its
+Cloudflare zone is active. The owner added `GITHUB_CLIENT_SECRET` directly to the
+Worker. The callback runtime fix is deployed; **a fresh real-user sign-in and
+the remaining live acceptance checks are still required before launch.**
 Follow [the deployment handoff](../docs/DEPLOYMENT_HANDOFF.md).
 
 **Operator rule:** never spend money on Cloudflare or any other service without
@@ -60,6 +91,11 @@ App; **do not create a duplicate**.
 
 1. Choose a unique App name. Set its homepage to your TriDelPhi website.
 2. Set **Callback URL** to `https://scan.tridelphi.com/auth/callback`.
+   Set **Post installation → Setup URL** to
+   `https://scan.tridelphi.com/auth/installed` and enable **Redirect on update**.
+   Leave **Request user authorization (OAuth) during installation** unchecked:
+   the portal starts its own browser-bound PKCE flow after installation instead.
+   GitHub's install-initiated OAuth does not supply the portal's PKCE/state pair.
 3. Keep user access token expiration enabled. Do not enable device flow.
 4. Disable webhooks for this portal-only App; no events are required. The
    existing `bot/` webhook receiver is independent and unchanged.
@@ -76,6 +112,16 @@ App; **do not create a duplicate**.
    **Client Secret** using Wrangler's secret input, never chat, Git or browser JS.
    This flow does not need the App's private key.
 
+Visitors may start with **Sign in with GitHub**. If GitHub verifies their identity
+but no active App installation is accessible, the callback automatically sends
+them to the fixed App installation URL. It clears old session/login cookies and
+does not retain the new token. After installation, the Setup URL starts fresh
+OAuth and rechecks installation before granting a session. Installation query
+parameters never prove identity or grant access. Protected API routes still deny
+missing/suspended installations; they never redirect API requests to GitHub.
+Until the owner configures the Setup URL, users must return to the portal and
+click Sign in after installation. No App settings are changed by Worker deploys.
+
 GitHub references:
 - [GitHub App user authorization and PKCE](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Codespaces REST permissions and billable-owner preflight](https://docs.github.com/en/rest/codespaces/codespaces)
@@ -84,7 +130,12 @@ GitHub references:
 
 ## Configure and deploy later
 
-Tests have no npm dependencies: `cd portal && npm test` with Node 22 or newer.
+Unit tests have no npm dependencies: `cd portal && npm test` with Node 22 or newer.
+Also run the real Workers runtime regression suite (all GitHub traffic is mocked):
+`cd bot && npm ci --ignore-scripts && node --test test/portal-runtime.test.mjs`.
+Its Miniflare/esbuild runtime is supplied by the locked Wrangler toolchain.
+Unlike Node's fetch, Workers rejects `redirect: "error"`; outbound requests must
+use `manual` and reject non-2xx responses without forwarding credentials.
 Use the repository's pinned Wrangler tooling from `bot/`:
 
 ```bash
@@ -116,8 +167,10 @@ Confirm GitHub honors the pinned ref/devcontainer link parameters, and that a
 clean Codespace runs the audit command. Unit tests mock GitHub and cannot prove
 live provider behavior. Native Windows/Linux CI is separate from local macOS tests.
 
-No Cloudflare account, App secret, DNS, payment setup or live deployment was
-created by this change. The GitHub App was created separately by the owner.
+The existing Cloudflare account and GitHub App were created by the owner. On
+2026-09-10 the portal Worker was deployed and only `scan.tridelphi.com` was
+attached. The owner subsequently added the App secret directly in Cloudflare.
+No payment setup, paid backend or Codespace was created.
 Keep the scan link off the main website until staging
 passes. Do not send secrets to cPanel or enable request-body logging there.
 

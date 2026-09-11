@@ -21,6 +21,11 @@ function fixture(options = {}) {
       idFromName: id => id,
       get: id => ({ fetch: async (_url, init) => {
         const { op, record } = JSON.parse(init.body);
+        if (op === "reserve") {
+          const previous = records.get(id);
+          if (previous?.expires > Date.now()) return Response.json({ acquired: false, record: previous });
+          records.set(id, record); return Response.json({ acquired: true });
+        }
         if (op === "put") { records.set(id, record); return Response.json({ ok: true }); }
         if (op === "delete") { records.delete(id); return Response.json({ ok: true }); }
         const value = records.get(id);
@@ -32,7 +37,7 @@ function fixture(options = {}) {
   };
   const fetcher = async (url, init) => {
     calls.push({ url, init });
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     if (url === "https://github.com/login/oauth/access_token") {
       return Response.json({ access_token: options.pat ? "ghp_notAnAppUserToken" : token, expires_in: 3600 });
     }
@@ -41,6 +46,13 @@ function fixture(options = {}) {
     if (options.revoked) return new Response("sensitive GitHub detail", { status: 401 });
     if (options.oversized) return new Response("x".repeat(300 * 1024));
     const path = new URL(url).pathname;
+    if (path.endsWith("/codespaces/machines")) return Response.json({ machines: [{ name: "basicLinux", cpus: options.noSmall ? 4 : 2 }] });
+    if (path === "/repos/girnarholdings/TriDelPhi/codespaces") {
+      if (options.createTimeout) throw new Error("timeout");
+      return Response.json({ owner: { id: 7 }, billable_owner: { id: options.createWrongPayer ? 99 : 7 },
+        repository: { id: 1234 }, machine: { cpus: 2 }, name: "tridelphi-test-space",
+        web_url: options.evilUrl ? "https://evil.test/" : "https://tridelphi-test-space.github.dev/" }, { status: 201 });
+    }
     if (path === "/user") return Response.json({ id: options.userId ?? 7, login: "builder" });
     if (path === "/user/installations") return Response.json({ installations: options.noInstall ? [] : [
       { app_id: options.wrongApp ? 456 : 123, suspended_at: options.suspended ? "today" : null },
@@ -64,7 +76,7 @@ function fixture(options = {}) {
       ...opts.headers,
     };
     return worker.fetch(new Request(origin + path, { method, headers,
-      ...(method === "POST" ? { body: JSON.stringify(opts.body ?? { acceptGitHubBilling: true }) } : {}) }), env);
+      ...(method === "POST" ? { body: JSON.stringify(opts.body ?? { acceptGitHubBilling: true, createWorkspace: true }) } : {}) }), env);
   };
   return { env, request, worker, records, calls };
 }
@@ -118,19 +130,48 @@ for (const options of [{ noInstall: true }, { wrongApp: true }, { suspended: tru
   });
 }
 
-test("Codespaces handoff is pinned to trusted scanner, never requested target", async () => {
+test("Codespaces creation is pinned and bounded, never requested target", async () => {
   const f = fixture();
   const response = await f.request("/api/codespaces", { body: {
-    acceptGitHubBilling: true, repo: "attacker/evil", ref: "evil", returnTo: "https://evil.test",
+    acceptGitHubBilling: true, createWorkspace: true, repo: "attacker/evil", ref: "evil", returnTo: "https://evil.test",
   } });
   assert.equal(response.status, 200);
   const url = new URL((await response.json()).url);
-  assert.equal(url.origin, "https://github.com");
-  assert.equal(url.pathname, "/codespaces/new");
-  assert.equal(url.searchParams.get("repo"), "1234");
-  assert.equal(url.searchParams.get("ref"), f.env.SCANNER_REF);
-  assert.equal(url.searchParams.get("devcontainer_path"), ".devcontainer/scan/devcontainer.json");
-  assert.ok(f.calls.every(c => !c.init.method || c.init.method === "GET"));
+  assert.equal(url.href, "https://tridelphi-test-space.github.dev/");
+  const writes = f.calls.filter(c => c.init.method === "POST");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].url, "https://api.github.com/repos/girnarholdings/TriDelPhi/codespaces");
+  assert.deepEqual(JSON.parse(writes[0].init.body), { ref: f.env.SCANNER_REF, machine: "basicLinux",
+    devcontainer_path: ".devcontainer/scan/devcontainer.json", multi_repo_permissions_opt_out: true,
+    idle_timeout_minutes: 5, retention_period_minutes: 60, display_name: "TriDelPhi security scan" });
+  assert.equal((await f.request("/api/codespaces")).status, 200);
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+  assert.equal(f.calls.length, 8, "repeat needs only identity + installation, not three preflight calls");
+});
+
+test("concurrent workspace clicks create at most one workspace", async () => {
+  const f = fixture();
+  const responses = await Promise.all([f.request("/api/codespaces"), f.request("/api/codespaces")]);
+  assert.ok(responses.every(r => [200, 409].includes(r.status)));
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+});
+for (const options of [{ createTimeout: true }, { createWrongPayer: true }, { evilUrl: true }]) {
+  test(`uncertain creation stays locked and never automatically retries: ${JSON.stringify(options)}`, async () => {
+    const f = fixture(options);
+    const response = await f.request("/api/codespaces");
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /may already exist/);
+    assert.equal((await f.request("/api/codespaces")).status, 409);
+    assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+  });
+}
+test("no automatic larger machine or missing creation confirmation", async () => {
+  const f = fixture({ noSmall: true });
+  assert.equal((await f.request("/api/codespaces")).status, 409);
+  const g = fixture();
+  assert.equal((await g.request("/api/codespaces", { body: { acceptGitHubBilling: true } })).status, 400);
+  assert.equal(g.calls.length, 2, "missing confirmation must not run Codespaces preflight");
+  assert.ok([...f.calls, ...g.calls].every(c => c.init.method !== "POST"));
 });
 
 for (const options of [{ otherPayer: true }, { codespacesDenied: true }]) {
@@ -200,6 +241,35 @@ test("OAuth exchange cannot substitute a PAT for App authorization", async () =>
   assert.equal(f.calls.length, 1);
 });
 
+for (const options of [{ noInstall: true }, { wrongApp: true }, { suspended: true }]) {
+  test(`OAuth prompts installation without granting access: ${JSON.stringify(options)}`, async () => {
+    const f = fixture(options);
+    const login = await f.request("/auth/login");
+    const id = new URL(login.headers.get("location")).searchParams.get("state");
+    const path = `/auth/callback?state=${id}&code=code&returnTo=https://evil.test`;
+    const headers = { Cookie: `__Host-tridelphi-login=${id}; __Host-tridelphi-session=${sessionId}` };
+    const response = await f.request(path, { headers });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), "https://github.com/apps/tridelphi-test/installations/new");
+    assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(f.records.size, 0);
+    assert.ok(!response.headers.get("set-cookie").includes(token));
+    assert.equal((await f.request(path, { headers })).status, 401);
+    assert.equal((await f.request("/api/session")).status, 401);
+  });
+}
+
+test("installation return ignores forged IDs and starts a fresh login, not a session", async () => {
+  const f = fixture();
+  const response = await f.request("/auth/installed?installation_id=123&setup_action=install&returnTo=https://evil.test", { auth: false });
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("location"), origin + "/auth/login");
+  assert.equal(response.headers.get("set-cookie"), null);
+  assert.equal(f.calls.length, 0);
+  assert.equal((await f.request("/api/session", { auth: false })).status, 401);
+  assert.equal((await f.request("/auth/installed", { method: "POST" })).status, 404);
+});
+
 test("oversized metadata refused", async () => {
   const f = fixture();
   assert.equal((await f.request("/api/codespaces", { body: { junk: "x".repeat(2048) } })).status, 413);
@@ -256,6 +326,7 @@ test("real storage object consumes records once and purges by alarm", async () =
     get: async k => data.get(k), put: async (k, v) => { data.set(k, v); },
     delete: async k => data.delete(k), deleteAll: async () => data.clear(),
     setAlarm: async time => { alarm = time; },
+    deleteAlarm: async () => { alarm = null; },
     transaction: async fn => fn(storage),
   };
   const object = new PortalState({ storage });
@@ -266,8 +337,44 @@ test("real storage object consumes records once and purges by alarm", async () =
   await call("put", session());
   assert.ok(alarm > Date.now());
   assert.equal((await (await call("take")).json()).token, token);
+  assert.equal(alarm, null);
   assert.equal(await (await call("take")).json(), null);
   await call("put", session());
   await object.alarm();
+  assert.equal((await (await call("get")).json()).token, token, "early alarm preserves live record");
+  data.set("record", { ...session(), expires: Date.now() - 1 });
+  await object.alarm();
   assert.equal(await (await call("get")).json(), null);
+  assert.equal(alarm, null);
+});
+
+test("logout revokes a pending OAuth callback, not only browser cookies", async () => {
+  const f = fixture();
+  const login = await f.request("/auth/login");
+  const id = new URL(login.headers.get("location")).searchParams.get("state");
+  const headers = { Cookie: `__Host-tridelphi-login=${id}; __Host-tridelphi-session=${sessionId}` };
+  assert.equal((await f.request("/auth/logout", { headers })).status, 200);
+  assert.equal(f.records.size, 0);
+  assert.equal((await f.request(`/auth/callback?state=${id}&code=late-code`, { headers })).status, 401);
+  assert.equal(f.calls.length, 0);
+});
+
+test("cached workspace never bypasses revocation or renewed consent", async () => {
+  const options = {};
+  const f = fixture(options);
+  assert.equal((await f.request("/api/codespaces")).status, 200);
+  assert.equal((await f.request("/api/codespaces", { body: { acceptGitHubBilling: true } })).status, 400);
+  options.suspended = true;
+  assert.equal((await f.request("/api/codespaces")).status, 403);
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+});
+
+test("empty Codespaces request is a client error, not an upstream failure", async () => {
+  const f = fixture();
+  const response = await f.worker.fetch(new Request(origin + "/api/codespaces", {
+    method: "POST", headers: { Origin: origin, "CF-Connecting-IP": "192.0.2.1",
+      Cookie: `__Host-tridelphi-session=${sessionId}`, "Content-Type": "application/json" },
+  }), f.env);
+  assert.equal(response.status, 400);
+  assert.equal(f.calls.length, 2);
 });
