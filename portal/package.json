@@ -2,5 +2,8 @@
   "name": "tridelphi-scan-portal",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test test/*.test.mjs" }
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:runtime": "node --test test/runtime.mjs"
+  }
 }
