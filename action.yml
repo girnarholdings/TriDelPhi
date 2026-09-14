@@ -201,7 +201,7 @@ runs:
     # Security tab tracks the default branch.
     - name: Upload to code scanning
       if: ${{ always() && steps.scan.outputs.sarif_ready == 'true' && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
-      uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       with:
         sarif_file: ${{ runner.temp }}/tridelphi.sarif
         category: tridelphi
@@ -241,7 +241,7 @@ runs:
 
     - name: Upload exposure audit to code scanning
       if: ${{ inputs.expose == 'true' && always() && steps.exposure.outputs.sarif_ready == 'true' && (github.event_name != 'pull_request' || inputs.pr-annotations == 'true') }}
-      uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       with:
         sarif_file: ${{ runner.temp }}/tridelphi-expose.sarif
         category: tridelphi-expose
