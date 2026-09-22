@@ -49,6 +49,8 @@ function fixture(options = {}) {
     if (path.endsWith("/codespaces/machines")) return Response.json({ machines: [{ name: "basicLinux", cpus: options.noSmall ? 4 : 2 }] });
     if (path === "/repos/girnarholdings/TriDelPhi/codespaces") {
       if (options.createTimeout) throw new Error("timeout");
+      if (options.createDenied) return new Response(null, { status: 403 });
+      if (options.createUpstreamError) return new Response(null, { status: 502 });
       return Response.json({ owner: { id: 7 }, billable_owner: { id: options.createWrongPayer ? 99 : 7 },
         repository: { id: 1234 }, machine: { cpus: 2 }, name: "tridelphi-test-space",
         web_url: options.evilUrl ? "https://evil.test/" : "https://tridelphi-test-space.github.dev/" }, { status: 201 });
@@ -165,6 +167,21 @@ for (const options of [{ createTimeout: true }, { createWrongPayer: true }, { ev
     assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
   });
 }
+test("a definitive GitHub refusal releases the creation lock instead of pausing 30 minutes", async () => {
+  const f = fixture({ createDenied: true });
+  const first = await f.request("/api/codespaces");
+  assert.equal(first.status, 403);
+  assert.match((await first.json()).error, /nothing was created/);
+  // Not 409: the slot was released, so the next attempt runs preflight and POSTs again.
+  assert.equal((await f.request("/api/codespaces")).status, 403);
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 2);
+});
+test("an upstream 5xx on creation is uncertain and stays locked", async () => {
+  const f = fixture({ createUpstreamError: true });
+  assert.equal((await f.request("/api/codespaces")).status, 503);
+  assert.equal((await f.request("/api/codespaces")).status, 409);
+  assert.equal(f.calls.filter(c => c.init.method === "POST").length, 1);
+});
 test("no automatic larger machine or missing creation confirmation", async () => {
   const f = fixture({ noSmall: true });
   assert.equal((await f.request("/api/codespaces")).status, 409);
