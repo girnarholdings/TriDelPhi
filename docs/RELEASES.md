@@ -86,7 +86,7 @@ gate.
   fails after the lock is armed; no remote ownership or tag-resolution claim
 
 ```yaml
-- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1
+- uses: girnarholdings/TriDelPhi@b7d5f909aab5ae8a118a0e43c7302859d3f1bca9 # v3.2.0
   with: { level: '7' }
 ```
 
@@ -144,7 +144,7 @@ In CI, add `expose: 'true'` to the action to also audit the checkout (advisory �
 the Security tab, never fails the build). `privatize` is deliberately not in the action.
 
 ```yaml
-- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1
+- uses: girnarholdings/TriDelPhi@b7d5f909aab5ae8a118a0e43c7302859d3f1bca9 # v3.2.0
   with: { level: '7', expose: 'true' }
 ```
 
@@ -178,7 +178,7 @@ be a default-branch commit carrying the current security posture.
 To cut a release:
 
 1. Merge the release commit to `main`.
-2. Tag it: `git tag -a v3.1.1 -m "…" <sha> && git push origin v3.1.1`.
+2. Tag it: `git tag -a v3.2.0 -m "…" <sha> && git push origin v3.2.0`.
 3. Set `ACTION_SHA` to that commit and `ACTION_TAG` to that tag.
 4. Run `pytest tests/test_release_pin.py` — it rewrites nothing, it only tells
    you which surface you forgot.

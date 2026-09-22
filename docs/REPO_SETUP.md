@@ -88,7 +88,7 @@ That drift is exactly how every `uses:` line in the repo came to advertise a pin
 that 404s.
 
 What we advertise now is a **commit SHA with the version in a trailing comment**
-— `- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1` —
+— `- uses: girnarholdings/TriDelPhi@b7d5f909aab5ae8a118a0e43c7302859d3f1bca9 # v3.2.0` —
 generated from `tridelphi/release.py` and enforced by `tests/test_release_pin.py`.
 A SHA resolves immediately, needs no tag to exist first, and cannot be repointed
 at code the user never agreed to run. The full runbook, including when to switch

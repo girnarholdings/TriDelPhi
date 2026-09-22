@@ -41,8 +41,8 @@ ACTION_REPO = "girnarholdings/TriDelPhi"
 # release tag. (`v3.1.0` is commit 04bc341, which predates the August 2026
 # remediation of the fix-bot authorization bypass; pinning users to it would
 # hand them the vulnerable bot.)
-ACTION_SHA = "d5c01388c21de9c1d12159087890d12d2d917990"
-ACTION_TAG = "v3.1.1"
+ACTION_SHA = "b7d5f909aab5ae8a118a0e43c7302859d3f1bca9"
+ACTION_TAG = "v3.2.0"
 
 # `tridelphi` is not on PyPI yet, so the short install line is aspirational and
 # the git URL is the one that actually works. Flip this at first publish.
