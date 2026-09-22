@@ -35,9 +35,11 @@ tridelphi audit ./your-project --format json
 
 This reads a directory or safely extracts a source archive. It does not install
 target dependencies, execute target code, or run the optional external scanner
-ladder. Exit codes: 0 means no warnings/critical findings in the selected checks,
-1 means review findings, and 2 means incomplete coverage or a scan error.
-None of these results certifies that a project is safe.
+ladder. Exit codes match every other command: 0 means nothing at or above the
+threshold, 1 means a finding at or above `--fail-on` (default `critical`; pass
+`--fail-on warning` to be stricter), and 2 means incomplete coverage or a scan
+error, which is never a pass. None of these results certifies that a project is
+safe.
 
 **Online scan access (deployment rails, not a live service):** the
 [scan portal](portal/README.md) requires GitHub App sign-in and installation.
@@ -838,7 +840,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1   # the whole ladder, one line
+      - uses: girnarholdings/TriDelPhi@b7d5f909aab5ae8a118a0e43c7302859d3f1bca9 # v3.2.0   # the whole ladder, one line
         with: { level: '3' }
 ```
 

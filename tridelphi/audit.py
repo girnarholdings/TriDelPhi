@@ -73,6 +73,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run all three native TriDelPhi static checks offline.")
     parser.add_argument("target", nargs="?", default=".", help="directory or ZIP/library archive")
     parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument(
+        "--fail-on", choices=("critical", "warning", "none"), default="critical",
+        help=(
+            "exit 1 when a finding at or above this level exists (default: critical, "
+            "the same threshold as every other tridelphi command; 'warning' is stricter; "
+            "'none' never fails on findings — an incomplete scan still exits 2)"
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         target = Path(args.target)
@@ -106,9 +114,19 @@ def main(argv: list[str] | None = None) -> int:
                         f"{finding['message']}\nWhat to do: {finding['fix']}"))
         if not report["complete"]:
             print("\nSome checks hit limits or could not read files. Use --format json for coverage details.")
+    # Exit codes follow the rest of the tool: an incomplete scan is 2 regardless of
+    # threshold (unknown is never a pass), and findings gate at --fail-on. The old
+    # behaviour gated on warnings unconditionally, so the Homebrew-style
+    # `curl | bash` line in a README turned the beginner door red while `scan`
+    # on the same tree stayed green.
     if not report["complete"]:
         return 2
-    return 1 if report["counts"]["critical"] or report["counts"]["warning"] else 0
+    counts = report["counts"]
+    if args.fail_on == "none":
+        return 0
+    if counts["critical"] or (args.fail_on == "warning" and counts["warning"]):
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

