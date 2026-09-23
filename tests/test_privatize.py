@@ -365,10 +365,50 @@ def test_only_dedicated_non_writable_obfuscator_install_is_accepted(tmp_path, mo
     assert got is None or got != [str(safe_bin)]
 
 
+def test_obfuscator_in_a_directory_another_account_owns_is_refused(tmp_path, monkeypatch):
+    """Mode bits alone vouch for nothing: another account can create
+    `/tmp/tridelphi-privatize` first, as `0755`, and still swap what is in it."""
+    import os
+
+    from tridelphi import privatize
+
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    install = tmp_path / "tridelphi-privatize"
+    entry = install / "node_modules" / ".bin" / "javascript-obfuscator"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/bin/sh\n")
+    entry.chmod(0o755)
+    assert privatize._find_obfuscator(tmp_path) == [str(entry)]
+
+    if os.geteuid() == 0:
+        os.chown(install, 4242, 4242)
+    else:
+        monkeypatch.setattr(privatize.os, "geteuid", lambda: os.getuid() + 1)
+    assert privatize._find_obfuscator(tmp_path) is None
+    ok, why = privatize._default_obfuscate(tmp_path / "dist", tmp_path / "out")
+    assert not ok and "another account" in why
+
+
+def test_home_install_from_the_setup_scripts_is_found(tmp_path, monkeypatch):
+    """.devcontainer/setup.sh and .cursor/install.sh install into
+    ~/.tridelphi-privatize, where privatize never looked."""
+    from tridelphi.privatize import _find_obfuscator
+
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    entry = tmp_path / ".tridelphi-privatize" / "node_modules" / ".bin" / "javascript-obfuscator"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/bin/sh\n")
+    entry.chmod(0o755)
+    assert _find_obfuscator(tmp_path / "project") == [str(entry)]
+
+
 def test_project_local_obfuscator_is_never_executed(tmp_path, monkeypatch):
     from tridelphi.privatize import _find_obfuscator
 
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "empty-runtime"))
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
     local = tmp_path / "project" / "node_modules" / ".bin" / "javascript-obfuscator"
     local.parent.mkdir(parents=True)
     local.write_text("#!/bin/sh\necho hostile\n", encoding="utf-8")
@@ -383,13 +423,10 @@ def test_project_local_obfuscator_is_never_executed(tmp_path, monkeypatch):
 
 
 def _real_obfuscator() -> str | None:
-    import os
+    from tridelphi.privatize import _find_obfuscator
 
-    dest = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "tridelphi-privatize"
-    bin_ = dest / "node_modules" / ".bin" / "javascript-obfuscator"
-    if bin_.is_file():
-        return str(bin_)
-    return shutil.which("javascript-obfuscator")
+    found = _find_obfuscator(Path("."))
+    return found[0] if found else None
 
 
 @pytest.mark.skipif(_real_obfuscator() is None, reason="javascript-obfuscator not installed")
