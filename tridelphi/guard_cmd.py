@@ -118,7 +118,16 @@ _OPTIONAL_TOOLS: tuple[tuple[str, str, str], ...] = (
 def _missing_tools() -> list[tuple[str, str, str]]:
     import shutil
 
-    return [t for t in _OPTIONAL_TOOLS if shutil.which(t[0]) is None]
+    from .privatize import _find_obfuscator
+
+    def present(name: str, kind: str) -> bool:
+        # privatize never runs an obfuscator from PATH, only from its own
+        # install directory — so that is the one place worth reporting on.
+        if kind == "privatize":
+            return _find_obfuscator(Path(".")) is not None
+        return shutil.which(name) is not None
+
+    return [t for t in _OPTIONAL_TOOLS if not present(t[0], t[2])]
 
 
 def _offer_missing_tools(

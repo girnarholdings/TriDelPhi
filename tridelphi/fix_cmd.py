@@ -21,6 +21,7 @@ from typing import TextIO
 
 from .api import AnalysisError, analyze
 from .model import Finding
+from .reportutil import md_escape
 from .severity import SEVERITY_ORDER as _SEVERITY_RANK
 
 __all__ = ["run_fix"]
@@ -134,9 +135,14 @@ def _render_text(findings: list[Finding], repo: str, out: TextIO) -> None:
     )
 
 
+def _code(text: str) -> str:
+    """An inline code span for a repo-chosen name: a backtick would end it early."""
+    return "`" + " ".join(text.replace("`", "").split()) + "`"
+
+
 def _render_markdown(findings: list[Finding], repo: str, out: TextIO) -> None:
     n = len(findings)
-    print(f"# TriDelPhi fix plan — {repo}", file=out)
+    print(f"# TriDelPhi fix plan — {md_escape(repo)}", file=out)
     if not n:
         print(
             "\n✅ **Nothing to fix.** No job holds untrusted input, privilege and "
@@ -154,7 +160,7 @@ def _render_markdown(findings: list[Finding], repo: str, out: TextIO) -> None:
         rem = finding.remediation
         strip = f"strip&nbsp;{rem.strip}" if rem else "review"
         print(f"### {i}. {strip} · {label}", file=out)
-        print(f"`{_location(finding)}` — job `{finding.context.job_id}`\n", file=out)
+        print(f"{_code(_location(finding))} — job {_code(finding.context.job_id)}\n", file=out)
         if rem:
             for seg in _md_segments(rem.rendered):
                 print(seg + "\n", file=out)

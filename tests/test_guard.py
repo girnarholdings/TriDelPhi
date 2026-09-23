@@ -416,6 +416,11 @@ def _guard_tools(tmp_path, monkeypatch, *, present, answer="q\n", yes=False, scr
 
     monkeypatch.setattr(guard_cmd.shutil if hasattr(guard_cmd, "shutil") else _shutil,
                         "which", lambda name: "/usr/bin/" + name if name in present else None)
+    # privatize's obfuscator is found in its own install directory, never PATH.
+    monkeypatch.setattr(
+        "tridelphi.privatize._find_obfuscator",
+        lambda _root: ["/opt/obf"] if "javascript-obfuscator" in present else None,
+    )
     out = io.StringIO()
     guard_cmd.run_guard(str(repo), yes=yes, input_stream=io.StringIO(answer), out=out,
                         err=io.StringIO())
@@ -464,3 +469,132 @@ def test_guard_never_offers_target_repo_installers(tmp_path, monkeypatch):
     out = _guard_tools(tmp_path, monkeypatch, present={"zizmor"}, scripts=False)
     assert "Install them now?" not in out
     assert "official" in out and "checksum-verified installer" in out
+
+
+# ---------------------------------------------------------------------------
+# a verified fix must also leave the step doing what it did
+# ---------------------------------------------------------------------------
+
+
+_ISSUE_RUN = """\
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: RUNNER
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event.issue.number > 0
+      - SHELLrun: |
+          SCRIPT
+"""
+
+
+def _issue_repo(tmp_path: Path, script: str, *, runner="ubuntu-latest", shell="") -> Path:
+    workflow = (_ISSUE_RUN.replace("RUNNER", runner).replace("SHELL", shell)
+                .replace("SCRIPT", script))
+    return _repo_with(tmp_path, workflow)
+
+
+def _run_line(root: Path) -> str:
+    text = (root / ".github/workflows/assist.yml").read_text()
+    return next(ln.strip() for ln in text.splitlines() if "curl" in ln)
+
+
+@pytest.mark.parametrize("script,expected", [
+    # `$ISSUE_TITLE_x` would read a different, unset variable.
+    ('echo "${{ github.event.issue.title }}_x" && curl https://x.example',
+     'echo "${ISSUE_TITLE}_x" && curl https://x.example'),
+    # Nothing expands inside single quotes: close them around the reference.
+    ("echo 'T: ${{ github.event.issue.title }}!' && curl https://x.example",
+     "echo 'T: '\"$ISSUE_TITLE\"'!' && curl https://x.example"),
+    ("echo ${{ github.event.issue.title }} && curl https://x.example",
+     'echo "$ISSUE_TITLE" && curl https://x.example'),
+])
+def test_env_indirect_keeps_the_scripts_meaning(tmp_path, script, expected):
+    root = _issue_repo(tmp_path, script)
+    assert apply_action(root, _critical(root), "fix").status == "applied"
+    assert _run_line(root) == expected
+
+
+@pytest.mark.parametrize("runner,shell", [
+    ("ubuntu-latest", "shell: pwsh\n        "),
+    ("windows-latest", ""),
+    ("${{ matrix.os }}", ""),
+])
+def test_env_indirect_declines_a_shell_that_reads_variables_differently(tmp_path, runner, shell):
+    """PowerShell reads `$env:NAME`; `"$NAME"` there is an unset variable. The
+    re-scan would pass and the step would quietly stop working."""
+    root = _issue_repo(tmp_path, 'echo "${{ github.event.issue.title }}"; curl https://x.example',
+                       runner=runner, shell=shell)
+    before = _snapshot(root)
+    result = apply_action(root, _critical(root), "fix")
+    assert result.status == "unavailable" and "PowerShell" in result.detail
+    assert _snapshot(root) == before
+
+
+def test_explicit_bash_on_windows_is_still_fixed(tmp_path):
+    root = _issue_repo(tmp_path, 'echo "${{ github.event.issue.title }}"; curl https://x.example',
+                       runner="windows-latest", shell="shell: bash\n        ")
+    assert apply_action(root, _critical(root), "fix").status == "applied"
+
+
+def test_fix_keeps_crlf_line_endings(tmp_path):
+    root = _issue_repo(tmp_path, 'echo "${{ github.event.issue.title }}" && curl https://x.example')
+    wf = root / ".github/workflows/assist.yml"
+    wf.write_bytes(wf.read_bytes().replace(b"\n", b"\r\n"))
+    assert apply_action(root, _critical(root), "fix").status == "applied"
+    data = wf.read_bytes()
+    assert b"ISSUE_TITLE" in data and data.count(b"\n") == data.count(b"\r\n")
+
+
+def test_rollback_restores_crlf_bytes_exactly(tmp_path, monkeypatch):
+    root = _issue_repo(tmp_path, 'echo "${{ github.event.issue.title }}" && curl https://x.example')
+    wf = root / ".github/workflows/assist.yml"
+    wf.write_bytes(wf.read_bytes().replace(b"\n", b"\r\n"))
+    before = wf.read_bytes()
+    monkeypatch.setattr("tridelphi.apply._verify_cleared", lambda *a, **k: False)
+    assert apply_action(root, _critical(root), "fix").status == "failed"
+    assert wf.read_bytes() == before
+
+
+def test_workflow_that_is_not_utf8_is_left_alone(tmp_path):
+    root = _issue_repo(tmp_path, 'echo "${{ github.event.issue.title }}" && curl https://x.example')
+    wf = root / ".github/workflows/assist.yml"
+    wf.write_bytes(wf.read_bytes().replace(b"triage:", b"triage:  # caf\xe9", 1))
+    before = wf.read_bytes()
+    finding = _critical(root)
+    for action in ("fix", "comment-out", "disable"):
+        result = apply_action(root, finding, action)
+        assert result.status in ("unavailable", "failed") and "UTF-8" in result.detail
+    assert wf.read_bytes() == before
+
+
+def test_narrow_trigger_is_not_blocked_by_a_steps_own_if(tmp_path):
+    """Only a job-level `if:` is a gate to preserve; nearly every real job has
+    steps with their own conditions."""
+    workflow = _ISSUE_BODY_AGENT.replace(
+        "      - uses: anthropics/claude-code-action@v1\n",
+        "      - uses: actions/checkout@v4\n        if: github.event.issue.number > 0\n"
+        "      - uses: anthropics/claude-code-action@v1\n",
+    )
+    root = _repo_with(tmp_path, workflow)
+    assert apply_action(root, _critical(root), "fix").status == "applied"
+    assert not [f for f in analyze(root).findings if f.severity == "critical"]
+
+
+def test_a_nested_key_named_like_the_job_is_not_the_job(tmp_path):
+    """A service container called `assist` in an earlier job is not job
+    `assist`; the gate belongs under the job key."""
+    workflow = _ISSUE_BODY_AGENT.replace(
+        "jobs:\n",
+        "jobs:\n  lint:\n    runs-on: ubuntu-latest\n    services:\n      assist:\n"
+        "        image: redis:7\n    steps:\n      - run: make lint\n",
+    )
+    root = _repo_with(tmp_path, workflow)
+    assert apply_action(root, _critical(root), "fix").status == "applied"
+    text = (root / ".github/workflows/assist.yml").read_text()
+    assert text.index("author_association") > text.index("\n  assist:")
