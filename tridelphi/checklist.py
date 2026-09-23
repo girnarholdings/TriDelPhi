@@ -25,6 +25,7 @@ from .severity import SARIF_LEVEL_TO_SEVERITY, SEVERITY_ORDER
 
 __all__ = [
     "ExternalStatus",
+    "item_counts",
     "items_from_sarif",
     "render_checklist",
     "render_checklist_markdown",
@@ -176,6 +177,27 @@ def items_from_sarif(sarif: dict) -> list[tuple[str, str, str]]:
             items.append((severity, where, body))
     items.sort(key=lambda it: SEVERITY_ORDER.get(it[0], 3))
     return items
+
+
+def item_counts(items: list[tuple[str, str, str]]) -> dict[str, int]:
+    """Severity counts of *distinct* problems — the identity ``_grouped`` shows.
+
+    Raw result counts overstate: osv-scanner reports one flaw once per advisory
+    record, so an mcp release with three CVEs, each published as both a GHSA
+    and a PYSEC record, arrived as six results. The comment's headline said
+    "7 vulnerable dependencies" for two packages while the list under it named
+    four flaws. Counting what is listed keeps the two in agreement.
+    """
+    counts = {"critical": 0, "warning": 0, "note": 0}
+    seen: set[tuple[str, ...]] = set()
+    for severity, where, message in items:
+        m = _OSV_MESSAGE.search(message)
+        key = (where, m.group(1), m.group(2), m.group(3)) if m else (where, message)
+        if key in seen:
+            continue
+        seen.add(key)
+        counts[severity if severity in counts else "warning"] += 1
+    return counts
 
 
 def _grouped(
@@ -516,7 +538,7 @@ def render_checklist(
 # Short nouns for the email-visible summary of the folded minor items.
 _RUNG_SHORT = {
     "gitleaks": "committed secrets",
-    "osv-scanner": "vulnerable dependencies",
+    "osv-scanner": "known dependency flaws",
     "zizmor": "workflow-hardening gaps",
     "scorecard": "repo-setting defaults",
     "semgrep": "risky code patterns",

@@ -21,6 +21,7 @@ from importlib import resources
 from typing import Any
 
 from .model import RULES, Diagnostic, Finding, rule_by_id
+from .reportutil import split_where
 from .severity import SARIF_LEVEL_TO_SEVERITY
 from .severity import SEVERITY_TO_SARIF_LEVEL as _LEVEL
 
@@ -282,8 +283,8 @@ def simple_sarif(findings, *, tool: str, audit_label: str, tool_version: str,
                 "shortDescription": {"text": f"{audit_label}: {f.rule}"},
                 "helpUri": help_uri,
             })
-        path, _sep, line = f.where.partition(":")
-        region = {"startLine": int(line)} if line.isdigit() else {"startLine": 1}
+        path, line = split_where(f.where)
+        region = {"startLine": line or 1}
         results.append({
             "ruleId": rule_id,
             "level": _LEVEL.get(f.severity, "warning"),

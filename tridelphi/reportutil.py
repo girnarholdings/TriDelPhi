@@ -16,23 +16,30 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["compact_wheres", "grouped_lines", "md_escape", "wrap"]
+__all__ = ["compact_wheres", "grouped_lines", "md_escape", "split_where", "wrap"]
 
-# The checklist/report text is already flattened and bounded upstream; this
-# escapes only the characters that would change its meaning as Markdown.
+# Escapes the characters that would change inline text's meaning as Markdown.
 _MD_META = re.compile(r"([\\`*_{}\[\]<>|~])")
+# Line breaks and other controls. Inline text has no use for them, and a file
+# name may carry one (git allows it): a newline would let a pull request's
+# file name open a heading, a quote or a fake checklist item in the comment.
+_MD_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
 
 
 def md_escape(text: str) -> str:
     """Backslash-escape Markdown/HTML metacharacters in untrusted text so it
     renders as the literal characters, never as markup, in a posted comment.
 
+    Control characters, line breaks included, become spaces first: the text is
+    always inline, and a newline in a file name would start a new block.
+
     GitHub's ``@name`` syntax is not Markdown, but it has the externally visible
     side effect of notifying another account. Encode the at-sign as an HTML
     entity so an attacker-chosen filename or scanner message cannot mention-spam
     people from a security bot comment.
     """
-    return _MD_META.sub(r"\\\1", text).replace("@", "&#64;")
+    flat = _MD_CONTROL.sub(" ", text)
+    return _MD_META.sub(r"\\\1", flat).replace("@", "&#64;")
 
 
 def wrap(text: str, width: int) -> list[str]:
@@ -51,17 +58,31 @@ def wrap(text: str, width: int) -> list[str]:
     return lines or [""]
 
 
+def split_where(where: str) -> tuple[str, int | None]:
+    """``"path:12"`` -> ``("path", 12)``; ``"path"`` -> ``("path", None)``.
+
+    The path is a scanned file name — attacker-chosen in a downloaded package —
+    and may itself contain colons, so the split is at the LAST colon and only
+    when what follows is plain ASCII digits (``"²".isdigit()`` is true and
+    ``int("²")`` raises). A line below 1 is clamped to 1, SARIF's minimum.
+    """
+    path, sep, tail = where.rpartition(":")
+    if not sep or not path or not (tail.isascii() and tail.isdigit()):
+        return where, None
+    return path, max(1, int(tail))
+
+
 def compact_wheres(wheres: list[str]) -> str:
     """`a.yml:25, a.yml:41, b.yml:3` -> `a.yml lines 25, 41 · b.yml line 3`."""
     by_file: dict[str, list[str]] = {}
     file_order: list[str] = []
     for where in wheres:
-        file, _sep, line = where.partition(":")
+        file, line_no = split_where(where)
         if file not in by_file:
             by_file[file] = []
             file_order.append(file)
-        if line:
-            by_file[file].append(line)
+        if line_no is not None:
+            by_file[file].append(str(line_no))
     parts = []
     for file in file_order:
         lines = by_file[file]

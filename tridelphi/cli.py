@@ -32,7 +32,7 @@ from .baseline import (
     write_baseline,
 )
 from .checklist import ExternalStatus as ChecklistStatus
-from .checklist import items_from_sarif, render_checklist, render_checklist_markdown
+from .checklist import item_counts, items_from_sarif, render_checklist, render_checklist_markdown
 from .coverage import render_coverage
 from .fsutil import atomic_write_text
 from .html_report import render_html
@@ -40,7 +40,7 @@ from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
 from .model import RULES
 from .orchestrate import merge_runs
 from .render import render_text
-from .sarif import dumps, fingerprint, severity_counts, to_sarif
+from .sarif import dumps, fingerprint, to_sarif
 from .severity import SARIF_LEVEL_TO_SEVERITY, should_fail
 from .severity import SEVERITIES as _SEVERITIES
 
@@ -532,10 +532,11 @@ def main(argv: list[str] | None = None) -> int:
     for ext in external_runs:
         if ext.diagnostic is not None:
             print(f"tridelphi: {ext.diagnostic.message}", file=sys.stderr)
+        items = items_from_sarif(ext.sarif) if ext.sarif is not None else None
         external_status[ext.spec.name] = ChecklistStatus(
             ran=ext.ok,
-            counts=dict(ext.severity_counts),
-            items=items_from_sarif(ext.sarif) if ext.sarif is not None else None,
+            counts=item_counts(items) if items is not None else dict(ext.severity_counts),
+            items=items,
         )
         if ext.sarif is not None:
             external_sarifs.append(ext.sarif)
@@ -591,14 +592,11 @@ def main(argv: list[str] | None = None) -> int:
     for ext in external_runs:
         if ext.sarif is None:
             continue
-        live_counts = {s: 0 for s in _SEVERITIES}
-        for run in ext.sarif.get("runs", []):
-            for severity, count in severity_counts(run.get("results", [])).items():
-                live_counts[severity] += count
+        live_items = items_from_sarif(ext.sarif)
         external_status[ext.spec.name] = ChecklistStatus(
             ran=ext.ok,
-            counts=live_counts,
-            items=items_from_sarif(ext.sarif),
+            counts=item_counts(live_items),
+            items=live_items,
         )
 
     summary_parts: list[str] = []
