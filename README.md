@@ -951,9 +951,10 @@ Security-sensitive reports: please use **private vulnerability reporting**
 
 ```console
 pip install -e ".[dev]"
-pytest -q                                # 670+ tests
+pytest -q                                # 880+ tests
 ruff check tridelphi/ tests/ scripts/    # lint
 python scripts/redteam.py --show-missed  # adversarial sweep (must stay 100%)
+python scripts/deps.py check             # known advisories in every pin (OSV)
 python -m build --wheel                  # packaging
 ```
 

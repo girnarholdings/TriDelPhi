@@ -1,11 +1,13 @@
 """Every third-party action pin must agree across the repo's own workflows, the
 composite action, the workflows `tridelphi init` generates, and the Setup Studio.
 
-The same five actions are pinned by SHA in all four places. Dependabot only
-bumps the first two, so a routine bump would silently leave the templates users
-receive on the old commit — and the trust story ("we pin what we tell you to
-pin") stops being true. This test turns that drift into a failing build with the
-exact SHAs named, so a pin bump is finished in one change or not merged.
+The same actions are pinned by SHA in all four places, and a bump that edits
+only the workflow files — the ones a reviewer looks at — would silently leave the
+templates users receive on the old commit, and the trust story ("we pin what we
+tell you to pin") stops being true. This test turns that drift into a failing
+build with the exact SHAs named, so a pin bump is finished in one change or not
+merged. (The update bot that used to make exactly that half-change is gone; the
+procedure is in docs/RELEASES.md under "Dependencies".)
 """
 
 from __future__ import annotations

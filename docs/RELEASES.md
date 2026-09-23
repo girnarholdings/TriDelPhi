@@ -288,3 +288,38 @@ The Python package version (`pyproject.toml`, `tridelphi/__init__.py`) is a
 **separate** namespace from the Action tags: package `0.2.0` ships alongside
 Action `v3.1.0`. Bump the package version for a PyPI release; PyPI refuses to
 overwrite an existing version, so a re-release always needs a new number.
+
+---
+
+# Dependencies — kept current without a bot
+
+Dependabot used to open pull requests here. It was removed because its two jobs
+did not fit this repository equally well (the reasoning heads
+`scripts/deps.py`). Knowing when a pin has a published vulnerability is
+essential. Its automatic bumps were not: they tripped the L7 trust-lock one
+action at a time, and they could not touch the hash-pinned scanner closures
+without breaking them.
+
+**Knowing** is `.github/workflows/dependency-advisories.yml`. Every Monday, and
+on any pull request that changes a pinned file, `python scripts/deps.py check`
+asks [OSV](https://osv.dev) about every version this repository pins or admits:
+the scanner closures, the npm lockfiles, the action pins, the ladder's prebuilt
+scanners and the floor of each `pyproject.toml` range. A red run is the
+notification. It runs the same way locally.
+
+**Moving a pin** is an ordinary pull request, under one rule: do not adopt a
+release younger than seven days unless it fixes a vulnerability that is being
+exploited. A fresh upload is when a hijacked maintainer account does its damage,
+and such releases are usually pulled within days.
+
+| What moves | How |
+|---|---|
+| A scanner closure (`scripts/*-requirements.txt`) | `python3 scripts/deps.py pin-closure semgrep==X.Y.Z -o scripts/semgrep-requirements.txt --verify-python python3.11 --verify-python python3.12 --verify-python python3.13 --smoke 'semgrep --version'`, then set `SEMGREP_VERSION` in `scripts/install-ladder.sh` to match. The script resolves as of seven days ago, refuses releases with known advisories and proves the install. Never edit one line of a closure by hand. |
+| A prebuilt scanner (gitleaks, osv-scanner, scorecard) | Bump the version **and** the SHA-256 in `scripts/install-ladder.sh`, taking the digest from the upstream checksums file or SLSA provenance. |
+| An action pin | Resolve the tag to its **commit**: `git ls-remote https://github.com/OWNER/REPO 'refs/tags/vX.Y.Z^{}'`, or the plain ref when that prints nothing (a lightweight tag). Replace the SHA and comment everywhere it appears: workflows, `action.yml`, `tridelphi/init_cmd.py` and `site/setup.html`. `tests/test_pin_parity.py` names any copy you miss. Then run `tridelphi verify . --relock` and commit `.tridelphi/trust.lock`. |
+| The bot's `wrangler` | `cd bot && npm install --save-dev --save-exact wrangler@X.Y.Z --ignore-scripts`, then `npm test`, `node --test test/portal-runtime.test.mjs`, and `wrangler deploy --dry-run` in both `bot/` and `portal/`. |
+| A `pyproject.toml` range | Raise the floor past any version with an advisory. `deps.py check` tests the floor, not only what CI happens to resolve. |
+
+If Dependabot security updates are still switched on in the repository settings,
+they keep opening pull requests with no config file present. Turning them off is
+covered in [`REPO_SETUP.md`](REPO_SETUP.md).

@@ -51,12 +51,17 @@ scanner.
    it deliberately: the migration creates a new Durable Object class, which is
    a config change on the existing Worker, not a new billable service, but
    confirm that on the Cloudflare plan before running it.
-4. **Dependabot #69 and #73 are open.** #69 bumps the pinned action SHAs used
-   by the workflows; `tests/test_pin_parity.py` now requires the generated
-   templates (`tridelphi/init_cmd.py`, `site/setup.html`) to carry the same
-   SHAs, so merging #69 needs a matching template update in the same PR. #73
-   bumps `wrangler`; merge it, then redeploy nothing until items 1 and 3 are
-   decided.
+4. **Dependabot is removed (resolved 2026-09-23).** Its two open pull requests
+   were folded into this branch instead: the #69 action pins were verified
+   against the peeled upstream tags and applied to the workflows *and* the
+   `tridelphi init` templates, with the trust-lock re-recorded, and `wrangler`
+   went to 4.132.0 rather than #73's 4.131.1, which also clears the `sharp`
+   advisory. The semgrep closure was regenerated for 1.177.0 to clear three
+   `mcp` CVEs. Advisory monitoring is now `scripts/deps.py check` in
+   `.github/workflows/dependency-advisories.yml`. One setting remains for the
+   owner: switch off Dependabot security updates (`docs/REPO_SETUP.md`, step 3).
+   The new wrangler only changes local tooling; redeploy nothing until items 1
+   and 3 are decided.
 5. **`agent-signals-review.yml` fails by design around January 2027** when the
    120-day freshness window on `docs/AGENT_SIGNALS.md` lapses. That is the
    intended nudge, but someone must own the monthly review or the check
