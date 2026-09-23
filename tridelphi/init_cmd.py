@@ -78,7 +78,7 @@ jobs:
       # Egress telemetry for this job itself (step-security/harden-runner,
       # Apache-2.0). Audit mode only observes; tighten to block once you have
       # a baseline of expected endpoints.
-      - uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
 
@@ -130,7 +130,7 @@ jobs:
       # review comments, duplicating the sticky comment below. One voice on the
       # PR; the Security tab tracks the default branch.
       - name: Upload to code scanning
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         if: always() && steps.scan.outputs.sarif_ready == 'true' && github.event_name != 'pull_request'
         with:
           sarif_file: ${{ runner.temp }}/tridelphi.sarif
@@ -146,7 +146,7 @@ jobs:
       #   - name: Audit shipped output
       #     run: tridelphi expose ./dist --sarif-file expose.sarif --fail-on none
       #   - name: Upload exposure audit
-      #     uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      #     uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       #     if: always() && github.event_name != 'pull_request'
       #     with:
       #       sarif_file: expose.sarif
@@ -327,7 +327,7 @@ jobs:
       # what the job needs — GitHub itself and PyPI. If a step fails on a blocked
       # connection, the harden-runner log names the endpoint to consider adding.
       - if: steps.auth.outputs.ok == 'true'
-        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
