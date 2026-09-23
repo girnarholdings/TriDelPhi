@@ -388,6 +388,10 @@ def _resolve_target(arg: str, tmp: Path, err: TextIO) -> Path | None:
 _grouped = grouped_lines
 
 
+def _more(hidden: int) -> str:
+    return f"…and {hidden} more — `--format sarif` lists every one."
+
+
 def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
     bar = "─" * 60
     print(bar, file=out)
@@ -428,7 +432,8 @@ def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
             if not group:
                 continue
             print(f"  🚫 {question}", file=out)
-            for _sev, text, fix in _grouped(group)[:_MAX_ITEMS]:
+            # Every reason not to install is printed: the verdict counts them all.
+            for _sev, text, fix in _grouped(group):
                 for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
                 for fl in wrap(f"Do this: {fix}", 64):
@@ -446,15 +451,21 @@ def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
             if not group:
                 continue
             print(f"  ⚠️  {question}", file=out)
-            for _sev, text, fix in _grouped(group)[:_MAX_ITEMS]:
+            lines = _grouped(group)
+            for _sev, text, fix in lines[:_MAX_ITEMS]:
                 for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
                 for fl in wrap(f"Do this: {fix}", 64):
                     print(f"        {fl}", file=out)
+            if len(lines) > _MAX_ITEMS:
+                print(f"      · {_more(len(lines) - _MAX_ITEMS)}", file=out)
             print("", file=out)
-    for _sev, text, _fix in _grouped(notes)[:_MAX_ITEMS + 4]:
+    note_lines = _grouped(notes)
+    for _sev, text, _fix in note_lines[:_MAX_ITEMS + 4]:
         for i, wl in enumerate(wrap(text, 66)):
             print(f"  {'🔎 ' if i == 0 else '   '}{wl}", file=out)
+    if len(note_lines) > _MAX_ITEMS + 4:
+        print(f"  🔎 {_more(len(note_lines) - _MAX_ITEMS - 4)}", file=out)
     if notes:
         print("", file=out)
 
@@ -518,9 +529,11 @@ def _render_markdown(result: PreflightResult, label: str) -> str:
         out.append(f"<summary><b>{len(warns)} worth a look</b> — tap to read</summary>")
         out.append("")
         for letter, _q, _g in CATEGORIES:
-            for _sev, text, fix in _grouped(
-                    [f for f in warns if f.category == letter], markdown=True)[:_MAX_ITEMS]:
+            lines = _grouped([f for f in warns if f.category == letter], markdown=True)
+            for _sev, text, fix in lines[:_MAX_ITEMS]:
                 out.append(f"- ⚠️ {text} **Do this:** {fix}")
+            if len(lines) > _MAX_ITEMS:
+                out.append(f"- {_more(len(lines) - _MAX_ITEMS)}")
         out.append("")
         out.append("</details>")
         out.append("")

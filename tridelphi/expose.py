@@ -21,6 +21,7 @@ of it is funneled through the same SARIF containment gate as every wrapped tool.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -140,6 +141,7 @@ class ExposureCoverage:
 # only a warning. Order note: the Anthropic `sk-ant-` pattern precedes the more
 # general OpenAI `sk-` one, and OpenAI carries a `(?!ant-)` guard, so an
 # Anthropic key is never also reported as an OpenAI key.
+_JWT_RE = re.compile(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}")
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("an AWS access key", re.compile(r"AKIA[0-9A-Z]{16}"), "critical"),
     ("a Google API key", re.compile(r"AIza[0-9A-Za-z_\-]{35}"), "critical"),
@@ -169,8 +171,16 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("a Slack token", re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}"), "critical"),
     ("a Slack incoming webhook", re.compile(r"https://hooks\.slack\.com/services/T[0-9A-Za-z_/]{20,}"), "critical"),
     ("a private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"), "critical"),
-    ("a JSON web token (JWT)", re.compile(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}"), "warning"),
+    ("a JSON web token (JWT)", _JWT_RE, "warning"),
 )
+# Shapes that are public by design as often as they are secret: an AIza key can
+# be a Firebase web key, a JWT can be a Supabase anon key. The first match of
+# one of these may be the harmless kind with a real secret of the same shape
+# after it, so a bundle is searched past it — up to this many matches.
+_PUBLIC_BY_DESIGN = frozenset({"a Google API key", "a JSON web token (JWT)"})
+_MAX_MATCHES_PER_PATTERN = 1000
+# How close a Firebase config marker must sit to an AIza key to vouch for it.
+_FIREBASE_WINDOW = 400
 
 # A Firebase web app config is AIza-shaped but PUBLIC by design (it identifies
 # the project; it does not grant access). When an AIza key sits next to these
@@ -230,6 +240,42 @@ def _supabase_role(jwt_token: str) -> str | None:
     role = data.get("role") if isinstance(data, dict) else None
     return role if role in ("service_role", "anon") else None
 
+
+def _committed_secret(text: str) -> tuple[str, str] | None:
+    """(label, masked) for the first secret in ``text`` that must not be committed.
+
+    ``_first_secret`` grades a JWT a warning, because most JWTs found in code
+    are public. A Supabase ``service_role`` key is a JWT as well, and a copy in
+    the repository is full database access past Row Level Security for anyone
+    who can read it — so here it counts with the provider keys.
+    """
+    hit = _first_secret(text)
+    if hit is not None and hit[2] == "critical":
+        return hit[0], hit[1]
+    for count, m in enumerate(_JWT_RE.finditer(text)):
+        if count >= _MAX_MATCHES_PER_PATTERN:
+            break
+        if _supabase_role(m.group(0)) == "service_role":
+            return "a Supabase service_role key", m.group(0)[:4] + "…"
+    return None
+
+
+def _env_assignment(line: str) -> tuple[str, str] | None:
+    """``(key, value)`` from one dotenv line; None for blanks and comments.
+
+    dotenv accepts the shell spelling ``export KEY=value`` too. Left in, the
+    ``export`` hid the key's ``NEXT_PUBLIC_``-style prefix, and a Firebase web
+    key was called a leaked secret on the line where the bundle calls it public.
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None
+    key, _sep, value = stripped.partition("=")
+    words = key.split()
+    if len(words) == 2 and words[0] == "export":
+        key = words[1]
+    return key.strip(), value.strip().strip("\"'")
+
 # Default/weak database passwords seen in the wild and in tutorials.
 _WEAK_DB_PASSWORDS = frozenset({
     "", "postgres", "password", "root", "admin", "mysql", "mongo", "redis",
@@ -239,6 +285,10 @@ _WEAK_DB_PASSWORDS = frozenset({
 _DB_IMAGE_HINTS = (
     "postgres", "mysql", "mariadb", "mongo", "redis", "elasticsearch", "opensearch",
     "rabbitmq", "minio", "couchdb", "neo4j", "clickhouse", "cassandra", "memcached",
+)
+# Environment switches that start a database with no password at all.
+_NO_PASSWORD_SWITCHES = (
+    "ALLOW_EMPTY_PASSWORD", "ALLOW_EMPTY_ROOT_PASSWORD", "ALLOW_ANONYMOUS_LOGIN",
 )
 _DB_URL_RE = re.compile(
     r"(?i)\b(postgres|postgresql|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp)://"
@@ -581,49 +631,84 @@ def _detect_maps_and_secrets(
         raw = _read_text(path, max_read, coverage=coverage)
         if raw is None:
             continue
-        where = str(path.relative_to(root))
-        firebase = bool(_FIREBASE_CONTEXT.search(raw))
-        for label, pattern, severity in _SECRET_PATTERNS:
-            m = pattern.search(raw)
-            if not m:
-                continue
-            masked = m.group(0)[:4] + "…"
-            line = raw.count("\n", 0, m.start()) + 1
-            # A Firebase web apiKey is AIza-shaped but public by design — not a leak.
-            if label == "a Google API key" and firebase:
-                out.append(ExposeFinding("A", "firebase-public-key", "note",
-                    f"{where}:{line}",
-                    f"This is a Firebase web API key ({masked}). Unlike a normal secret it "
-                    "is meant to ship in the browser — it names your project, it does not "
-                    "grant access. Your real protection is server-side Security Rules.",
-                    "no need to hide this key; make sure your Firestore/Storage Security "
-                    "Rules actually restrict who can read and write your data."))
-                continue
-            # A Supabase key is a JWT: the `service_role` key bypasses Row Level
-            # Security and must never ship; the `anon` key is public by design.
-            if label.endswith("(JWT)") and (role := _supabase_role(m.group(0))):
-                if role == "service_role":
-                    out.append(ExposeFinding("A", "supabase-service-role", "critical",
-                        f"{where}:{line}",
-                        f"A Supabase service_role key ({masked}) is shipped in your bundle. "
-                        "It bypasses Row Level Security — anyone who reads it has full, "
-                        "unrestricted access to your database.",
-                        "rotate this key immediately and never expose service_role to the "
-                        "browser; the client should use the anon key plus RLS policies."))
-                else:
-                    out.append(ExposeFinding("A", "supabase-anon-key", "note",
-                        f"{where}:{line}",
-                        f"This is a Supabase anon key ({masked}). Like a Firebase web key it "
-                        "is meant to ship in the browser; it grants nothing on its own.",
-                        "no need to hide it; your protection is Row Level Security — make "
-                        "sure RLS is enabled on every table with real policies."))
-                continue
-            out.append(ExposeFinding("A", "client-secret", severity,
-                f"{where}:{line}",
-                f"What looks like {label} ({masked}) is shipped inside your browser "
-                "bundle. Anything in browser code is readable by anyone who loads the "
-                "page — obfuscation cannot hide it.", _FIX_A_SECRET))
+        out.extend(_bundle_secrets(raw, str(path.relative_to(root))))
     return out
+
+
+def _bundle_secrets(raw: str, where: str) -> list[ExposeFinding]:
+    """The secrets in one shipped bundle: the first of each kind, per shape.
+
+    A shape that is public by design as often as not is searched past its
+    harmless matches. A Supabase app ships its anon key; a service_role key
+    later in the same bundle was invisible behind it. And a Firebase config
+    anywhere in a file used to vouch for every AIza key in it — a Gemini or
+    Maps key a thousand characters away included.
+    """
+    out: list[ExposeFinding] = []
+    firebase_file = bool(_FIREBASE_CONTEXT.search(raw))
+    for label, pattern, severity in _SECRET_PATTERNS:
+        matches = list(itertools.islice(pattern.finditer(raw), _MAX_MATCHES_PER_PATTERN))
+        if not matches:
+            continue
+        # The only distinct AIza key in a Firebase bundle is its web key, however
+        # far the config markers sit from it.
+        lone_key = len({m.group(0) for m in matches}) == 1
+        reported: set[str] = set()
+        for m in matches:
+            finding = _bundle_secret(label, severity, m, raw, where,
+                                     firebase_file=firebase_file, lone_key=lone_key)
+            if finding.rule not in reported:
+                reported.add(finding.rule)
+                out.append(finding)
+            if label not in _PUBLIC_BY_DESIGN or finding.severity == "critical":
+                break
+    return out
+
+
+def _bundle_secret(
+    label: str,
+    severity: str,
+    m: re.Match[str],
+    raw: str,
+    where_file: str,
+    *,
+    firebase_file: bool,
+    lone_key: bool,
+) -> ExposeFinding:
+    masked = m.group(0)[:4] + "…"
+    where = f"{where_file}:{raw.count(chr(10), 0, m.start()) + 1}"
+    # A Firebase web apiKey is AIza-shaped but public by design — not a leak.
+    if label == "a Google API key" and firebase_file and (
+        lone_key
+        or _FIREBASE_CONTEXT.search(
+            raw, max(0, m.start() - _FIREBASE_WINDOW), m.end() + _FIREBASE_WINDOW
+        )
+    ):
+        return ExposeFinding("A", "firebase-public-key", "note", where,
+            f"This is a Firebase web API key ({masked}). Unlike a normal secret it "
+            "is meant to ship in the browser — it names your project, it does not "
+            "grant access. Your real protection is server-side Security Rules.",
+            "no need to hide this key; make sure your Firestore/Storage Security "
+            "Rules actually restrict who can read and write your data.")
+    # A Supabase key is a JWT: the `service_role` key bypasses Row Level
+    # Security and must never ship; the `anon` key is public by design.
+    if label.endswith("(JWT)") and (role := _supabase_role(m.group(0))):
+        if role == "service_role":
+            return ExposeFinding("A", "supabase-service-role", "critical", where,
+                f"A Supabase service_role key ({masked}) is shipped in your bundle. "
+                "It bypasses Row Level Security — anyone who reads it has full, "
+                "unrestricted access to your database.",
+                "rotate this key immediately and never expose service_role to the "
+                "browser; the client should use the anon key plus RLS policies.")
+        return ExposeFinding("A", "supabase-anon-key", "note", where,
+            f"This is a Supabase anon key ({masked}). Like a Firebase web key it "
+            "is meant to ship in the browser; it grants nothing on its own.",
+            "no need to hide it; your protection is Row Level Security — make "
+            "sure RLS is enabled on every table with real policies.")
+    return ExposeFinding("A", "client-secret", severity, where,
+        f"What looks like {label} ({masked}) is shipped inside your browser "
+        "bundle. Anything in browser code is readable by anyone who loads the "
+        "page — obfuscation cannot hide it.", _FIX_A_SECRET)
 
 
 _FIX_PUBLIC_ENV = ("give it a non-public name (drop the NEXT_PUBLIC_/VITE_/… prefix) and read "
@@ -660,11 +745,10 @@ def _detect_public_env(
             continue
         where_file = str(path.relative_to(root))
         for i, ln in enumerate(raw.splitlines(), 1):
-            stripped = ln.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
+            assignment = _env_assignment(ln)
+            if assignment is None:
                 continue
-            key, _sep, value = stripped.partition("=")
-            key, value = key.strip(), value.strip().strip("\"'")
+            key, value = assignment
             prefix = _public_env_prefix(key)
             if prefix is None or not value:
                 continue
@@ -733,6 +817,12 @@ def _compose_line(node: Any, key: str) -> int | None:
 def _port_is_public(entry: Any) -> bool:
     """A compose ports entry that publishes to the host (not 127.0.0.1)."""
     text = ""
+    if isinstance(entry, bool):
+        return False
+    if isinstance(entry, int):
+        # `- 5432` unquoted is a YAML integer; like "5432" it publishes the
+        # port on every host interface.
+        return True
     if isinstance(entry, str):
         text = entry
     elif isinstance(entry, dict):
@@ -802,8 +892,12 @@ def _detect_db_misconfig(
                 vv = val.strip().strip("\"'").lower()
                 if "PASSWORD" in ku and vv in _WEAK_DB_PASSWORDS:
                     weak_pw = True
-                if ku in ("ALLOW_EMPTY_PASSWORD", "ALLOW_ANONYMOUS_LOGIN") and vv in ("yes", "true", "1"):
+                # MYSQL_ALLOW_EMPTY_PASSWORD, MARIADB_ALLOW_EMPTY_ROOT_PASSWORD
+                # (official images) and Bitnami's unprefixed spellings.
+                if ku.endswith(_NO_PASSWORD_SWITCHES) and vv in ("yes", "true", "1"):
                     no_auth = True
+                if ku == "POSTGRES_HOST_AUTH_METHOD" and vv == "trust":
+                    no_auth = True  # every connection accepted without a password
                 # Engine-specific "auth turned off" switches.
                 if ku == "NEO4J_AUTH" and vv == "none":
                     no_auth = True
@@ -850,6 +944,13 @@ def _detect_db_misconfig(
 # ---------------------------------------------------------------------------
 
 
+def _size_or_zero(path: Path) -> int:
+    try:
+        return path.stat(follow_symlinks=False).st_size
+    except OSError:
+        return 0
+
+
 def _looks_minified(text: str) -> bool:
     head = text[:200_000]
     if not head.strip():
@@ -866,7 +967,7 @@ def _detect_minification(
     if not surface.bundles:
         return []
     # Look at the largest few bundles for a representative verdict.
-    ranked = sorted(surface.bundles, key=lambda p: p.stat().st_size if p.exists() else 0, reverse=True)
+    ranked = sorted(surface.bundles, key=_size_or_zero, reverse=True)
     checked = 0
     minified = 0
     for path in ranked[:5]:
@@ -953,8 +1054,8 @@ def _detect_committed_credentials(
         elif _AWS_SECRET_RE.search(raw):
             out.append(ExposeFinding("F", "committed-aws-credential", "critical", where,
                 "An AWS secret access key is committed in this credentials file.", _FIX_CRED))
-        elif (hit := _first_secret(raw)) and hit[2] == "critical":
-            label, masked, _sev, _matched = hit
+        elif secret := _committed_secret(raw):
+            label, masked = secret
             out.append(ExposeFinding("F", "committed-secret-file", "critical", where,
                 f"What looks like {label} ({masked}) is committed in this file.", _FIX_CRED))
         elif name.endswith((".tfstate", ".tfstate.backup")):
@@ -980,12 +1081,12 @@ def _detect_committed_credentials(
         for i, ln in enumerate(raw.splitlines(), 1):
             # A public-prefixed line (NEXT_PUBLIC_/VITE_/…) is owned by category A
             # (`_detect_public_env`), whose message about the prefix is more precise.
-            key = ln.split("=", 1)[0].strip()
-            if _public_env_prefix(key):
+            assignment = _env_assignment(ln)
+            if assignment is not None and _public_env_prefix(assignment[0]):
                 continue
-            hit = _first_secret(ln)
-            if hit and hit[2] == "critical":
-                label, masked, _sev, _matched = hit
+            secret = _committed_secret(ln)
+            if secret:
+                label, masked = secret
                 out.append(ExposeFinding("F", "committed-env-secret", "critical",
                     f"{where_file}:{i}",
                     f"What looks like {label} ({masked}) is committed in this env file. "

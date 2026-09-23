@@ -643,3 +643,103 @@ def test_the_row_is_clear_when_nothing_is_committed(tmp_path):
         ln for ln in buf.getvalue().splitlines() if "keys or cloud config committed" in ln
     )
     assert "all clear" in committed_row
+
+
+# ---------------------------------------------------------------------------
+# a harmless key first must not hide a real one behind it
+# ---------------------------------------------------------------------------
+
+
+def test_service_role_after_an_anon_key_in_one_bundle_is_critical(tmp_path):
+    """A Supabase app ships its anon key. Only the first JWT in a bundle was
+    ever decoded, so a service_role key after it went unreported."""
+    root = _repo(tmp_path, {"dist/app.js": (
+        f'const anon="{_supabase_jwt("anon")}";const admin="{_supabase_jwt("service_role")}";'
+    )})
+    result = _native(root)
+    assert [f.rule for f in result.gating()] == ["supabase-service-role"]
+    assert [f for f in result.findings if f.rule == "supabase-anon-key"]
+
+
+def test_a_firebase_config_does_not_vouch_for_every_google_key(tmp_path):
+    """An AIza key is also what the Gemini and Maps APIs issue. A Firebase
+    config anywhere in the file used to turn every AIza key in it into a note."""
+    firebase = 'const firebaseConfig={apiKey:"AIza' + "b" * 35 + '",authDomain:"x.firebaseapp.com"};'
+    gemini = 'fetch("https://generativelanguage.googleapis.com/v1/models?key=AIza' + "c" * 35 + '")'
+    root = _repo(tmp_path, {"dist/app.js": firebase + "x" * 5000 + gemini})
+    result = _native(root)
+    assert [f.rule for f in result.gating()] == ["client-secret"]
+    assert [f for f in result.findings if f.rule == "firebase-public-key"]
+
+
+def test_the_only_google_key_in_a_firebase_bundle_stays_a_note(tmp_path):
+    """Markers far from the key, one distinct key: still the web config key."""
+    body = 'const k="AIza' + "b" * 35 + '";' + "x" * 5000 + 'const c={authDomain:"x.firebaseapp.com"};'
+    root = _repo(tmp_path, {"dist/app.js": body})
+    result = _native(root)
+    assert not result.gating()
+    assert [f for f in result.findings if f.rule == "firebase-public-key"]
+
+
+def test_committed_service_role_key_in_env_is_critical(tmp_path):
+    """Not behind a public prefix, so category A skips it — and F skipped every
+    JWT as merely a warning. The classic committed `.env` said nothing."""
+    root = _repo(tmp_path, {".env": f"SUPABASE_SERVICE_ROLE_KEY={_supabase_jwt('service_role')}\n"})
+    result = _native(root)
+    crit = result.gating()
+    assert [f.rule for f in crit] == ["committed-env-secret"]
+    assert "service_role" in crit[0].message
+
+
+def test_committed_anon_key_in_env_is_not_a_committed_secret(tmp_path):
+    root = _repo(tmp_path, {".env": f"SUPABASE_ANON_KEY={_supabase_jwt('anon')}\n"})
+    assert not _native(root).gating()
+
+
+def test_export_prefixed_env_line_keeps_its_public_prefix(tmp_path):
+    """dotenv accepts `export KEY=value`. The `export` hid the NEXT_PUBLIC_
+    prefix, so the same Firebase key was a note without it and a committed
+    secret with it."""
+    key = "AIza" + "b" * 35
+    root = _repo(tmp_path, {".env": f"export NEXT_PUBLIC_FIREBASE_API_KEY={key}\n"})
+    result = _native(root)
+    assert not result.gating()
+    assert [f.rule for f in result.findings] == ["firebase-public-key"]
+
+
+@pytest.mark.parametrize("environment", [
+    "MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'",
+    "MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'",
+    "ALLOW_EMPTY_PASSWORD: 'yes'",
+    "POSTGRES_HOST_AUTH_METHOD: trust",
+])
+def test_passwordless_database_on_a_public_port_is_critical(tmp_path, environment):
+    """The official images' own switches for "no password at all" were not
+    recognised, so the published port was only a warning."""
+    compose = (
+        "services:\n  db:\n    image: mysql:8\n    ports: ['3306:3306']\n"
+        f"    environment:\n      {environment}\n"
+    )
+    result = _native(_repo(tmp_path, {"docker-compose.yml": compose}))
+    assert [f.rule for f in result.gating()] == ["db-public-open"]
+
+
+def test_unquoted_port_number_is_published(tmp_path):
+    """`- 5432` is a YAML integer, and it publishes the port on every host
+    interface exactly as "5432" does."""
+    compose = (
+        "services:\n  db:\n    image: postgres:16\n    ports:\n      - 5432\n"
+        "    environment:\n      POSTGRES_PASSWORD: postgres\n"
+    )
+    result = _native(_repo(tmp_path, {"docker-compose.yml": compose}))
+    assert [f.rule for f in result.gating()] == ["db-public-open"]
+
+
+def test_folded_items_are_counted_not_dropped(tmp_path):
+    """Past the per-category cap the report says how many more there are."""
+    columns = ("password", "passwd", "pwd", "ssn", "social_security", "credit_card",
+               "card_number", "cvv")  # eight distinct messages, so eight lines
+    files = {f"data/users{i}.csv": f"id,email,{column}\n" for i, column in enumerate(columns)}
+    out = io.StringIO()
+    run_expose(str(_repo(tmp_path, files)), fmt="checklist", out=out, err=io.StringIO())
+    assert "…and 3 more" in out.getvalue()
