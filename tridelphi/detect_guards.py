@@ -29,6 +29,8 @@ __all__ = [
     "detect",
     "has_strong_association_gate",
     "is_vetted",
+    "trigger_association_field",
+    "trigger_association_gate",
     "vetted_event_prefixes",
 ]
 
@@ -190,6 +192,33 @@ def is_vetted(path: str, prefixes: tuple[str, ...]) -> bool:
 # Payload objects whose author GitHub reports as `author_association`.
 _GATEABLE_OBJECTS = ("comment", "issue", "pull_request", "review", "discussion")
 _TRUSTED_LIST = "fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]')"
+
+
+# Whose association the gate must test, by trigger: the author of the event's
+# own object. On `pull_request_target` there is no comment, so a comment gate
+# there is never true and silently switches the job off.
+_TRIGGER_ASSOCIATION = (
+    ("issue_comment", "github.event.comment.author_association"),
+    ("pull_request_review_comment", "github.event.comment.author_association"),
+    ("pull_request_review", "github.event.review.author_association"),
+    ("discussion_comment", "github.event.comment.author_association"),
+    ("discussion", "github.event.discussion.author_association"),
+    ("issues", "github.event.issue.author_association"),
+    ("pull_request_target", "github.event.pull_request.author_association"),
+    ("pull_request", "github.event.pull_request.author_association"),
+)
+
+
+def trigger_association_field(triggers: Iterable[str]) -> str | None:
+    """The association field that vets the author of this job's triggering event."""
+    present = set(triggers)
+    return next((field for trigger, field in _TRIGGER_ASSOCIATION if trigger in present), None)
+
+
+def trigger_association_gate(triggers: Iterable[str]) -> str:
+    """A job ``if:`` vetting the triggering author; the commenter when unknown."""
+    field = trigger_association_field(triggers) or "github.event.comment.author_association"
+    return f"contains({_TRUSTED_LIST}, {field})"
 
 
 def association_gate(paths: Iterable[str]) -> str | None:

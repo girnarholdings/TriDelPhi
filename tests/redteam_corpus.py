@@ -313,6 +313,91 @@ def _cross_job_cases() -> Iterator[Case]:
     )
 
 
+def _cross_job_relay_cases() -> Iterator[Case]:
+    """One pass-through job between the taint and the privilege. Provenance was
+    computed per job from its own hits, so a relay that re-exported an output or
+    re-uploaded an artifact laundered it, and the privileged job read as a
+    compliant note."""
+    yield Case(
+        name="cross-job-relay(needs.outputs)",
+        expect_rule="cross-job-untrusted-flow",
+        workflow=f"""
+        on:
+          pull_request_target:
+            types: [opened]
+        jobs:
+          meta:
+            runs-on: ubuntu-latest
+            outputs:
+              title: ${{{{ steps.g.outputs.title }}}}
+            steps:
+              - id: g
+                run: echo "title=${{{{ github.event.pull_request.title }}}}" >> "$GITHUB_OUTPUT"
+          relay:
+            needs: meta
+            runs-on: ubuntu-latest
+            outputs:
+              title: ${{{{ needs.meta.outputs.title }}}}
+            steps:
+              - run: echo relaying
+          publish:
+            needs: relay
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - run: ./release.sh "${{{{ needs.relay.outputs.title }}}}"
+                env:
+                  NPM_TOKEN: {_SECRET}
+        """,
+    )
+    yield Case(
+        name="cross-job-relay(artifact)",
+        expect_rule="cross-job-untrusted-flow",
+        workflow=f"""
+        on:
+          pull_request_target:
+            types: [opened, synchronize]
+        jobs:
+          build:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v4
+                with:
+                  ref: ${{{{ github.event.pull_request.head.sha }}}}
+              - run: npm ci && npm run build
+              - uses: actions/upload-artifact@v4
+                with:
+                  name: bundle
+                  path: dist
+          package:
+            needs: build
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/download-artifact@v4
+                with:
+                  name: bundle
+              - run: tar czf release.tgz dist
+              - uses: actions/upload-artifact@v4
+                with:
+                  name: release
+                  path: release.tgz
+          deploy:
+            needs: package
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - uses: actions/download-artifact@v4
+                with:
+                  name: release
+              - run: tar xzf release.tgz && node dist/index.js
+                env:
+                  NPM_TOKEN: {_SECRET}
+        """,
+    )
+
+
 def _cross_job_artifact_cases() -> Iterator[Case]:
     """Taint that crosses jobs through a run-scoped artifact, not a job output.
     The `build` job checks out pull request code and uploads it as an artifact;
@@ -988,6 +1073,7 @@ _GENERATORS = (
     _mcp_cases,
     _cross_job_cases,
     _cross_job_artifact_cases,
+    _cross_job_relay_cases,
     _workflow_run_cases,
     _env_file_injection_cases,
     _weak_actor_guard_cases,

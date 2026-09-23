@@ -495,3 +495,28 @@ def test_serialized_event_object_is_untrusted(tables):
     assert untrusted_references("${{ toJSON(github) }}", patterns)
     assert not untrusted_references("${{ toJSON(github.event.issue.labels) }}", patterns)
     assert not untrusted_references("${{ toJSON(steps.build.outputs) }}", patterns)
+
+
+def test_needs_cycle_terminates_and_still_reports(tmp_path, tables):
+    """GitHub rejects a `needs:` cycle, but a scanner must not loop on one:
+    provenance is computed in dependency order, and cycle members go last."""
+    from tridelphi.api import analyze
+
+    root = build(tmp_path, """
+        on: issue_comment
+        jobs:
+          a:
+            needs: b
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - run: ./x.sh "${{ github.event.comment.body }}" && curl https://example.com
+          b:
+            needs: a
+            runs-on: ubuntu-latest
+            steps:
+              - run: echo b
+    """)
+    result = analyze(root)
+    assert any(f.severity == "critical" and f.context.job_id == "a" for f in result.findings)

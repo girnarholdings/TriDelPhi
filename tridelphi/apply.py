@@ -37,7 +37,11 @@ from pathlib import Path
 from typing import Literal
 
 from .api import analyze
-from .detect_guards import association_gate
+from .detect_guards import (
+    association_gate,
+    trigger_association_field,
+    trigger_association_gate,
+)
 from .fsutil import atomic_write_text
 from .model import Finding
 from .render import SEVERITY_ORDER
@@ -337,19 +341,6 @@ def _fix_drop_ref(text: str, finding: Finding) -> str | None:
     return "\n".join(lines[:start] + cleaned + lines[end:])
 
 
-# Which event payload the association gate must vet, by trigger.
-_ASSOCIATION_CONTEXT = (
-    ("issue_comment", "github.event.comment.author_association"),
-    ("pull_request_review_comment", "github.event.comment.author_association"),
-    ("pull_request_review", "github.event.review.author_association"),
-    ("discussion_comment", "github.event.comment.author_association"),
-    ("discussion", "github.event.discussion.author_association"),
-    ("issues", "github.event.issue.author_association"),
-    ("pull_request_target", "github.event.pull_request.author_association"),
-    ("pull_request", "github.event.pull_request.author_association"),
-)
-
-
 def _fix_narrow_trigger(text: str, finding: Finding) -> str | None:
     """Insert the author_association job gate the remediation recommends."""
     lines = text.split("\n")
@@ -368,16 +359,9 @@ def _fix_narrow_trigger(text: str, finding: Finding) -> str | None:
     # not make the issue body the comment sits on trustworthy).
     expression = association_gate(injected_paths(finding.hits, "agent-prompt-injection"))
     if expression is None:
-        association = next(
-            (ctx for trig, ctx in _ASSOCIATION_CONTEXT if trig in finding.context.triggers),
-            None,
-        )
-        if association is None:
+        if trigger_association_field(finding.context.triggers) is None:
             return None
-        expression = (
-            "contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), "
-            f"{association})"
-        )
+        expression = trigger_association_gate(finding.context.triggers)
     gate = f"{child_indent}if: {expression}"
     return "\n".join([*lines[:start + 1], gate, *lines[start + 1:end], *lines[end:]])
 
