@@ -15,8 +15,17 @@ a PR comment that GitHub renders as HTML.
 from __future__ import annotations
 
 import re
+from typing import TextIO
 
-__all__ = ["compact_wheres", "grouped_lines", "md_escape", "split_where", "wrap"]
+__all__ = [
+    "TerminalSafeWriter",
+    "compact_wheres",
+    "grouped_lines",
+    "md_escape",
+    "split_where",
+    "terminal_safe",
+    "wrap",
+]
 
 # Escapes the characters that would change inline text's meaning as Markdown.
 _MD_META = re.compile(r"([\\`*_{}\[\]<>|~])")
@@ -24,6 +33,85 @@ _MD_META = re.compile(r"([\\`*_{}\[\]<>|~])")
 # name may carry one (git allows it): a newline would let a pull request's
 # file name open a heading, a quote or a fake checklist item in the comment.
 _MD_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
+
+# The only escape sequences TriDelPhi itself writes: render.py's bold, dim,
+# red, yellow and cyan, and the reset. Colour cannot hide or move text.
+_OWN_SGR = re.compile(r"\x1b\[(?:0|1|2|1;31|1;33|1;36)m")
+# A line whose first non-blank characters are `::` (or the legacy `##[`) is a
+# GitHub Actions workflow command when it reaches a runner's log \u2014 the runner
+# trims leading whitespace before it looks.
+_WORKFLOW_COMMAND = re.compile(r"(?m)^( *)(:(?=:)|#(?=#\[))")
+
+
+def _escape_char(char: str) -> str:
+    code = ord(char)
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
+
+
+def _visible(text: str, keep_newlines: bool) -> str:
+    if text.isprintable():
+        return text
+    return "".join(
+        char if char.isprintable() or (keep_newlines and char == "\n") else _escape_char(char)
+        for char in text
+    )
+
+
+def terminal_safe(text: str, *, keep_newlines: bool = False, allow_color: bool = False) -> str:
+    """Untrusted text headed for a terminal or a CI log: shown, never obeyed.
+
+    Every non-printable character becomes a visible ``\\uXXXX`` escape: ESC and
+    the rest of C0/C1, carriage return, bidi and other format controls, line
+    separators, and the lone surrogate that stands in for an undecodable file
+    name. A scanned package picks the text quoted from its own install script,
+    and ``ESC[8m`` there would hide everything printed after it \u2014 the verdict
+    included \u2014 while a cursor move can overwrite a finding already shown and
+    OSC 52 asks some terminals to replace the clipboard.
+
+    ``keep_newlines`` is for output that is laid out in lines; a field such as
+    a path or a job id has no business starting a new one. ``allow_color``
+    passes TriDelPhi's own colour codes, and only those, through unchanged.
+    Either way, a line that would read as a workflow command gets its first
+    character escaped, so a hostile file name cannot add a mask, forge an
+    annotation, or switch command processing off in the runner's log.
+    """
+    if allow_color and "\x1b" in text:
+        pieces: list[str] = []
+        last = 0
+        for match in _OWN_SGR.finditer(text):
+            pieces.append(_visible(text[last : match.start()], keep_newlines))
+            pieces.append(match.group(0))
+            last = match.end()
+        pieces.append(_visible(text[last:], keep_newlines))
+        shown = "".join(pieces)
+    else:
+        shown = _visible(text, keep_newlines)
+    if "::" not in shown and "##[" not in shown:
+        return shown
+    return _WORKFLOW_COMMAND.sub(lambda m: m.group(1) + _escape_char(m.group(2)), shown)
+
+
+class TerminalSafeWriter:
+    """A text stream that applies :func:`terminal_safe` to everything written.
+
+    The CLI installs it over stdout and stderr, so no report, diagnostic or
+    error message can pass a scanned file's bytes to the terminal raw. Each
+    ``write`` is treated as able to start a line \u2014 ``print`` hands over whole
+    strings, so the only extra escapes that costs are on hostile text.
+    """
+
+    def __init__(self, stream: TextIO) -> None:
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        return self._stream.write(terminal_safe(text, keep_newlines=True, allow_color=True))
+
+    def writelines(self, lines) -> None:
+        for line in lines:
+            self.write(line)
+
+    def __getattr__(self, name: str):
+        return getattr(self._stream, name)
 
 
 def md_escape(text: str) -> str:

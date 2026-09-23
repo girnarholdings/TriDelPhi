@@ -19,6 +19,7 @@ from . import __version__
 from .api import AnalysisError, analyze
 from .expose import analyze_exposure
 from .preflight import analyze_preflight, extract_archive
+from .reportutil import terminal_safe
 
 _ARCHIVES = (".zip", ".whl", ".tgz", ".tar.gz", ".tar", ".tar.bz2", ".tar.xz")
 _SCOPE = (
@@ -65,8 +66,9 @@ def audit_directory(root: Path) -> dict:
 
 
 def _safe(text: str) -> str:
-    # Untrusted file names/messages must not inject terminal escape sequences.
-    return "".join(c if c.isprintable() or c == "\n" else f"\\u{ord(c):04x}" for c in text)
+    # Untrusted file names/messages must not inject terminal escape sequences
+    # or read as workflow commands in a CI log.
+    return terminal_safe(text, keep_newlines=True)
 
 
 def main(argv: list[str] | None = None) -> int:
