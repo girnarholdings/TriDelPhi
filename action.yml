@@ -302,15 +302,25 @@ runs:
             '',
             '_[What this means](https://girnarholdings.github.io/TriDelPhi/)._',
           ].join('\n');
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner, repo: context.repo.repo,
-            issue_number,
-          });
-          const existing = comments.find(c => c.body && c.body.includes('<!-- tridelphi -->'));
-          const api = existing
-            ? github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body })
-            : github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number, body });
-          await api;
+          // Our sticky comment is the one the workflow token's bot wrote. Anyone
+          // can put the marker in a comment of their own, and trying to edit it
+          // fails, so the author is part of the match. Every page is read: on a
+          // long thread the comment is not on the first one.
+          try {
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => c.user && c.user.login === 'github-actions[bot]' &&
+              c.body && c.body.includes('<!-- tridelphi -->'));
+            const api = existing
+              ? github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body })
+              : github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number, body });
+            await api;
+          } catch (error) {
+            // The comment is a courtesy; the threshold step is the verdict.
+            core.warning(`TriDelPhi could not post its pull request comment (${error.message}). The report is in the job Summary.`);
+          }
 
     - name: Enforce the threshold
       shell: bash

@@ -188,22 +188,31 @@ jobs:
               '[What this means](https://girnarholdings.github.io/TriDelPhi/)._',
             ].join('\\n');
 
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body && c.body.includes('<!-- tridelphi -->'));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
+            // Our comment is the one this workflow's bot wrote: anyone can put
+            // the marker in a comment of their own, and editing theirs fails.
+            // Every page is read, and a failure warns instead of skipping the gate.
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100,
               });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: context.issue.number, body,
-              });
+              const existing = comments.find(c => c.user && c.user.login === 'github-actions[bot]' &&
+                c.body && c.body.includes('<!-- tridelphi -->'));
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  comment_id: existing.id, body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: context.issue.number, body,
+                });
+              }
+            } catch (error) {
+              core.warning(`TriDelPhi could not post its comment (${error.message}). The report is in the job Summary.`);
             }
 
       - name: Gate
@@ -557,23 +566,28 @@ jobs:
             const report = (readBounded(process.env.REPORT_FILE) ||
               'TriDelPhi produced no readable report.').replaceAll('@', '&#64;');
             const body = ['<!-- tridelphi-expose -->', report.slice(0, 60000)].join('\\n');
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(
-              c => c.body && c.body.includes('<!-- tridelphi-expose -->'));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100,
               });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: context.issue.number, body,
-              });
+              const existing = comments.find(c => c.user && c.user.login === 'github-actions[bot]' &&
+                c.body && c.body.includes('<!-- tridelphi-expose -->'));
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  comment_id: existing.id, body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: context.issue.number, body,
+                });
+              }
+            } catch (error) {
+              core.warning(`TriDelPhi could not post its comment (${error.message}). The report is in the job Summary.`);
             }
 """
 
