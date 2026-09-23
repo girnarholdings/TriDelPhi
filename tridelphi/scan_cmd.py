@@ -25,11 +25,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import lzma
 import re
 import sys
+import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+import zipfile
+import zlib
 from pathlib import Path
 from typing import TextIO
 
@@ -315,6 +319,22 @@ def _fetch_pypi(spec: str, tmp: Path, err: TextIO) -> Path | None:
     return target
 
 
+# What reading a damaged or unusual archive raises besides ValueError: I/O and
+# bz2 errors (OSError), a truncated gzip (EOFError), tar and zip format errors,
+# zlib/lzma stream errors, an encrypted zip (RuntimeError) and an unsupported
+# zip compression method (NotImplementedError).
+_UNREADABLE_ARCHIVE = (
+    OSError,
+    EOFError,
+    tarfile.TarError,
+    zipfile.BadZipFile,
+    zlib.error,
+    lzma.LZMAError,
+    RuntimeError,
+    NotImplementedError,
+)
+
+
 def _resolve_target(arg: str, tmp: Path, err: TextIO) -> Path | None:
     """Turn the CLI argument into a directory to analyze, or None (error
     already printed)."""
@@ -339,14 +359,24 @@ def _resolve_target(arg: str, tmp: Path, err: TextIO) -> Path | None:
             return None
     if archive is None:
         return None
+    name = Path(archive).name
     try:
         return extract_archive(Path(archive), tmp / "extracted")
-    except (ValueError, OSError) as exc:
-        # A refused extraction is itself a verdict: honest archives don't
-        # need path traversal.
-        print(f"tridelphi: refusing to extract {Path(archive).name}: {exc}", file=err)
+    except ValueError as exc:
+        # extract_archive raises ValueError for the shapes it refuses on
+        # purpose — traversal, links, devices, duplicate paths, size bombs. A
+        # refused extraction is itself a verdict: honest archives need none.
+        print(f"tridelphi: refusing to extract {name}: {exc}", file=err)
         print("tridelphi: an archive built to escape its extraction directory is "
               "malicious by construction — do not install this.", file=err)
+        return None
+    except _UNREADABLE_ARCHIVE as exc:
+        # Truncated, corrupt, encrypted or oddly compressed. Every one of these
+        # used to escape as a traceback and exit 1 — the code for "findings".
+        print(f"tridelphi: {name} could not be read as an archive "
+              f"({exc.__class__.__name__}: {exc}).", file=err)
+        print("tridelphi: nothing inside it was checked. It may be truncated or "
+              "corrupt; do not install it until a clean copy scans.", file=err)
         return None
 
 

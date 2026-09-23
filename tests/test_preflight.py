@@ -680,3 +680,45 @@ def test_jsonc_executable_config_is_parsed(tmp_path):
     result = analyze_preflight(root)
 
     assert "agent-config-downloader" in _gating_rules(result)
+
+
+def _truncated_tgz(path: Path) -> None:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        data = b"x" * 50_000
+        info = tarfile.TarInfo("package/index.js")
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    raw = buf.getvalue()
+    path.write_bytes(raw[: len(raw) // 2])
+
+
+def _encrypted_zip(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("a.txt", "hi")
+    raw = bytearray(path.read_bytes())
+    raw[6] |= 1  # general-purpose flag bit 0: encrypted (local header)
+    central = raw.find(b"PK\x01\x02")
+    raw[central + 8] |= 1  # and in the central directory
+    path.write_bytes(bytes(raw))
+
+
+@pytest.mark.parametrize(
+    "name,build",
+    [
+        ("corrupt.tgz", lambda p: p.write_bytes(b"\x1f\x8b" + b"\x00garbage" * 200)),
+        ("truncated.tgz", _truncated_tgz),
+        ("corrupt.zip", lambda p: p.write_bytes(b"PK\x03\x04not-a-zip")),
+        ("encrypted.zip", _encrypted_zip),
+    ],
+)
+def test_unreadable_archive_is_an_error_not_a_crash(tmp_path, capsys, name, build):
+    """A truncated download or a damaged archive used to escape as a traceback
+    with exit 1 — the code for "findings". Nothing was checked, so it is exit 2
+    with a sentence saying so."""
+    archive = tmp_path / name
+    build(archive)
+    code = scan_cmd.run_scan(str(archive), fmt="text", fail_on="critical", tool_version="t")
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "could not be read as an archive" in err and "nothing inside it was checked" in err
