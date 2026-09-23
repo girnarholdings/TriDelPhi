@@ -215,3 +215,15 @@ def test_closure_resolves_as_of_the_cutoff(deps, tmp_path):
     )
     assert [(r.name, r.version) for r in releases] == [("lib", "1.0")]
     assert excluded == {"lib": {"2.0"}}
+
+
+@pytest.mark.parametrize("url", [
+    "file:///etc/passwd",
+    "http://api.osv.dev/v1/querybatch",
+    "https://api.osv.dev.evil.example/v1/querybatch",
+    "https://pypi.org:8443/pypi/x/json",
+])
+def test_advisory_client_fetches_only_its_two_https_endpoints(deps, url):
+    """urllib honours file:// and any host it is handed; the check must not."""
+    with pytest.raises(ValueError):
+        deps["_http_json"](url)

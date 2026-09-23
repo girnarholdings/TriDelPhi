@@ -238,14 +238,22 @@ def all_pins(root: Path) -> list[Pin]:
 # --- talking to OSV and PyPI ----------------------------------------------------
 
 
+_HOSTS = frozenset({"api.osv.dev", "pypi.org"})
+
+
 def _http_json(url: str, payload: dict | None = None) -> dict:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname not in _HOSTS or parsed.port is not None:
+        raise ValueError(f"refusing to fetch {url!r}: only https://api.osv.dev and https://pypi.org")
     data = json.dumps(payload).encode() if payload is not None else None
     request = urllib.request.Request(
         url,
         data=data,
         headers={"Content-Type": "application/json", "User-Agent": "tridelphi-deps"},
     )
-    # Only the fixed https:// endpoints above ever reach this call.
+    # Audited (semgrep dynamic-urllib-use): the scheme and host were checked
+    # just above, so no file:// or other-host URL reaches urlopen.
+    # nosemgrep
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
         return json.load(response)
 
@@ -472,8 +480,10 @@ def verify_install(path: Path, python: str, workdir: Path, smoke: str | None) ->
     _pip(vpy, "check")
     if smoke:
         env = {**os.environ, "PATH": str(vpy.parent) + os.pathsep + os.environ.get("PATH", "")}
-        # The operator typed this command on their own command line.
-        subprocess.run(smoke, shell=True, check=True, env=env)
+        # The operator typed this command on their own command line, and it
+        # needs a shell (`a && b`). An explicit argv says so plainly, where
+        # shell=True would hide it (the same spelling privatize.py uses).
+        subprocess.run(["/bin/sh", "-c", smoke], check=True, env=env)
 
 
 def settle(
