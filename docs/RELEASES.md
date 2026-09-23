@@ -216,6 +216,14 @@ The workflow also gates the release on TriDelPhi's own scan and trust-lock, and
 verifies the built wheel runs from **outside** the checkout — the only way to
 catch the vendored SARIF schema or the rule tables failing to ship.
 
+It runs as three jobs so that nothing unpinned can touch what is published.
+`build` installs only the hash-pinned `scripts/build-requirements.txt` (build,
+twine, setuptools and their whole closure), builds without isolation, and
+records the SHA-256 of each file as a job output. `verify` installs TriDelPhi's
+own range-pinned dependencies to run the self-scan and the smoke test, and
+uploads nothing. `publish` checks every downloaded file against the digests
+`build` recorded before it uploads.
+
 ## 1. One-time setup on PyPI (a human, ~2 minutes)
 
 This cannot be done from a workflow. While the project does not exist on PyPI
@@ -316,6 +324,7 @@ and such releases are usually pulled within days.
 | What moves | How |
 |---|---|
 | A scanner closure (`scripts/*-requirements.txt`) | `python3 scripts/deps.py pin-closure semgrep==X.Y.Z -o scripts/semgrep-requirements.txt --verify-python python3.11 --verify-python python3.12 --verify-python python3.13 --smoke 'semgrep --version'`, then set `SEMGREP_VERSION` in `scripts/install-ladder.sh` to match. The script resolves as of seven days ago, refuses releases with known advisories and proves the install. Never edit one line of a closure by hand. |
+| The release tooling (`scripts/build-requirements.txt`) | `python3 scripts/deps.py pin-closure build==X twine==Y setuptools==Z -o scripts/build-requirements.txt --python python3.12 --verify-python python3.12 --smoke 'python -m build --version && python -m twine --version'`. `publish.yml` builds with this closure alone, without isolation, so setuptools must satisfy `[build-system] requires`. |
 | A prebuilt scanner (gitleaks, osv-scanner, scorecard) | Bump the version **and** the SHA-256 in `scripts/install-ladder.sh`, taking the digest from the upstream checksums file or SLSA provenance. |
 | An action pin | Resolve the tag to its **commit**: `git ls-remote https://github.com/OWNER/REPO 'refs/tags/vX.Y.Z^{}'`, or the plain ref when that prints nothing (a lightweight tag). Replace the SHA and comment everywhere it appears: workflows, `action.yml`, `tridelphi/init_cmd.py` and `site/setup.html`. `tests/test_pin_parity.py` names any copy you miss. Then run `tridelphi verify . --relock` and commit `.tridelphi/trust.lock`. |
 | The bot's `wrangler` | `cd bot && npm install --save-dev --save-exact wrangler@X.Y.Z --ignore-scripts`, then `npm test`, `node --test test/portal-runtime.test.mjs`, and `wrangler deploy --dry-run` in both `bot/` and `portal/`. |
