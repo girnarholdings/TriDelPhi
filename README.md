@@ -882,7 +882,7 @@ lives in [`bot/`](bot/), testable with `wrangler dev`.
 |:--:|---|
 | `0` | no findings at or above `--fail-on` (default `critical`) |
 | `1` | findings at or above `--fail-on` |
-| `2` | execution error — bad path, bad arguments, or `--strict-parse` on unparseable YAML |
+| `2` | execution error — bad path, bad arguments, `--strict-parse` on unparseable YAML, or a `scan` / `expose` / `audit` that could not read everything (never a pass, whatever `--fail-on` says) |
 
 `--min-severity` controls what you **see**; `--fail-on` controls what **breaks the
 build**. Independent axes, both defaulting to `critical`.

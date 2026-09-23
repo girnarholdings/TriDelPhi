@@ -557,7 +557,8 @@ def run_scan(
     err: TextIO | None = None,
 ) -> int:
     """Scan ``target`` before it is installed. Exit 1 when a finding at or
-    above ``fail_on`` exists, 0 when clean, 2 on a bad target."""
+    above ``fail_on`` exists, 0 when clean, 2 on a bad target or a scan that
+    could not read everything."""
     out = out or sys.stdout
     err = err or sys.stderr
 
@@ -585,4 +586,8 @@ def run_scan(
             print(f"tridelphi: could not write scan output: {exc}", file=err)
             return 2
 
+    # Incomplete coverage is 2 whatever the threshold, as in expose and audit:
+    # --fail-on none must not turn "could not read it all" into a pass.
+    if result.truncated:
+        return 2
     return 1 if should_fail((f.severity for f in result.findings), fail_on) else 0

