@@ -1,6 +1,6 @@
-# Repository setup — the two switches a workflow cannot flip
+# Repository setup — the switches a workflow cannot flip
 
-Everything else in this repo is code. These two are repository *settings*, and
+Everything else in this repo is code. These are repository *settings*, and
 GitHub deliberately does not let a workflow (or an app token) change them —
 otherwise a pull request could disable the checks that gate it. Each takes about
 thirty seconds in the UI.
@@ -67,6 +67,22 @@ failure mode that let the untested merges through.
 
 ---
 
+## 3. Switch off Dependabot pull requests
+
+The repository no longer uses Dependabot: `.github/dependabot.yml` is gone, and
+`.github/workflows/dependency-advisories.yml` checks every pin against OSV each
+week instead (the reasoning and the upgrade procedure are in
+[`RELEASES.md`](RELEASES.md#dependencies--kept-current-without-a-bot)). Deleting
+the config stops version updates, but **Dependabot security updates** is a
+separate setting that opens pull requests with no config file at all.
+
+**Settings → Code security → Dependabot security updates: Disable**
+
+Dependabot *alerts* can stay on as a second opinion or be turned off; nothing in
+this repository reads them.
+
+---
+
 ## Optional: make the scan itself blocking
 
 `self-scan` currently uploads SARIF to code scanning and fails the job if
@@ -88,7 +104,7 @@ That drift is exactly how every `uses:` line in the repo came to advertise a pin
 that 404s.
 
 What we advertise now is a **commit SHA with the version in a trailing comment**
-— `- uses: girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1` —
+— `- uses: girnarholdings/TriDelPhi@b7d5f909aab5ae8a118a0e43c7302859d3f1bca9 # v3.2.0` —
 generated from `tridelphi/release.py` and enforced by `tests/test_release_pin.py`.
 A SHA resolves immediately, needs no tag to exist first, and cannot be repointed
 at code the user never agreed to run. The full runbook, including when to switch
@@ -104,3 +120,6 @@ The wrapped scanners are pinned by version + SHA-256 in
 `scripts/install-ladder.sh`; bumping them is a normal PR that updates the
 digest alongside the version, with the digest taken from the upstream
 release's own checksums file (gitleaks) or SLSA provenance (osv-scanner).
+The pip-installed scanners (zizmor, semgrep) move by regenerating their whole
+closure with `scripts/deps.py pin-closure`; see
+[`RELEASES.md`](RELEASES.md#dependencies--kept-current-without-a-bot).

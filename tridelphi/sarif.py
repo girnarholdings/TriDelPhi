@@ -21,6 +21,7 @@ from importlib import resources
 from typing import Any
 
 from .model import RULES, Diagnostic, Finding, rule_by_id
+from .reportutil import split_where
 from .severity import SARIF_LEVEL_TO_SEVERITY
 from .severity import SEVERITY_TO_SARIF_LEVEL as _LEVEL
 
@@ -51,10 +52,13 @@ def is_suppressed(result: dict[str, Any]) -> bool:
     Defensive: the field is attacker-adjacent (it rides in a subprocess's output),
     so a malformed ``suppressions`` never raises — only a well-formed, non-empty
     array suppresses, and anything else counts, which fails safe toward showing.
+    A suppression whose ``status`` is ``underReview`` or ``rejected`` has not
+    been accepted by anyone, so it suppresses nothing; no status is the
+    in-source case (semgrep writes none) and counts as accepted.
     """
     supp = result.get("suppressions")
     return isinstance(supp, list) and len(supp) > 0 and all(
-        isinstance(s, dict) for s in supp
+        isinstance(s, dict) and s.get("status", "accepted") == "accepted" for s in supp
     )
 
 
@@ -102,7 +106,10 @@ def fingerprint(finding: Finding) -> str:
         finding.rule_id,
         ",".join(sorted({h.kind for h in finding.hits})),
     )
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()[:16]
+    # "surrogatepass": a file name with a byte that is not UTF-8 reaches us as a
+    # lone surrogate (Python's surrogateescape); a strict encode crashed the
+    # whole scan on one such workflow name. The bytes stay stable run to run.
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 def _region(position) -> dict[str, Any]:
@@ -282,8 +289,8 @@ def simple_sarif(findings, *, tool: str, audit_label: str, tool_version: str,
                 "shortDescription": {"text": f"{audit_label}: {f.rule}"},
                 "helpUri": help_uri,
             })
-        path, _sep, line = f.where.partition(":")
-        region = {"startLine": int(line)} if line.isdigit() else {"startLine": 1}
+        path, line = split_where(f.where)
+        region = {"startLine": line or 1}
         results.append({
             "ruleId": rule_id,
             "level": _LEVEL.get(f.severity, "warning"),

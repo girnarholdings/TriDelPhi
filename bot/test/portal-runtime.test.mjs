@@ -3,7 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { Miniflare } from "miniflare";
+// Miniflare 5 takes a `workers` array; the v4 single-worker shape below is
+// converted by the helper it ships for exactly that migration.
+import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { fileURLToPath } from "node:url";
 
 const origin = "https://scan.example.test";
@@ -15,7 +17,7 @@ const bundle = await build({
 for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redirect", "install-required"]) {
   test(`Workers runtime OAuth: ${scenario}`, async () => {
     const calls = [];
-    const mf = new Miniflare({
+    const mf = new Miniflare(convertV4MiniflareOptions({
       modules: true, script: bundle.outputFiles[0].text,
       compatibilityDate: "2026-08-01",
       bindings: {
@@ -60,7 +62,7 @@ for (const scenario of ["success", "invalid-grant", "token-redirect", "api-redir
         }
         assert.fail("Unexpected outbound destination; redirects must not be followed");
       },
-    });
+    }));
     try {
       const worker = { fetch: (...args) => mf.dispatchFetch(...args) };
       const headers = { "CF-Connecting-IP": "192.0.2.1" };

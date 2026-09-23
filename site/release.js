@@ -2,9 +2,9 @@
 // Do not edit release strings here by hand.
 window.TRIDELPHI_RELEASE = Object.freeze({
   actionRepo: "girnarholdings/TriDelPhi",
-  actionSha: "d5c01388c21de9c1d12159087890d12d2d917990",
-  actionTag: "v3.1.1",
-  actionUses: "girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990 # v3.1.1",
+  actionSha: "b7d5f909aab5ae8a118a0e43c7302859d3f1bca9",
+  actionTag: "v3.2.0",
+  actionUses: "girnarholdings/TriDelPhi@b7d5f909aab5ae8a118a0e43c7302859d3f1bca9 # v3.2.0",
   install: "pipx install git+https://github.com/girnarholdings/TriDelPhi",
-  installPinned: "pipx install git+https://github.com/girnarholdings/TriDelPhi@d5c01388c21de9c1d12159087890d12d2d917990"
+  installPinned: "pipx install git+https://github.com/girnarholdings/TriDelPhi@b7d5f909aab5ae8a118a0e43c7302859d3f1bca9"
 });

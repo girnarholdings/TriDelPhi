@@ -1,7 +1,10 @@
-# zizmor, pinned by version AND artifact digest for --require-hashes installs.
-# Digests are the sha256 values published by PyPI for every 1.29.0 artifact
-# (pypi.org/pypi/zizmor/1.29.0/json), so the pin holds on any platform pip
-# resolves to. Bumping the version means regenerating every hash line.
+# zizmor==1.29.0 and its full dependency closure, pinned by version AND artifact
+# digest for `pip install --require-hashes`. Every sha256 is the digest PyPI
+# publishes for that release's artifacts, so the pin holds on any platform pip
+# resolves to. Generated — never edit one line; a closure only moves whole:
+#
+#     python3 scripts/deps.py pin-closure zizmor==1.29.0 -o scripts/zizmor-requirements.txt
+
 zizmor==1.29.0 \
     --hash=sha256:ea72f84d610643d57f96430c655a3780d0b874e477d32e14eae8e910f6cce1fd \
     --hash=sha256:5aafe617d7b1e0c0c15d58fdf20495f360f74a791dfa136f76630b4cc06c2a34 \

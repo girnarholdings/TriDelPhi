@@ -25,11 +25,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import lzma
 import re
 import sys
+import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+import zipfile
+import zlib
 from pathlib import Path
 from typing import TextIO
 
@@ -315,6 +319,22 @@ def _fetch_pypi(spec: str, tmp: Path, err: TextIO) -> Path | None:
     return target
 
 
+# What reading a damaged or unusual archive raises besides ValueError: I/O and
+# bz2 errors (OSError), a truncated gzip (EOFError), tar and zip format errors,
+# zlib/lzma stream errors, an encrypted zip (RuntimeError) and an unsupported
+# zip compression method (NotImplementedError).
+_UNREADABLE_ARCHIVE = (
+    OSError,
+    EOFError,
+    tarfile.TarError,
+    zipfile.BadZipFile,
+    zlib.error,
+    lzma.LZMAError,
+    RuntimeError,
+    NotImplementedError,
+)
+
+
 def _resolve_target(arg: str, tmp: Path, err: TextIO) -> Path | None:
     """Turn the CLI argument into a directory to analyze, or None (error
     already printed)."""
@@ -339,14 +359,24 @@ def _resolve_target(arg: str, tmp: Path, err: TextIO) -> Path | None:
             return None
     if archive is None:
         return None
+    name = Path(archive).name
     try:
         return extract_archive(Path(archive), tmp / "extracted")
-    except (ValueError, OSError) as exc:
-        # A refused extraction is itself a verdict: honest archives don't
-        # need path traversal.
-        print(f"tridelphi: refusing to extract {Path(archive).name}: {exc}", file=err)
+    except ValueError as exc:
+        # extract_archive raises ValueError for the shapes it refuses on
+        # purpose — traversal, links, devices, duplicate paths, size bombs. A
+        # refused extraction is itself a verdict: honest archives need none.
+        print(f"tridelphi: refusing to extract {name}: {exc}", file=err)
         print("tridelphi: an archive built to escape its extraction directory is "
               "malicious by construction — do not install this.", file=err)
+        return None
+    except _UNREADABLE_ARCHIVE as exc:
+        # Truncated, corrupt, encrypted or oddly compressed. Every one of these
+        # used to escape as a traceback and exit 1 — the code for "findings".
+        print(f"tridelphi: {name} could not be read as an archive "
+              f"({exc.__class__.__name__}: {exc}).", file=err)
+        print("tridelphi: nothing inside it was checked. It may be truncated or "
+              "corrupt; do not install it until a clean copy scans.", file=err)
         return None
 
 
@@ -356,6 +386,10 @@ def _resolve_target(arg: str, tmp: Path, err: TextIO) -> Path | None:
 
 
 _grouped = grouped_lines
+
+
+def _more(hidden: int) -> str:
+    return f"…and {hidden} more — `--format sarif` lists every one."
 
 
 def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
@@ -398,7 +432,8 @@ def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
             if not group:
                 continue
             print(f"  🚫 {question}", file=out)
-            for _sev, text, fix in _grouped(group)[:_MAX_ITEMS]:
+            # Every reason not to install is printed: the verdict counts them all.
+            for _sev, text, fix in _grouped(group):
                 for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
                 for fl in wrap(f"Do this: {fix}", 64):
@@ -416,15 +451,21 @@ def _render_text(result: PreflightResult, label: str, out: TextIO) -> None:
             if not group:
                 continue
             print(f"  ⚠️  {question}", file=out)
-            for _sev, text, fix in _grouped(group)[:_MAX_ITEMS]:
+            lines = _grouped(group)
+            for _sev, text, fix in lines[:_MAX_ITEMS]:
                 for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
                 for fl in wrap(f"Do this: {fix}", 64):
                     print(f"        {fl}", file=out)
+            if len(lines) > _MAX_ITEMS:
+                print(f"      · {_more(len(lines) - _MAX_ITEMS)}", file=out)
             print("", file=out)
-    for _sev, text, _fix in _grouped(notes)[:_MAX_ITEMS + 4]:
+    note_lines = _grouped(notes)
+    for _sev, text, _fix in note_lines[:_MAX_ITEMS + 4]:
         for i, wl in enumerate(wrap(text, 66)):
             print(f"  {'🔎 ' if i == 0 else '   '}{wl}", file=out)
+    if len(note_lines) > _MAX_ITEMS + 4:
+        print(f"  🔎 {_more(len(note_lines) - _MAX_ITEMS - 4)}", file=out)
     if notes:
         print("", file=out)
 
@@ -488,9 +529,11 @@ def _render_markdown(result: PreflightResult, label: str) -> str:
         out.append(f"<summary><b>{len(warns)} worth a look</b> — tap to read</summary>")
         out.append("")
         for letter, _q, _g in CATEGORIES:
-            for _sev, text, fix in _grouped(
-                    [f for f in warns if f.category == letter], markdown=True)[:_MAX_ITEMS]:
+            lines = _grouped([f for f in warns if f.category == letter], markdown=True)
+            for _sev, text, fix in lines[:_MAX_ITEMS]:
                 out.append(f"- ⚠️ {text} **Do this:** {fix}")
+            if len(lines) > _MAX_ITEMS:
+                out.append(f"- {_more(len(lines) - _MAX_ITEMS)}")
         out.append("")
         out.append("</details>")
         out.append("")
@@ -514,7 +557,8 @@ def run_scan(
     err: TextIO | None = None,
 ) -> int:
     """Scan ``target`` before it is installed. Exit 1 when a finding at or
-    above ``fail_on`` exists, 0 when clean, 2 on a bad target."""
+    above ``fail_on`` exists, 0 when clean, 2 on a bad target or a scan that
+    could not read everything."""
     out = out or sys.stdout
     err = err or sys.stderr
 
@@ -542,4 +586,8 @@ def run_scan(
             print(f"tridelphi: could not write scan output: {exc}", file=err)
             return 2
 
+    # Incomplete coverage is 2 whatever the threshold, as in expose and audit:
+    # --fail-on none must not turn "could not read it all" into a pass.
+    if result.truncated:
+        return 2
     return 1 if should_fail((f.severity for f in result.findings), fail_on) else 0

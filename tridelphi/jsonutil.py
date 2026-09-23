@@ -15,6 +15,11 @@ __all__ = ["loads_jsonc"]
 
 
 def loads_jsonc(text: str) -> Any:
+    # Editors on Windows save JSON with a UTF-8 byte-order mark, and the
+    # standard library refuses it, which turned a valid MCP config into an
+    # "unknown" one instead of an analysed one.
+    if text.startswith("\ufeff"):
+        text = text[1:]
     stripped: list[str] = []
     i = 0
     in_string = False

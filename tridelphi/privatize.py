@@ -21,7 +21,10 @@ consent, and is unreachable from `--yes` / `fix --apply` / `guard -y`.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -143,55 +146,100 @@ class DirSnapshot:
 # ---------------------------------------------------------------------------
 
 
-def _safe_from_tampering(path: Path) -> bool:
-    """Is the executable ``path`` names writable only by its owner, along with
-    every directory that could redirect or replace it?
+def _only_ours(info: os.stat_result, *, sticky_ok: bool = False) -> bool:
+    """Owned by this account (or root), and writable by no one else.
 
-    privatize *executes* whatever this resolves to. A predictable, world- or
-    group-writable location — a shared ``/tmp`` on a multi-user box — is exactly
-    where someone else could drop a poisoned ``javascript-obfuscator`` for us to
-    run. So we check three things, all following symlinks (a ``node_modules/.bin``
-    entry is itself a symlink, whose own mode bits are a meaningless ``rwxrwxrwx``
-    and must not be read): the real binary, the directory holding the real
-    binary, and the directory holding the (possibly symlink) entry we were given
-    — a writable entry directory would let an attacker repoint it. (POSIX permission bits; on
-    a platform without them this is a no-op and the other candidates still apply.)"""
-    import stat
-
-    bad = stat.S_IWGRP | stat.S_IWOTH
-    try:
-        real = path.resolve()
-        for check in (real, real.parent, path.parent):
-            if bool(check.stat().st_mode & bad):
-                return False
-        return True
-    except OSError:
+    Mode bits alone prove nothing about a path another account created: it can
+    make its own directory ``0755`` and still rename anything inside it. A
+    shared directory is fine above the install only when its sticky bit stops
+    other accounts from renaming what they do not own — ``/tmp`` itself.
+    """
+    if hasattr(os, "geteuid") and info.st_uid not in (os.geteuid(), 0):
         return False
+    if not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return True
+    return sticky_ok and stat.S_ISDIR(info.st_mode) and bool(info.st_mode & stat.S_ISVTX)
+
+
+def _safe_from_tampering(path: Path, install_root: Path | None = None) -> bool:
+    """Can no other account replace the executable ``path`` names, or redirect it?
+
+    privatize *executes* whatever this resolves to. A predictable location such
+    as a shared ``/tmp`` on a multi-user box is exactly where someone else could
+    drop a poisoned ``javascript-obfuscator`` for us to run — and could create
+    the directory first with innocent-looking mode bits, so ownership is checked
+    along with them. Checked, following symlinks (a ``node_modules/.bin`` entry
+    is itself a symlink whose own ``rwxrwxrwx`` means nothing): the real binary,
+    the directory holding it, the directory holding the entry we were given,
+    and — given ``install_root`` — every directory from the install root down to
+    both, with the real binary required to sit inside the install, and every
+    directory above the install root. (POSIX permission bits; on a platform
+    without them this is a no-op.)
+    """
+    try:
+        real = path.resolve(strict=True)
+        checks = [real, real.parent, path.parent]
+        if install_root is not None:
+            top = install_root.resolve(strict=True)
+            if not real.is_relative_to(top):
+                return False
+            for leaf in (real.parent, path.parent.resolve(strict=True)):
+                checks.extend([leaf, *[d for d in leaf.parents if d.is_relative_to(top)]])
+            if not all(_only_ours(d.stat(), sticky_ok=True) for d in top.parents):
+                return False
+        return all(_only_ours(check.stat()) for check in checks)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _install_roots() -> list[Path]:
+    """Where scripts/install-privatize.sh puts the obfuscator: the runner's temp
+    directory in CI, otherwise ``~/.tridelphi-privatize`` (as the devcontainer
+    and Cursor setups install it)."""
+    roots: list[Path] = []
+    if runner_temp := os.environ.get("RUNNER_TEMP"):
+        roots.append(Path(runner_temp) / "tridelphi-privatize")
+    with contextlib.suppress(RuntimeError):  # no home directory to speak of
+        roots.append(Path.home() / ".tridelphi-privatize")
+    return roots
+
+
+def _locate_obfuscator() -> tuple[list[str] | None, str | None]:
+    """``(argv, None)`` for a trusted install; ``(None, why)`` otherwise."""
+    refused: list[str] = []
+    for install_root in _install_roots():
+        candidate = install_root / "node_modules" / ".bin" / "javascript-obfuscator"
+        if not candidate.is_file():
+            continue
+        if _safe_from_tampering(candidate, install_root):
+            return [str(candidate)], None
+        refused.append(str(install_root))
+    if refused:
+        return None, (
+            f"javascript-obfuscator at {refused[0]} was not run: it, or a directory "
+            "above it, belongs to or is writable by another account. Reinstall with "
+            "scripts/install-privatize.sh into a directory only you control."
+        )
+    return None, (
+        "javascript-obfuscator is not installed. Run scripts/install-privatize.sh "
+        "(pinned + integrity-checked) first."
+    )
 
 
 def _find_obfuscator(_root: Path) -> list[str] | None:
     """Locate the pinned javascript-obfuscator installed by install-privatize.sh.
 
-    Only the dedicated directory used by TriDelPhi's installer is eligible.
+    Only the dedicated directories TriDelPhi's installer uses are eligible.
     Project-local ``node_modules/.bin`` and PATH are deliberately excluded: the
     project is the input being guarded, so a same-named executable it supplies
     is not trusted tooling."""
-    import os
-
-    dest = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "tridelphi-privatize"
-    candidate = dest / "node_modules" / ".bin" / "javascript-obfuscator"
-    if candidate.is_file() and _safe_from_tampering(candidate):
-        return [str(candidate)]
-    return None
+    return _locate_obfuscator()[0]
 
 
 def _default_obfuscate(src: Path, dst: Path) -> tuple[bool, str]:
-    argv = _find_obfuscator(src.parent)
+    argv, why = _locate_obfuscator()
     if argv is None:
-        return False, (
-            "javascript-obfuscator is not installed. Run scripts/install-privatize.sh "
-            "(pinned + integrity-checked) first."
-        )
+        return False, why or "javascript-obfuscator is not installed."
     cmd = [*argv, str(src), "--output", str(dst), *_SAFE_FLAGS]
     try:
         completed = run_bounded(

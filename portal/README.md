@@ -64,7 +64,7 @@ Never upgrade a plan or enable paid fallback automatically.
 
 The free flow is an **explicit handoff**, not an automatically launched scan.
 Users confirm creation on GitHub, upload an archive in the trusted Codespace,
-and run `python -m tridelphi.audit ./project.zip` there. For private repositories,
+and run `python -m tridelphi.audit ./project.zip` (the same check as `tridelphi audit`) there. For private repositories,
 download the ZIP on GitHub while authenticated and upload it in the Codespace.
 Do not create a Codespace from the target repo: its devcontainer can run scripts.
 Do not install target dependencies or execute the target's setup instructions.
@@ -151,7 +151,7 @@ disabled to avoid alternate authentication origins. The portal is not a Sites
 deployment and must not be put behind ChatGPT-only authentication.
 
 `SCANNER_REF` points to published candidate
-`78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8`, containing
+`b7d5f909aab5ae8a118a0e43c7302859d3f1bca9`, containing
 `.devcontainer/scan/devcontainer.json` and `tridelphi/audit.py`.
 Review [PR #70](https://github.com/girnarholdings/TriDelPhi/pull/70)
 and use a reviewed merged/release commit for production.

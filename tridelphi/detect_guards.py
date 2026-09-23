@@ -18,17 +18,29 @@ authorization is a distinct problem from holding the three capabilities.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 from .model import CapabilityHit, ExecutionContext
 from .steps import iter_steps
 from .tables import Tables
 
-__all__ = ["detect", "has_strong_association_gate"]
+__all__ = [
+    "association_gate",
+    "detect",
+    "has_strong_association_gate",
+    "is_vetted",
+    "trigger_association_field",
+    "trigger_association_gate",
+    "vetted_event_prefixes",
+]
 
 # An actor-identity reference used as a guard.
 _ACTOR_REF = re.compile(r"github\.(?:triggering_actor|actor)\b")
 _TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+_TRUSTED_NAME = re.compile(rf"\b(?:{'|'.join(_TRUSTED_ASSOCIATIONS)})\b")
+# The event object whose author an association test names:
+# `github.event.comment.author_association` vets the commenter, nobody else.
+_ASSOCIATION_FIELD = re.compile(r"github\.event\.([A-Za-z_]+)\.author_association\b")
 
 
 def _split_top_level_or(expr: str) -> list[str]:
@@ -111,17 +123,134 @@ def _is_positive_association_term(term: str) -> bool:
         return False
     if re.search(r"!\s*contains", term) is not None:
         return False
-    trusted = re.compile(rf"\b(?:{'|'.join(_TRUSTED_ASSOCIATIONS)})\b")
     return any(
         len(args) >= 2
-        and trusted.search(args[0]) is not None
+        and _TRUSTED_NAME.search(args[0]) is not None
         and "author_association" in args[1]
         for args in _call_arguments(term, "contains")
     )
 
 
+def _vetted_objects(term: str) -> set[str]:
+    """Event objects whose author a positive membership test in ``term`` vets."""
+    vetted: set[str] = set()
+    for args in _call_arguments(term, "contains"):
+        if len(args) >= 2 and _TRUSTED_NAME.search(args[0]) is not None:
+            vetted.update(_ASSOCIATION_FIELD.findall(args[1]))
+    return vetted
+
+
+def vetted_event_prefixes(context: ExecutionContext) -> tuple[str, ...]:
+    """Event-payload prefixes whose *author* the job-level gate vets.
+
+    An ``author_association`` test vouches for one person: the author of the
+    object it names. ``contains(…, github.event.comment.author_association)``
+    admits a trusted commenter and says nothing about the stranger who wrote
+    the issue or pull request that comment sits on. So that gate clears
+    ``github.event.comment.*`` and nothing else — the issue title, the PR body
+    and the PR's code stay untrusted.
+
+    Trusting every ``github.event.*`` path behind any association test was a
+    bypass two ways: a maintainer's ``/command`` on an attacker's issue ran the
+    attacker's title through the shell with the gate reported as protection,
+    and a gate on ``issue.author_association`` let any stranger's comment
+    through on a maintainer's issue.
+
+    Alternatives joined by a top-level ``||`` each admit the job on their own,
+    so only an object every alternative vets is vetted; anything that is not a
+    positive membership test vets nothing (fail closed).
+    """
+    expr = context.job_if or ""
+    if "author_association" not in expr:
+        return ()
+    vetted: set[str] | None = None
+    for term in _split_top_level_or(expr):
+        if not _is_positive_association_term(term):
+            return ()
+        objects = _vetted_objects(term)
+        vetted = objects if vetted is None else vetted & objects
+    return tuple(sorted(f"github.event.{name}." for name in vetted or ()))
+
+
+def _normalise(path: str) -> str:
+    return path.replace("['", ".").replace("']", "").replace('["', ".").replace('"]', "")
+
+
+def is_vetted(path: str, prefixes: tuple[str, ...]) -> bool:
+    """Is this context path written by an author the gate vetted?"""
+    if not prefixes:
+        return False
+    normalised = _normalise(path).rstrip(".")
+    # The head branch name is chosen by the pull request's author.
+    if normalised == "github.head_ref":
+        normalised = "github.event.pull_request.head.ref"
+    # A trailing dot lets `toJSON(github.event.comment)` — the vetted object
+    # itself — match the prefix `github.event.comment.`.
+    return (normalised + ".").startswith(prefixes)
+
+
+# Payload objects whose author GitHub reports as `author_association`.
+_GATEABLE_OBJECTS = ("comment", "issue", "pull_request", "review", "discussion")
+_TRUSTED_LIST = "fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]')"
+
+
+# Whose association the gate must test, by trigger: the author of the event's
+# own object. On `pull_request_target` there is no comment, so a comment gate
+# there is never true and silently switches the job off.
+_TRIGGER_ASSOCIATION = (
+    ("issue_comment", "github.event.comment.author_association"),
+    ("pull_request_review_comment", "github.event.comment.author_association"),
+    ("pull_request_review", "github.event.review.author_association"),
+    ("discussion_comment", "github.event.comment.author_association"),
+    ("discussion", "github.event.discussion.author_association"),
+    ("issues", "github.event.issue.author_association"),
+    ("pull_request_target", "github.event.pull_request.author_association"),
+    ("pull_request", "github.event.pull_request.author_association"),
+)
+
+
+def trigger_association_field(triggers: Iterable[str]) -> str | None:
+    """The association field that vets the author of this job's triggering event."""
+    present = set(triggers)
+    return next((field for trigger, field in _TRIGGER_ASSOCIATION if trigger in present), None)
+
+
+def trigger_association_gate(triggers: Iterable[str]) -> str:
+    """A job ``if:`` vetting the triggering author; the commenter when unknown."""
+    field = trigger_association_field(triggers) or "github.event.comment.author_association"
+    return f"contains({_TRUSTED_LIST}, {field})"
+
+
+def association_gate(paths: Iterable[str]) -> str | None:
+    """A job ``if:`` that vets the author of every one of ``paths``, or None.
+
+    The advice and the auto-fix both build their gate here, from the text that
+    was actually injected, so the gate they recommend is one the detectors
+    accept: an issue body is vetted by the issue author's association, a
+    comment by the commenter's. None means some path has no author GitHub can
+    vouch for (a ``workflow_run`` field, a wildcard), and no gate will do.
+    """
+    fields: list[str] = []
+    for path in paths:
+        normalised = _normalise(path).rstrip(".")
+        if normalised == "github.head_ref":
+            normalised = "github.event.pull_request.head.ref"
+        parts = normalised.split(".")
+        if len(parts) < 3 or parts[:2] != ["github", "event"] or parts[2] not in _GATEABLE_OBJECTS:
+            return None
+        field = f"github.event.{parts[2]}.author_association"
+        if field not in fields:
+            fields.append(field)
+    if not fields:
+        return None
+    return " && ".join(f"contains({_TRUSTED_LIST}, {field})" for field in fields)
+
+
 def has_strong_association_gate(context: ExecutionContext) -> bool:
     """Does a job-level ``if:`` gate the event author on ``author_association``?
+
+    True means *some* author is vetted; which payload that makes trustworthy is
+    :func:`vetted_event_prefixes`' question, and the detectors ask that one.
 
     This is the gate our own remediation recommends (see ``rule.py``): only
     OWNER / MEMBER / COLLABORATOR authors can make the job run, so a drive-by
@@ -147,10 +276,7 @@ def has_strong_association_gate(context: ExecutionContext) -> bool:
     Step-level gates do not count — they protect one step, not the job the
     finding is about.
     """
-    expr = context.job_if or ""
-    if "author_association" not in expr:
-        return False
-    return all(_is_positive_association_term(d) for d in _split_top_level_or(expr))
+    return bool(vetted_event_prefixes(context))
 
 
 def _is_strong_association_expression(expr: str) -> bool:

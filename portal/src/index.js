@@ -10,7 +10,10 @@ const random = () => [...crypto.getRandomValues(new Uint8Array(32))]
   .map(x => x.toString(16).padStart(2, "0")).join("");
 
 class Failure extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  // `upstream` is GitHub's own status when the failure came from a GitHub call,
+  // so a caller can tell a definitive refusal (4xx: nothing happened) from an
+  // uncertain outcome (timeout, 5xx: something may have happened).
+  constructor(status, message, upstream) { super(message); this.status = status; this.upstream = upstream; }
 }
 class InstallationRequired extends Failure {
   constructor() { super(403, "Install or re-enable the TriDelPhi GitHub App, then sign in again."); }
@@ -72,8 +75,9 @@ async function github(path, token, fetcher, body) {
   });
   if (!response.ok) {
     await response.body?.cancel();
-    fail(response.status === 401 ? 401 : 403,
-      "GitHub could not authorize this step. Check your App permissions and Codespaces availability, then sign in again.");
+    throw new Failure(response.status === 401 ? 401 : 403,
+      "GitHub could not authorize this step. Check your App permissions and Codespaces availability, then sign in again.",
+      response.status);
   }
   return boundedJson(response);
 }
@@ -290,7 +294,17 @@ export function createPortal(fetcher = fetch) {
             const result = { url: target.href, created: true, message: "Your workspace is being prepared. Open it below. Save your report before deleting it; idle workspaces are scheduled for cleanup." };
             await state(env, slot, "put", { kind: "workspace", result, expires });
             response = json(result);
-          } catch {
+          } catch (error) {
+            // A definitive client-side refusal from GitHub (a 4xx on the create
+            // call) means no workspace was created, so the reservation is
+            // released: a permission or validation error must not lock the user
+            // out for 30 minutes. Anything else — a timeout, a network failure,
+            // a 5xx, or a created workspace we could not verify — may still have
+            // produced a machine, so the lock stays and nothing is retried.
+            if (error instanceof Failure && error.upstream >= 400 && error.upstream < 500) {
+              await state(env, slot, "delete");
+              fail(403, "GitHub refused to create the workspace, so nothing was created. Check your App permissions and Codespaces access on GitHub, then try again.");
+            }
             fail(503, "GitHub did not confirm workspace creation. A workspace may already exist: check github.com/codespaces. We will not retry automatically; creation is paused here for up to 30 minutes to avoid duplicates.");
           }
         }

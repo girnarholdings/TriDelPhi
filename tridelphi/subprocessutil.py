@@ -67,6 +67,9 @@ def run_bounded(
     process = subprocess.Popen(
         argv,
         cwd=str(cwd) if cwd is not None else None,
+        # Nothing run here is interactive. An inherited terminal would let a
+        # prompting tool sit until its timeout instead of failing at once.
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=os.name == "posix",

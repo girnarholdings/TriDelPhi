@@ -1,5 +1,6 @@
 {
-  "_comment": "TriDelPhi L7 trust-lock. Records the owner and pinned SHA of each third-party action. A change here on a later run fails the gate: review it \u2014 a repo transfer or takeover looks exactly like this.",
+  "_comment": "TriDelPhi L7 trust-lock. Records the owner path and pinned SHA written for each third-party action. Later source changes require review; this offline file does not resolve publisher ownership or prove safety.",
+  "version": 1,
   "actions": {
     "actions/attest-build-provenance": {
       "owner": "actions",
@@ -15,7 +16,7 @@
     },
     "actions/deploy-pages": {
       "owner": "actions",
-      "sha": "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"
+      "sha": "368f82528645a54fb793d4d04e342629a3f51346"
     },
     "actions/download-artifact": {
       "owner": "actions",
@@ -43,7 +44,7 @@
     },
     "github/codeql-action/upload-sarif": {
       "owner": "github",
-      "sha": "5595ccaf912efad79be6eef63a5619ff05969be3"
+      "sha": "b96794f015dfd88f77b49b1c93e0fa7110f94c63"
     },
     "pypa/gh-action-pypi-publish": {
       "owner": "pypa",
@@ -51,7 +52,7 @@
     },
     "step-security/harden-runner": {
       "owner": "step-security",
-      "sha": "b09bb98e06d4d774595224525879c09bc6e98c40"
+      "sha": "e14015d583714f6e62063499dc959a02595150a1"
     }
   }
 }

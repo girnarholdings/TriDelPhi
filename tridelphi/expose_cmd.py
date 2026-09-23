@@ -29,6 +29,10 @@ _SCOPE = (
 _MAX_ITEMS = 5
 
 
+def _more(hidden: int) -> str:
+    return f"…and {hidden} more — `--format sarif` lists every one."
+
+
 def _status(
     findings: list[ExposeFinding], elsewhere: list[ExposeFinding] | None = None
 ) -> tuple[str, str]:
@@ -139,11 +143,14 @@ def _render_text(result: ExposureResult, repo: str, out: TextIO) -> None:
                 continue
             print(f"  ⚠️  {question}", file=out)
             print(f"      {gloss}", file=out)
-            for _sev, text, fix in grouped_lines(group)[:_MAX_ITEMS]:
+            lines = grouped_lines(group)
+            for _sev, text, fix in lines[:_MAX_ITEMS]:
                 for i, wl in enumerate(wrap(text, 64)):
                     print(f"      {'· ' if i == 0 else '  '}{wl}", file=out)
                 for fl in wrap(f"Do this: {fix}", 64):
                     print(f"        {fl}", file=out)
+            if len(lines) > _MAX_ITEMS:
+                print(f"      · {_more(len(lines) - _MAX_ITEMS)}", file=out)
             print("", file=out)
 
     for f in notes:
@@ -218,8 +225,11 @@ def _render_markdown(result: ExposureResult, repo: str) -> str:
                 continue
             out.append(f"**{question}**  ")
             out.append(f"_{gloss}_")
-            for _sev, text, fix in grouped_lines(group, markdown=True)[:_MAX_ITEMS]:
+            lines = grouped_lines(group, markdown=True)
+            for _sev, text, fix in lines[:_MAX_ITEMS]:
                 out.append(f"- {text} **Do this:** {fix}")
+            if len(lines) > _MAX_ITEMS:
+                out.append(f"- {_more(len(lines) - _MAX_ITEMS)}")
             out.append("")
         out.append("</details>")
         out.append("")

@@ -37,9 +37,15 @@ from pathlib import Path
 from typing import Literal
 
 from .api import analyze
+from .detect_guards import (
+    association_gate,
+    trigger_association_field,
+    trigger_association_gate,
+)
 from .fsutil import atomic_write_text
 from .model import Finding
 from .render import SEVERITY_ORDER
+from .rule import injected_paths
 
 __all__ = [
     "AUTO_FIXABLE",
@@ -58,12 +64,18 @@ _MAX_WORKFLOW_BYTES = 8 * 1024 * 1024
 
 
 def _read_workflow(path: Path) -> str | None:
-    """Read a workflow file to edit, refusing an implausibly large one."""
+    """Read a workflow file to edit, exactly as it is on disk.
+
+    No newline translation: a rollback must put back the same bytes, and a fix
+    must not quietly turn a CRLF file into an LF one. A file that is not UTF-8
+    is left alone — decoding it with replacements and writing it back would
+    corrupt it — where it used to escape as a traceback.
+    """
     try:
         if path.stat().st_size > _MAX_WORKFLOW_BYTES:
             return None
-        return path.read_text(encoding="utf-8")
-    except OSError:
+        return path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -99,6 +111,10 @@ def _safe_workflow_path(root: Path, path: Path) -> bool:
     return True
 
 
+class _Unavailable(Exception):
+    """A transform's reason for declining an edit, shown to the user as is."""
+
+
 @dataclass(frozen=True, slots=True)
 class FixResult:
     status: Literal["applied", "failed", "unavailable"]
@@ -124,11 +140,21 @@ def _job_span(lines: list[str], job_id: str) -> tuple[int, int] | None:
     )
     if jobs_at is None:
         return None
+    # Job keys sit at one indentation, set by the first key under `jobs:`. A
+    # deeper line spelled `<job_id>:` (a `with:` input, an env var) is not it.
+    job_indent = next(
+        (
+            len(ln) - len(ln.lstrip())
+            for ln in lines[jobs_at + 1 :]
+            if ln.strip() and not ln.lstrip().startswith("#")
+        ),
+        None,
+    )
     start = None
     indent = None
     for i in range(jobs_at + 1, len(lines)):
         m = re.match(rf"^(\s+){re.escape(job_id)}:\s*(#.*)?$", lines[i])
-        if m:
+        if m and len(m.group(1)) == job_indent:
             start, indent = i, len(m.group(1))
             break
     if start is None:
@@ -217,6 +243,90 @@ def _injected_tokens(finding: Finding) -> list[str]:
     return tokens
 
 
+def _quote_state(prefix: str) -> str:
+    """The POSIX-shell quoting open at the end of ``prefix``: ``""``, ``"'"`` or ``'"'``."""
+    state = ""
+    escaped = False
+    for char in prefix:
+        if escaped:
+            escaped = False
+        elif state == "'":
+            if char == "'":
+                state = ""
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            state = "" if state == '"' else '"'
+        elif char == "'" and not state:
+            state = "'"
+    return state
+
+
+def _env_reference(var: str, line: str, at: int, token: str) -> str:
+    """The shell text that reads ``var`` where ``token`` stood, meaning intact.
+
+    Braces when a name character follows (``${X}_suffix``, not ``$X_suffix``);
+    quotes when none are open; and inside single quotes, where nothing expands,
+    the quote is closed around a double-quoted reference and reopened.
+    """
+    after = line[at + len(token) : at + len(token) + 1]
+    ref = f"${{{var}}}" if after and (after.isalnum() or after == "_") else f"${var}"
+    state = _quote_state(line[:at])
+    if state == '"':
+        return ref
+    if state == "'":
+        return f"'\"{ref}\"'"
+    return f'"{ref}"'
+
+
+_POSIX_SHELL = re.compile(r"^(ba)?sh(\s|$)")
+
+
+def _default_shell(text: str, job_id: str) -> str | None:
+    """``defaults.run.shell`` for the job, else for the workflow — or None."""
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
+
+    try:
+        doc = YAML(typ="safe").load(text)
+    except (YAMLError, ValueError, TypeError, RecursionError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    jobs = doc.get("jobs")
+    job = jobs.get(job_id) if isinstance(jobs, dict) else None
+    for scope in (job, doc):
+        defaults = scope.get("defaults") if isinstance(scope, dict) else None
+        run = defaults.get("run") if isinstance(defaults, dict) else None
+        shell = run.get("shell") if isinstance(run, dict) else None
+        if isinstance(shell, str):
+            return shell
+    return None
+
+
+def _runs_posix_shell(step: list[str], text: str, finding: Finding) -> bool:
+    """Will this step's script run in bash or sh?
+
+    ``"$VAR"`` is how bash reads the hoisted variable. PowerShell — the default
+    on Windows runners — reads ``$env:VAR``, and Python or cmd something else
+    again, so the same edit there clears the finding by breaking the step.
+    """
+    shell = None
+    for ln in step:
+        m = re.match(r"^\s*(?:-\s+)?shell:\s*(.*?)\s*(#.*)?$", ln)
+        if m:
+            shell = m.group(1).strip("\"'")
+            break
+    if shell is None:
+        shell = _default_shell(text, finding.context.job_id)
+    if shell is not None:
+        return bool(_POSIX_SHELL.match(shell))
+    labels = " ".join(finding.context.runs_on).lower()
+    # Unknown (an expression such as a matrix) could be Windows; so could a
+    # self-hosted label set. Only a runner we can read as not-Windows passes.
+    return bool(labels) and "${{" not in labels and "windows" not in labels
+
+
 def _fix_env_indirect(text: str, finding: Finding) -> str | None:
     """Hoist every injected expression in the step into env indirection.
 
@@ -234,6 +344,13 @@ def _fix_env_indirect(text: str, finding: Finding) -> str | None:
         return None
     start, end = span
     step = lines[start:end]
+    if not _runs_posix_shell(step, text, finding):
+        raise _Unavailable(
+            "this step may not run in bash or sh (a PowerShell, Python or cmd shell, "
+            "or a runner that could be Windows), where \"$NAME\" would read the wrong "
+            "thing; move the expression into the step's env: by hand and read it the "
+            "way that shell reads variables ($env:NAME in PowerShell)"
+        )
 
     run_rel = next(
         (i for i, ln in enumerate(step) if re.match(r"^\s*(-\s+)?run:", ln)), None
@@ -258,12 +375,7 @@ def _fix_env_indirect(text: str, finding: Finding) -> str | None:
         for i, ln in enumerate(step):
             while token in ln:
                 at = ln.index(token)
-                # Inside an open double-quoted string (odd count of `"` before
-                # the token) the var is already protected; elsewhere, quote it
-                # so attacker text never word-splits.
-                inside = ln[:at].count('"') % 2 == 1 or (at and ln[at - 1] == "'")
-                repl = f"${var}" if inside else f'"${var}"'
-                ln = ln[:at] + repl + ln[at + len(token):]
+                ln = ln[:at] + _env_reference(var, ln, at, token) + ln[at + len(token):]
             step[i] = ln
         env_lines.append(f"{key_indent}  {var}: {token}")
 
@@ -335,19 +447,6 @@ def _fix_drop_ref(text: str, finding: Finding) -> str | None:
     return "\n".join(lines[:start] + cleaned + lines[end:])
 
 
-# Which event payload the association gate must vet, by trigger.
-_ASSOCIATION_CONTEXT = (
-    ("issue_comment", "github.event.comment.author_association"),
-    ("pull_request_review_comment", "github.event.comment.author_association"),
-    ("pull_request_review", "github.event.review.author_association"),
-    ("discussion_comment", "github.event.comment.author_association"),
-    ("discussion", "github.event.discussion.author_association"),
-    ("issues", "github.event.issue.author_association"),
-    ("pull_request_target", "github.event.pull_request.author_association"),
-    ("pull_request", "github.event.pull_request.author_association"),
-)
-
-
 def _fix_narrow_trigger(text: str, finding: Finding) -> str | None:
     """Insert the author_association job gate the remediation recommends."""
     lines = text.split("\n")
@@ -358,19 +457,20 @@ def _fix_narrow_trigger(text: str, finding: Finding) -> str | None:
     body = [ln for ln in lines[start + 1 : end] if ln.strip()]
     if not body:
         return None
-    if any(re.match(r"^\s*if:", ln) for ln in body):
-        return None  # an existing gate is logic we must not clobber
     child_indent = " " * (len(body[0]) - len(body[0].lstrip()))
-    association = next(
-        (ctx for trig, ctx in _ASSOCIATION_CONTEXT if trig in finding.context.triggers),
-        None,
-    )
-    if association is None:
+    # An existing job gate is logic we must not clobber. A step's own `if:`
+    # sits deeper and is not one — most real jobs have several.
+    if any(re.match(rf"^{child_indent}if:", ln) for ln in body):
         return None
-    gate = (
-        f"{child_indent}if: contains(fromJSON('[\"OWNER\",\"MEMBER\","
-        f"\"COLLABORATOR\"]'), {association})"
-    )
+    # Vet whoever wrote the injected text; the trigger's own author is only the
+    # fallback when the finding names no path (a gate on the commenter does
+    # not make the issue body the comment sits on trustworthy).
+    expression = association_gate(injected_paths(finding.hits, "agent-prompt-injection"))
+    if expression is None:
+        if trigger_association_field(finding.context.triggers) is None:
+            return None
+        expression = trigger_association_gate(finding.context.triggers)
+    gate = f"{child_indent}if: {expression}"
     return "\n".join([*lines[:start + 1], gate, *lines[start + 1:end], *lines[end:]])
 
 
@@ -461,14 +561,16 @@ def apply_action(repo_root: str | Path, finding: Finding, action: str) -> FixRes
             )
         original = _read_workflow(workflow)
         if original is None:
-            return FixResult("failed", action, "workflow file is missing or too large to read")
+            return FixResult(
+                "failed", action, "workflow file is missing, not UTF-8, or too large to read"
+            )
         try:
             original_mode = workflow.stat().st_mode & 0o777
         except OSError as exc:
             return FixResult("failed", action, f"cannot inspect workflow file: {exc}")
         header = (
             "# tridelphi: workflow disabled — rename back to "
-            f"{workflow.name} to re-enable\n"
+            f"{workflow.name} to re-enable" + ("\r\n" if "\r\n" in original else "\n")
         )
         target_created = False
         try:
@@ -518,8 +620,18 @@ def apply_action(repo_root: str | Path, finding: Finding, action: str) -> FixRes
 
     original = _read_workflow(workflow)
     if original is None:
-        return FixResult("unavailable", action, "workflow file is missing or too large to read")
-    changed = transform(original, finding)
+        return FixResult(
+            "unavailable", action, "workflow file is missing, not UTF-8, or too large to read"
+        )
+    # The transforms work in LF; a CRLF file is edited that way and written back
+    # with its own line endings, so the diff is the fix and nothing else.
+    crlf = "\r\n" in original
+    try:
+        changed = transform(original.replace("\r\n", "\n") if crlf else original, finding)
+    except _Unavailable as exc:
+        return FixResult("unavailable", action, str(exc))
+    if changed is not None and crlf:
+        changed = changed.replace("\n", "\r\n")
     if changed is None or changed == original:
         return FixResult(
             "unavailable", action, "could not locate an unambiguous edit site"

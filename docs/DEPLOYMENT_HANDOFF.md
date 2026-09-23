@@ -1,5 +1,72 @@
 # TriDelPhi deployment and GitHub publication handoff
 
+## Status review — 2026-09-22
+
+An independent review of the 2026-09-10/11 work, done without deploying or
+creating anything billable. What was verified, what changed, and what is still
+open, so the next agent does not re-derive it.
+
+**Verified as claimed.** The Python suite, the portal Node tests and the bot
+runtime tests all pass on `main` (`b7d5f90`), and CI on `main` is green. The
+live endpoints behave as recorded: the scan page serves, `/api/config` returns
+the installation link, and anonymous `/api/session` returns 401. No unmerged
+portal commits exist. `SCANNER_REF` (`78fb220`) is behind `main` in history
+but the scanner tree (`tridelphi/`, `.devcontainer/scan/`, `pyproject.toml`)
+is byte-identical between the two, so the deployed Worker checks out the same
+scanner.
+
+**Changed in this review (needs a portal redeploy to take effect).**
+
+- `SCANNER_REF` in `portal/wrangler.toml` now points at `b7d5f90`, the same
+  commit the Action pin (`tridelphi/release.py`, tag `v3.2.0`) advertises.
+- A definitive GitHub 4xx on the Codespaces create call now releases the
+  per-user creation slot immediately and reports 403. Only an uncertain
+  outcome (5xx, timeout, network failure) keeps the 30-minute pause, because
+  only then might a workspace have been created without confirmation.
+- The homepage, portal page and portal README now say `python -m
+  tridelphi.audit` is the same check as `tridelphi audit`, so users on a plain
+  checkout and users with the CLI installed are not told two different things.
+- `tridelphi audit` exits 1 only on criticals by default, matching every other
+  command; `--fail-on warning` is the strict opt-in. Incomplete coverage is
+  always exit 2.
+
+**Open items, in order.**
+
+1. **Live acceptance is still pending, and the homepage already links to the
+   portal.** Section 5 below says to link only after a fresh real sign-in and a
+   user-confirmed Codespaces creation are recorded here, but the two-studio
+   homepage merged in #72 carries the Cloud Scan Studio link. Either run the
+   acceptance and record it in this section, or remove the link until it is
+   done. An agent cannot run it: it needs the owner's browser session and
+   creates a billable Codespace, which the spending rule reserves to the owner.
+2. **`ref` as a full commit SHA is not explicitly documented.** The GitHub REST
+   docs describe the create-Codespace `ref` as "Git ref (typically a branch
+   name)" and the default-attributes `ref` as "the branch or commit". SHAs
+   are widely reported to work, but the first real creation should confirm it.
+   If GitHub rejects the SHA, the fallback is a tag pushed to that commit
+   (`v3.2.0`) and `SCANNER_REF` set to the tag name.
+3. **Bot code changed but was not redeployed.** PR #70 added the `ReplayGuard`
+   Durable Object (`bot/src/state.js`) with a `v1` migration in
+   `bot/wrangler.toml`. The live webhook bot still runs the older code. Deploy
+   it deliberately: the migration creates a new Durable Object class, which is
+   a config change on the existing Worker, not a new billable service, but
+   confirm that on the Cloudflare plan before running it.
+4. **Dependabot is removed (resolved 2026-09-23).** Its two open pull requests
+   were folded into this branch instead: the #69 action pins were verified
+   against the peeled upstream tags and applied to the workflows *and* the
+   `tridelphi init` templates, with the trust-lock re-recorded, and `wrangler`
+   went to 4.132.0 rather than #73's 4.131.1, which also clears the `sharp`
+   advisory. The semgrep closure was regenerated for 1.177.0 to clear three
+   `mcp` CVEs. Advisory monitoring is now `scripts/deps.py check` in
+   `.github/workflows/dependency-advisories.yml`. One setting remains for the
+   owner: switch off Dependabot security updates (`docs/REPO_SETUP.md`, step 3).
+   The new wrangler only changes local tooling; redeploy nothing until items 1
+   and 3 are decided.
+5. **`agent-signals-review.yml` fails by design around January 2027** when the
+   120-day freshness window on `docs/AGENT_SIGNALS.md` lapses. That is the
+   intended nudge, but someone must own the monthly review or the check
+   becomes noise.
+
 ## Final workflow hardening — 2026-09-11
 
 Deployed version `11247069-1522-462a-a013-99754885c56d` at
@@ -136,7 +203,7 @@ disabled and never introduce an automatic paid fallback.
 
 | Item | Value |
 |---|---|
-| Local checkout | `/Users/kathanthakkar/VibeCode/TriDelPhi` |
+| Local checkout | your clone of the repository |
 | Repository | `https://github.com/girnarholdings/TriDelPhi` |
 | Published branch | `codex/fortify-beginner-followups` |
 | Pull request | `https://github.com/girnarholdings/TriDelPhi/pull/70` |
@@ -150,7 +217,7 @@ disabled and never introduce an automatic paid fallback.
 | Client ID | `Iv23li3y8yo2DOaLlZ7K` |
 | Worker name | `tridelphi-scan-portal` |
 | Configuration | `portal/wrangler.toml` |
-| Pinned scanner candidate | `78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8` |
+| Pinned scanner candidate | `b7d5f909aab5ae8a118a0e43c7302859d3f1bca9` |
 
 Public identifiers are committed. **No real client secret, private key, GitHub
 token or Cloudflare token is in this document or the configuration.**
@@ -234,7 +301,7 @@ on `152507f801bb0f55af862c41d91ad92fd9915f61`. The initial published source tree
 was verified to exactly match local candidate `1258cca290d2221eb77380822affcbf457051527`
 (tree `01f81230e177448e493da8a4f9a9b3e4c8405d32`). A follow-up updates the
 scanner pin to the published candidate and records this handoff/spending rule.
-Published candidate commit: `78fb22015299b3fc98b2bfbdc4e3c0a06aa469b8`.
+Published candidate commit: `b7d5f909aab5ae8a118a0e43c7302859d3f1bca9`.
 PR: https://github.com/girnarholdings/TriDelPhi/pull/70 (merged).
 
 API-created commits have different IDs from the original local commits. Preserve
@@ -320,8 +387,8 @@ Wrangler 4.120.0 dependencies already exist under `bot/node_modules` on this Mac
 The bundled Node runtime is not on the default shell PATH. For this checkout:
 
 ```bash
-cd /Users/kathanthakkar/VibeCode/TriDelPhi
-export PATH="/Users/kathanthakkar/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH"
+cd <your clone>
+# Node 22+ must be on PATH (the Codex runtime kept its own copy off the default PATH).
 node bot/node_modules/wrangler/bin/wrangler.js login
 node bot/node_modules/wrangler/bin/wrangler.js whoami
 node bot/node_modules/wrangler/bin/wrangler.js deploy --config portal/wrangler.toml --dry-run

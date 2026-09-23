@@ -1,0 +1,45 @@
+# Known-vulnerability watch for everything this repository pins.
+#
+# This is what replaced Dependabot. The pull-request scan (tridelphi.yml) already
+# runs osv-scanner on every change, but an advisory published against a pin that
+# nobody touches would wait for the next unrelated pull request to surface. This
+# job asks OSV directly, every week and on any change to a pinned file, and goes
+# red when something needs upgrading — the red run is the notification.
+#
+# Read-only token, no secrets, no write scopes: it can report, never change.
+# Fixing is a normal pull request; scripts/deps.py and docs/RELEASES.md
+# ("Dependencies") say how.
+name: Dependency advisories
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/*-requirements.txt"
+      - "scripts/install-ladder.sh"
+      - "scripts/deps.py"
+      - "**/package-lock.json"
+      - "pyproject.toml"
+      - "action.yml"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  osv:
+    name: OSV advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # Standard library only: nothing is installed before the check runs.
+      - name: Every pinned dependency against OSV
+        run: python scripts/deps.py check

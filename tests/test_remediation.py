@@ -101,3 +101,26 @@ def test_self_hosted_fix_does_not_suggest_permissions():
     finding = next(f for f in result.findings if f.severity == "critical")
     assert finding.remediation.kind == "narrow-runner"
     assert "ephemeral" in finding.remediation.rendered
+
+
+def test_gate_advice_names_the_triggering_author(tmp_path):
+    """On `pull_request_target` there is no comment. Advice to gate on
+    `github.event.comment.author_association` there is never true, so following
+    it would switch the job off rather than protect it."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "w.yml").write_text(
+        "on: pull_request_target\n"
+        "jobs:\n"
+        "  label:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    if: github.actor == 'dependabot[bot]'\n"
+        "    permissions:\n"
+        "      pull-requests: write\n"
+        "    steps:\n"
+        "      - run: echo labelled\n",
+        encoding="utf-8",
+    )
+    finding = next(f for f in analyze(tmp_path).findings if f.rule_id == "tridelphi/weak-actor-guard")
+    assert "github.event.pull_request.author_association" in finding.remediation.rendered
+    assert "github.event.comment.author_association" not in finding.remediation.rendered

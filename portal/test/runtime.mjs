@@ -7,7 +7,9 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 const require = createRequire(process.env.PORTAL_TEST_PACKAGE_JSON || new URL("../../bot/package.json", import.meta.url));
 const { build } = require("esbuild");
-const { Miniflare } = require("miniflare");
+const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
+// Miniflare 5 takes a `workers` array; older toolchains take the v4 shape as-is.
+const v4Options = convertV4MiniflareOptions ?? (options => options);
 const origin = "https://scan.example.test";
 const bundle = await build({ stdin: { contents: `
   export { default } from './index.js';
@@ -29,7 +31,7 @@ for (const uncertain of [false, true]) {
   test(`full mocked install/auth/workspace/logout workflow, uncertain=${uncertain}`, async () => {
     let installed = false;
     const calls = [];
-    const mf = new Miniflare({
+    const mf = new Miniflare(v4Options({
       modules: true, script: bundle.outputFiles[0].text, compatibilityDate: "2026-08-01",
       bindings: { PUBLIC_ORIGIN: origin, GITHUB_CLIENT_ID: "fake-client", GITHUB_CLIENT_SECRET: "fake-secret",
         GITHUB_APP_ID: "123", GITHUB_APP_SLUG: "tridelphi-test", PAID_ENTITLEMENTS: "{}",
@@ -63,7 +65,7 @@ for (const uncertain of [false, true]) {
         }
         assert.fail(`Unexpected outbound request: ${url.pathname}`);
       },
-    });
+    }));
     const headers = { "CF-Connecting-IP": "192.0.2.1" };
     const send = (path, init = {}) => mf.dispatchFetch(origin + path, { redirect: "manual", ...init,
       headers: { ...headers, ...init.headers } });

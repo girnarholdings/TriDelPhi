@@ -44,9 +44,13 @@ fi
 # Design tooling for agents working on site/: the Impeccable skill (design
 # playbooks + a deterministic anti-pattern detector). Machine-local by intent
 # (see .gitignore); advisory, so its absence never fails the install.
+# Pinned: a bare `npx -y impeccable` runs whatever version is newest at that
+# moment. 4.1.0 has no dependencies and no install scripts, and npm versions
+# are immutable, so the pin fixes exactly what runs; `scripts/deps.py check`
+# watches it for advisories. Move it the way docs/RELEASES.md describes.
 step "Installing the Impeccable design skill (advisory)"
 if command -v npx >/dev/null 2>&1; then
-  npx -y impeccable install --providers=cursor --scope=project || \
+  npx -y impeccable@4.1.0 install --providers=cursor --scope=project || \
     echo "Impeccable install failed; design detector unavailable this session." >&2
 else
   echo "npx is absent, so the Impeccable design skill was skipped." >&2

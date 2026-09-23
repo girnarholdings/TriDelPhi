@@ -37,8 +37,8 @@ HELP
 }
 trap 'failed $LINENO' ERR
 
-# Where the wrapped scanners go. install-ladder.sh defaults to a temp directory
-# and, outside GitHub Actions, only *prints* "add to PATH" — nothing adds it. A
+# Where the wrapped scanners go. install-ladder.sh defaults to a directory that
+# is not on PATH and, outside GitHub Actions, only *prints* "add to PATH" — nothing adds it. A
 # codespace set up that way installs five scanners and then reports three of
 # them as "not run".
 TOOLS="$HOME/.local/bin"

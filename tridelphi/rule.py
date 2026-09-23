@@ -16,12 +16,14 @@ produced a specific fatal outcome in review:
 from __future__ import annotations
 
 import re
+from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from . import detect_agent_ingress, detect_egress, detect_guards, detect_privilege, detect_untrusted
-from .detect_untrusted import expression_paths, matches_untrusted_path
+from .detect_untrusted import untrusted_references
 from .model import (
     CapabilityHit,
     ExecutionContext,
@@ -32,7 +34,7 @@ from .model import (
 from .steps import iter_steps, uses_name
 from .tables import Tables
 
-__all__ = ["evaluate_all"]
+__all__ = ["evaluate_all", "injected_paths"]
 
 _AGENT_KINDS = {"agent-config-ingress", "agent-untrusted-worktree", "agent-mcp-ingress"}
 
@@ -146,14 +148,32 @@ def _scalar_texts(value: Any) -> Iterable[str]:
             yield from _scalar_texts(item)
 
 
-def _contains_direct_untrusted(value: Any, patterns: tuple[str, ...]) -> bool:
-    for text in _scalar_texts(value):
-        if any(matches_untrusted_path(path, patterns) for path in expression_paths(text)):
-            return True
-    return False
+@lru_cache(maxsize=256)
+def _needs_pattern(needs_refs: frozenset[str]) -> re.Pattern[str]:
+    alternatives = "|".join(re.escape(ref) for ref in sorted(needs_refs))
+    return re.compile(rf"(?<![A-Za-z0-9_-])(?:{alternatives})(?![A-Za-z0-9_-])")
 
 
-def _tainted_env_names(context: ExecutionContext, patterns: tuple[str, ...]) -> set[str]:
+def _references_needs(text: str, needs_refs: frozenset[str]) -> bool:
+    """Does ``text`` read one of the tainted ``needs.<job>.outputs.<name>``?"""
+    if not needs_refs or "needs" not in text:
+        return False
+    return _needs_pattern(needs_refs).search(_normalise_expression_notation(text)) is not None
+
+
+def _contains_direct_untrusted(
+    value: Any, patterns: tuple[str, ...], needs_refs: frozenset[str] = frozenset()
+) -> bool:
+    """Attacker text from the event payload, or a tainted upstream job output."""
+    return any(
+        untrusted_references(text, patterns) or _references_needs(text, needs_refs)
+        for text in _scalar_texts(value)
+    )
+
+
+def _tainted_env_names(
+    context: ExecutionContext, patterns: tuple[str, ...], needs_refs: frozenset[str] = frozenset()
+) -> set[str]:
     """Resolve direct workflow/job env aliases before inspecting outputs."""
 
     tainted: set[str] = set()
@@ -161,7 +181,7 @@ def _tainted_env_names(context: ExecutionContext, patterns: tuple[str, ...]) -> 
         if env_node is None or not env_node.is_mapping():
             continue
         for name, node in env_node.items():
-            if _contains_direct_untrusted(node.value, patterns):
+            if _contains_direct_untrusted(node.value, patterns, needs_refs):
                 tainted.add(str(name))
     return tainted
 
@@ -173,7 +193,12 @@ def _references_tainted_env(text: str, tainted: set[str]) -> bool:
     return False
 
 
-def _tainted_step_ids(context: ExecutionContext, patterns: tuple[str, ...]) -> set[str]:
+def _tainted_step_ids(
+    context: ExecutionContext,
+    patterns: tuple[str, ...],
+    needs_refs: frozenset[str] = frozenset(),
+    files_tainted: bool = False,
+) -> set[str]:
     """Identify the producing step, instead of tainting every step output.
 
     A direct event expression taints only the step that consumes it. A shell
@@ -183,38 +208,50 @@ def _tainted_step_ids(context: ExecutionContext, patterns: tuple[str, ...]) -> s
     """
 
     tainted: set[str] = set()
-    inherited_env = _tainted_env_names(context, patterns)
+    inherited_env = _tainted_env_names(context, patterns, needs_refs)
     for step in iter_steps(context.body):
         step_id = step.get("id")
         if step_id is None or not step_id.text:
             continue
-        direct = _contains_direct_untrusted(step.value, patterns)
+        direct = _contains_direct_untrusted(step.value, patterns, needs_refs)
         env_tainted = any(
             _references_tainted_env(text, inherited_env) for text in _scalar_texts(step.value)
         )
         run = step.get("run")
-        worktree_derived = context.untrusted_worktree and run is not None
+        worktree_derived = (context.untrusted_worktree or files_tainted) and run is not None
         if direct or env_tainted or worktree_derived:
             tainted.add(step_id.text)
     return tainted
 
 
-def _tainted_outputs(context: ExecutionContext, tables: Tables) -> tuple[str, ...]:
-    """Job outputs whose values have a concrete attacker-controlled source."""
+def _tainted_outputs(
+    context: ExecutionContext,
+    tables: Tables,
+    needs_refs: frozenset[str] = frozenset(),
+    files_tainted: bool = False,
+) -> tuple[str, ...]:
+    """Job outputs whose values have a concrete attacker-controlled source.
+
+    ``needs_refs`` are the upstream outputs already known to be tainted, so a
+    job that merely re-exports one (``outputs: x: ${{ needs.a.outputs.x }}``)
+    passes the taint on instead of laundering it.
+    """
 
     outputs = context.body.get("outputs")
     if outputs is None or not outputs.is_mapping():
         return ()
     patterns = tables.tuple_of("untrusted_expressions", "paths")
-    tainted_steps = _tainted_step_ids(context, patterns)
-    tainted_env = _tainted_env_names(context, patterns)
+    tainted_steps = _tainted_step_ids(context, patterns, needs_refs, files_tainted)
+    tainted_env = _tainted_env_names(context, patterns, needs_refs)
     tainted = []
     for name, node in outputs.items():
         text = node.text
         if not text:
             continue
         normalised = _normalise_expression_notation(text)
-        if _contains_direct_untrusted(text, patterns) or _references_tainted_env(text, tainted_env):
+        if _contains_direct_untrusted(text, patterns, needs_refs) or _references_tainted_env(
+            text, tainted_env
+        ):
             tainted.append(str(name))
             continue
         if any(step_id in tainted_steps for step_id, _ in _STEP_OUTPUT_RE.findall(normalised)):
@@ -224,8 +261,10 @@ def _tainted_outputs(context: ExecutionContext, tables: Tables) -> tuple[str, ..
 
 # A job whose worktree holds pull request code (these U kinds) can pack that
 # attacker-authored code into an uploaded artifact. Expression-injection is a
-# shell-exec issue, not a file-on-disk one, so it is deliberately excluded.
-_WORKTREE_U_KINDS = ("untrusted-checkout", "agent-untrusted-worktree")
+# shell-exec issue, not a file-on-disk one, so it is deliberately excluded. A
+# job that downloaded such an artifact holds the same files, so whatever it
+# uploads or derives carries them on.
+_WORKTREE_U_KINDS = ("untrusted-checkout", "agent-untrusted-worktree", "cross-job-artifact")
 
 
 def _uses_position(context: ExecutionContext, markers: tuple[str, ...]) -> Position | None:
@@ -266,11 +305,13 @@ def _literal_artifact_paths(step: Any) -> tuple[str, ...] | None:
     return tuple(values)
 
 
-def _tainted_written_paths(context: ExecutionContext, tables: Tables) -> tuple[str, ...]:
+def _tainted_written_paths(
+    context: ExecutionContext, tables: Tables, needs_refs: frozenset[str] = frozenset()
+) -> tuple[str, ...]:
     """Literal files a directly tainted shell step writes before upload."""
 
     patterns = tables.tuple_of("untrusted_expressions", "paths")
-    inherited_env = _tainted_env_names(context, patterns)
+    inherited_env = _tainted_env_names(context, patterns, needs_refs)
     written: set[str] = set()
     for step in iter_steps(context.body):
         run = step.get("run")
@@ -282,13 +323,13 @@ def _tainted_written_paths(context: ExecutionContext, tables: Tables) -> tuple[s
             tainted_env.update(
                 str(name)
                 for name, node in step_env.items()
-                if _contains_direct_untrusted(node.value, patterns)
+                if _contains_direct_untrusted(node.value, patterns, needs_refs)
             )
         shell_tainted: set[str] = set()
         for line in run.text.splitlines():
-            line_tainted = _contains_direct_untrusted(line, patterns) or _references_tainted_env(
-                line, tainted_env | shell_tainted
-            )
+            line_tainted = _contains_direct_untrusted(
+                line, patterns, needs_refs
+            ) or _references_tainted_env(line, tainted_env | shell_tainted)
             assignment = _SHELL_ASSIGN_RE.match(line)
             if assignment and line_tainted:
                 shell_tainted.add(assignment.group(1))
@@ -312,11 +353,14 @@ def _path_channel_may_match(written: str, uploaded: str) -> bool:
 
 
 def _tainted_artifact_uploads(
-    context: ExecutionContext, u_hits: Sequence[CapabilityHit], tables: Tables
+    context: ExecutionContext,
+    u_hits: Sequence[CapabilityHit],
+    tables: Tables,
+    needs_refs: frozenset[str] = frozenset(),
 ) -> tuple[ArtifactFlow, ...]:
     """Artifacts uploaded by a job whose worktree contains pull-request code."""
     untrusted_worktree = any(h.kind in _WORKTREE_U_KINDS for h in u_hits)
-    tainted_paths = _tainted_written_paths(context, tables)
+    tainted_paths = _tainted_written_paths(context, tables, needs_refs)
     if not untrusted_worktree and not tainted_paths:
         return ()
     markers = tables.tuple_of("egress", "artifact_producers")
@@ -536,23 +580,43 @@ def _remediation(
             ),
         )
 
-    # 3. Agent prompt injection: the prompt is the sink, not the shell.
+    # 3. Agent prompt injection: the prompt is the sink, not the shell. The
+    # gate must vet whoever WROTE the injected text — the commenter for a
+    # comment, the issue author for an issue body — or the detectors (rightly)
+    # keep the finding, and advice the tool gives must be advice it accepts.
     hit = u_kinds.get("agent-prompt-injection")
     if hit is not None:
+        token = _quoted_token(hit.reason)
+        gate = detect_guards.association_gate(injected_paths(u_hits, "agent-prompt-injection"))
+        if gate is None:
+            return Remediation(
+                strip="U",
+                kind="drop-prompt-input",
+                target=token,
+                target_position=hit.position,
+                breaks="the agent no longer receives that text inline",
+                rendered=(
+                    f"Strip untrusted input. {token} is placed in the agent's prompt at "
+                    f"{_loc(hit.position)}, and the agent obeys what it reads. No "
+                    "`author_association` gate can vouch for whoever wrote that text, "
+                    "so take it out of the prompt: say where the material is and let "
+                    "the agent read it with read-only tools, in a job that holds no "
+                    "credential worth stealing."
+                ),
+            )
         return Remediation(
             strip="U",
             kind="narrow-trigger",
-            target=_quoted_token(hit.reason),
+            target=token,
             target_position=hit.position,
             breaks="drive-by contributors stop being able to invoke the agent",
             rendered=(
-                f"Strip untrusted input. {_quoted_token(hit.reason)} is placed in the "
-                f"agent's prompt at {_loc(hit.position)}, and the agent obeys what it "
-                "reads. Escaping does not help — the injection is semantic, not "
-                "syntactic. Gate the job on the commenter's association so only "
-                "trusted accounts can reach it:\n"
-                "    if: contains(fromJSON('[\"OWNER\",\"MEMBER\"]'), "
-                "github.event.comment.author_association)\n"
+                f"Strip untrusted input. {token} is placed in the agent's prompt at "
+                f"{_loc(hit.position)}, and the agent obeys what it reads. Escaping "
+                "does not help — the injection is semantic, not syntactic. Gate the "
+                "job on the association of whoever wrote that text, so only trusted "
+                "accounts can put words in front of the agent:\n"
+                f"    if: {gate}\n"
                 "That keeps the feature for maintainers and removes untrusted ingress "
                 "entirely. Removing the secret instead would break the agent step."
             ),
@@ -661,6 +725,18 @@ def _remediation(
     return None
 
 
+_INJECTED_RE = re.compile(r"`\$\{\{\s*(.+?)\s*\}\}`")
+
+
+def injected_paths(hits: Iterable[CapabilityHit], kind: str) -> list[str]:
+    """The context paths named by hits of ``kind`` (their ``${{ … }}`` token)."""
+    paths = []
+    for hit in hits:
+        if hit.kind == kind and (match := _INJECTED_RE.search(hit.reason)):
+            paths.append(match.group(1))
+    return paths
+
+
 def _quoted_token(reason: str) -> str:
     start = reason.find("`")
     if start == -1:
@@ -688,26 +764,79 @@ def _workflow_has_secret(contexts: Iterable[ExecutionContext], workflow_file: st
     return None
 
 
+def _dependency_order(contexts: Sequence[ExecutionContext]) -> list[str]:
+    """Labels ordered so every job comes after the jobs it ``needs``.
+
+    Kahn's algorithm, seeded in input order so the result is deterministic.
+    A ``needs`` cycle is invalid on GitHub; its members are appended last, in
+    input order, rather than looped over.
+    """
+    labels = [ctx.label for ctx in contexts]
+    known = set(labels)
+    dependents: dict[str, list[str]] = {}
+    indegree: dict[str, int] = {}
+    for ctx in contexts:
+        deps = {f"{ctx.workflow_file}::{dep}" for dep in ctx.needs} & known
+        deps.discard(ctx.label)
+        indegree[ctx.label] = len(deps)
+        for dep in sorted(deps):
+            dependents.setdefault(dep, []).append(ctx.label)
+    ready = deque(label for label in labels if indegree[label] == 0)
+    order: list[str] = []
+    while ready:
+        label = ready.popleft()
+        order.append(label)
+        for dependent in dependents.get(label, ()):
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                ready.append(dependent)
+    placed = set(order)
+    return order + [label for label in labels if label not in placed]
+
+
+def _tainted_needs(ctx: ExecutionContext, upstream: dict[str, JobProvenance]) -> frozenset[str]:
+    refs: set[str] = set()
+    for dep in ctx.needs:
+        entry = upstream.get(f"{ctx.workflow_file}::{dep}")
+        if entry:
+            refs.update(f"needs.{dep}.outputs.{output}" for output in entry.outputs)
+    return frozenset(refs)
+
+
 def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[Finding]:
     per_context: dict[str, tuple[list[CapabilityHit], list[CapabilityHit], list[CapabilityHit]]] = {}
-    upstream: dict[str, JobProvenance] = {}
-
+    by_label = {ctx.label: ctx for ctx in contexts}
     for ctx in contexts:
         u = detect_untrusted.detect(ctx, tables)
         u += detect_agent_ingress.detect(ctx, tables)
         p = detect_privilege.detect(ctx, tables)
         e = detect_egress.detect(ctx, tables)
         per_context[ctx.label] = (u, p, e)
-        upstream[ctx.label] = JobProvenance(
+
+    # Provenance in dependency order, so taint crosses as many job boundaries
+    # as the `needs:` graph does. Computed once per job from its own hits, a
+    # relay job that re-exported `needs.a.outputs.x`, or re-uploaded an
+    # artifact it downloaded, laundered the taint, and the privileged job
+    # behind it read as a compliant note.
+    upstream: dict[str, JobProvenance] = {}
+    cross_hits: dict[str, list[CapabilityHit]] = {}
+    for label in _dependency_order(contexts):
+        ctx = by_label[label]
+        cross = _cross_job_hits(ctx, upstream, tables)
+        cross_hits[label] = cross
+        u_all = [*per_context[label][0], *cross]
+        refs = _tainted_needs(ctx, upstream)
+        files_tainted = any(h.kind == "cross-job-artifact" for h in cross)
+        upstream[label] = JobProvenance(
             context=ctx,
-            outputs=_tainted_outputs(ctx, tables),
-            artifacts=_tainted_artifact_uploads(ctx, u, tables),
+            outputs=_tainted_outputs(ctx, tables, refs, files_tainted),
+            artifacts=_tainted_artifact_uploads(ctx, u_all, tables, refs),
         )
 
     findings: list[Finding] = []
     for ctx in contexts:
         u, p, e = per_context[ctx.label]
-        u = sorted(u + _cross_job_hits(ctx, upstream, tables), key=lambda h: h.sort_key)
+        u = sorted(u + cross_hits[ctx.label], key=lambda h: h.sort_key)
 
         unknown_agents = detect_agent_ingress.detect_unknown_semantics(ctx, tables)
         if unknown_agents:
@@ -791,8 +920,7 @@ def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[F
                             "than granting a capability, so a successful injection meets "
                             "no boundary. Name the accounts allowed to trigger it instead "
                             "of accepting any:\n"
-                            "    if: contains(fromJSON('[\"OWNER\",\"MEMBER\"]'), "
-                            "github.event.comment.author_association)\n"
+                            f"    if: {detect_guards.trigger_association_gate(ctx.triggers)}\n"
                             "and grant the narrowest tool set the task actually needs "
                             "rather than skipping permission checks."
                         ),
@@ -827,8 +955,7 @@ def evaluate_all(contexts: Sequence[ExecutionContext], tables: Tables) -> list[F
                             "trusts `github.actor`, which the Dependabot confused-deputy "
                             "trick and forged git identities defeat. Gate on the event's "
                             "association instead:\n"
-                            "    if: contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), "
-                            "github.event.comment.author_association)\n"
+                            f"    if: {detect_guards.trigger_association_gate(ctx.triggers)}\n"
                             "or check the caller's real repository permission with a "
                             "permission-lookup action. Actor identity is not authorization."
                         ),

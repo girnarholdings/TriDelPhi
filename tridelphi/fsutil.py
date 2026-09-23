@@ -75,6 +75,10 @@ def atomic_write_text(
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
+            # A report can quote a file name that is not valid UTF-8 (a lone
+            # surrogate in Python). Write it as a visible escape rather than
+            # abandon the report — and the temp file — halfway.
+            errors="backslashreplace",
             newline="\n",
             dir=parent,
             prefix=f".{target.name}.",

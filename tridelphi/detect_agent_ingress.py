@@ -56,10 +56,16 @@ class AgentStep:
         return self.state != "unknown"
 
     def covers(self, path: str) -> bool:
-        """Is ``path`` replaced with base-branch content before the agent reads it?"""
-        candidate = posixpath.normpath(path.replace("\\", "/")).lstrip("./")
+        """Is ``path`` replaced with base-branch content before the agent reads it?
+
+        ``normpath`` already folds a leading ``./``; only a leading ``/`` is left
+        to drop. (``lstrip("./")`` strips *characters*, so it turned the
+        restored ``.claude/`` into ``claude/`` and vouched for an unrestored
+        ``claude/CLAUDE.md``.)
+        """
+        candidate = posixpath.normpath(path.replace("\\", "/")).lstrip("/")
         for restored in self.restores():
-            pattern = posixpath.normpath(str(restored).replace("\\", "/")).lstrip("./")
+            pattern = posixpath.normpath(str(restored).replace("\\", "/")).lstrip("/")
             if str(restored).endswith("/"):
                 if candidate == pattern or candidate.startswith(f"{pattern}/"):
                     return True
@@ -143,8 +149,8 @@ def _prompt_injection(context: ExecutionContext, tables: Tables) -> list[Capabil
     is invisible to a YAML linter: nothing here is shell metacharacters, the
     injection is semantic.
     """
-    from .detect_guards import has_strong_association_gate
-    from .detect_untrusted import expression_paths, matches_untrusted_path
+    from .detect_guards import is_vetted, vetted_event_prefixes
+    from .detect_untrusted import untrusted_references
 
     patterns = tables.tuple_of("untrusted_expressions", "paths")
     prompt_inputs = tables.tuple_of("agent_signals", "prompt_inputs")
@@ -154,8 +160,8 @@ def _prompt_injection(context: ExecutionContext, tables: Tables) -> list[Capabil
     # (escaping cannot help — the injection is semantic). Once the job carries
     # that gate, only trusted accounts can put text in front of the agent, so
     # the ingress claim no longer holds. Advice the tool gives must be advice
-    # the tool accepts.
-    gated = has_strong_association_gate(context)
+    # the tool accepts — for the author it vets and no one else.
+    vetted = vetted_event_prefixes(context)
 
     for agent in agent_steps(context, tables):
         with_node = agent.node.get("with")
@@ -165,10 +171,8 @@ def _prompt_injection(context: ExecutionContext, tables: Tables) -> list[Capabil
             node = with_node.get(key)
             if node is None or not node.text:
                 continue
-            for path in expression_paths(node.text):
-                if gated and path.startswith("github.event."):
-                    continue
-                if matches_untrusted_path(path, patterns):
+            for path, _pattern in untrusted_references(node.text, patterns):
+                if not is_vetted(path, vetted):
                     hits.append(
                         CapabilityHit(
                             capability="U",

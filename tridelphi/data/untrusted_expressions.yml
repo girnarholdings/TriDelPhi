@@ -34,6 +34,8 @@ paths:
   - github.event.workflow_run.head_commit.author.email
   - github.event.workflow_run.head_commit.author.name
   - github.event.workflow_run.head_repository.description
+  - github.event.workflow_run.display_title
+  - github.event.workflow_run.pull_requests.*.head.ref
   - github.head_ref
 
 # Refs whose content is chosen by the pull request author. A checkout resolving
