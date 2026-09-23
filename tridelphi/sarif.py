@@ -52,10 +52,13 @@ def is_suppressed(result: dict[str, Any]) -> bool:
     Defensive: the field is attacker-adjacent (it rides in a subprocess's output),
     so a malformed ``suppressions`` never raises — only a well-formed, non-empty
     array suppresses, and anything else counts, which fails safe toward showing.
+    A suppression whose ``status`` is ``underReview`` or ``rejected`` has not
+    been accepted by anyone, so it suppresses nothing; no status is the
+    in-source case (semgrep writes none) and counts as accepted.
     """
     supp = result.get("suppressions")
     return isinstance(supp, list) and len(supp) > 0 and all(
-        isinstance(s, dict) for s in supp
+        isinstance(s, dict) and s.get("status", "accepted") == "accepted" for s in supp
     )
 
 

@@ -132,3 +132,10 @@ def test_is_suppressed_matches_sarif_semantics():
     assert not is_suppressed({"suppressions": "nope"})
     assert not is_suppressed({"suppressions": ["not-a-dict"]})
     assert not is_suppressed({"suppressions": None})
+    # a suppression nobody accepted suppresses nothing (§3.35.3 `status`):
+    assert is_suppressed({"suppressions": [{"kind": "inSource", "status": "accepted"}]})
+    assert not is_suppressed({"suppressions": [{"kind": "external", "status": "rejected"}]})
+    assert not is_suppressed({"suppressions": [{"kind": "inSource", "status": "underReview"}]})
+    assert not is_suppressed({"suppressions": [{"kind": "inSource"},
+                                               {"kind": "external", "status": "rejected"}]})
+    assert not is_suppressed({"suppressions": [{"kind": "inSource", "status": 1}]})

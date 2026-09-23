@@ -65,6 +65,16 @@ def test_advisory_check_sees_every_pinned_file(repo_root, deps):
     assert {"PyPI", "npm", "GitHub Actions", "Go"} <= ecosystems, ecosystems
 
 
+def test_setup_scripts_run_no_unpinned_npx_package(repo_root, deps):
+    """`npx -y name` fetches and runs the newest release at that moment — the
+    same hole a lockfile closes, on the machine an agent works from."""
+    specs = deps["npx_specs"](repo_root)
+    unpinned = [f"{source}: {spec}" for spec, source in specs
+                if not deps["_NPX_PINNED"].match(spec)]
+    assert not unpinned, f"npx packages without an exact version: {unpinned}"
+    assert {p.name for p in deps["npx_pins"](repo_root)} >= {s.split("@")[0] for s, _ in specs}
+
+
 def test_every_action_pin_names_its_version(repo_root):
     """OSV looks an action up by release version, and the version lives only in
     the trailing comment. A bare SHA is invisible to the advisory check."""

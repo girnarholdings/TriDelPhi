@@ -303,8 +303,9 @@ without breaking them.
 **Knowing** is `.github/workflows/dependency-advisories.yml`. Every Monday, and
 on any pull request that changes a pinned file, `python scripts/deps.py check`
 asks [OSV](https://osv.dev) about every version this repository pins or admits:
-the scanner closures, the npm lockfiles, the action pins, the ladder's prebuilt
-scanners and the floor of each `pyproject.toml` range. A red run is the
+the scanner closures, the npm lockfiles, the `npx` package in the Cursor
+setup, the action pins, the ladder's prebuilt scanners and the floor of each
+`pyproject.toml` range. A red run is the
 notification. It runs the same way locally.
 
 **Moving a pin** is an ordinary pull request, under one rule: do not adopt a
@@ -319,6 +320,7 @@ and such releases are usually pulled within days.
 | An action pin | Resolve the tag to its **commit**: `git ls-remote https://github.com/OWNER/REPO 'refs/tags/vX.Y.Z^{}'`, or the plain ref when that prints nothing (a lightweight tag). Replace the SHA and comment everywhere it appears: workflows, `action.yml`, `tridelphi/init_cmd.py` and `site/setup.html`. `tests/test_pin_parity.py` names any copy you miss. Then run `tridelphi verify . --relock` and commit `.tridelphi/trust.lock`. |
 | The bot's `wrangler` | `cd bot && npm install --save-dev --save-exact wrangler@X.Y.Z --ignore-scripts`, then `npm test`, `node --test test/portal-runtime.test.mjs`, and `wrangler deploy --dry-run` in both `bot/` and `portal/`. |
 | A `pyproject.toml` range | Raise the floor past any version with an advisory. `deps.py check` tests the floor, not only what CI happens to resolve. |
+| An `npx -y name@X.Y.Z` in a setup script | Change the exact version in place (`.cursor/install.sh`). Check first that the release adds no dependencies or install scripts, since `npx` resolves them fresh, outside any lockfile. `tests/test_repo_config.py` rejects an `npx` package with no exact version. |
 
 If Dependabot security updates are still switched on in the repository settings,
 they keep opening pull requests with no config file present. Turning them off is

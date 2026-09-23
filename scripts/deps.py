@@ -197,10 +197,38 @@ def pyproject_floor_pins(root: Path) -> list[Pin]:
     return pins
 
 
+# `npx -y name@1.2.3` in a setup script: the one npm package run outside a
+# lockfile. A bare `npx -y name` runs whatever is newest at that moment.
+_NPX = re.compile(r"\bnpx\s+(?:-y|--yes)\s+(?P<spec>[^\s;&|]+)")
+_NPX_PINNED = re.compile(r"^(?P<name>(?:@[\w.-]+/)?[\w.-]+)@(?P<version>\d+\.\d+\.\d+[\w.+-]*)$")
+SETUP_SCRIPTS = (".cursor/install.sh", ".devcontainer/*.sh", "scripts/*.sh")
+
+
+def npx_specs(root: Path) -> list[tuple[str, str]]:
+    """Every ``npx -y`` package spec in a setup script, with its file."""
+    found = []
+    for pattern in SETUP_SCRIPTS:
+        for script in sorted(root.glob(pattern)):
+            for line in script.read_text(encoding="utf-8").splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
+                found.extend((m["spec"], _rel(script, root)) for m in _NPX.finditer(line))
+    return found
+
+
+def npx_pins(root: Path) -> list[Pin]:
+    pins = []
+    for spec, source in npx_specs(root):
+        if m := _NPX_PINNED.match(spec):
+            pins.append(Pin("npm", m["name"], m["version"], source))
+    return pins
+
+
 def all_pins(root: Path) -> list[Pin]:
     return (
         closure_pins(root)
         + npm_lock_pins(root)
+        + npx_pins(root)
         + action_pins(root)
         + ladder_binary_pins(root)
         + pyproject_floor_pins(root)

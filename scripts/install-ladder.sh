@@ -28,7 +28,15 @@ set -euo pipefail
 
 # Levels 3 and 6 install the same tools (6 adds only native attest/gate).
 LEVEL="${1:-3}"
-DEST="${2:-${RUNNER_TEMP:-/tmp}/tridelphi-tools}"
+# Outside CI the default is under your home directory, not a shared /tmp path
+# another account could create first and then swap binaries inside.
+if [ -n "${2:-}" ]; then
+  DEST="$2"
+elif [ -n "${RUNNER_TEMP:-}" ]; then
+  DEST="${RUNNER_TEMP}/tridelphi-tools"
+else
+  DEST="${HOME}/.tridelphi-tools"
+fi
 
 # Validate the level before it reaches a `[ "$LEVEL" -ge N ]` test. A
 # non-numeric value would otherwise either abort the script with a cryptic
@@ -54,6 +62,12 @@ SCORECARD_SHA256=83b90a05c1540ef1390db1cd5711e5fd04be9c1d8537fb84d39d02092d6a8df
 SEMGREP_VERSION=1.177.0
 
 mkdir -p "$DEST"
+# Downloads are written into DEST and later run from it: a directory another
+# account owns (or a symlink to one) could redirect a write or replace a binary.
+if [ ! -O "$DEST" ] || [ -L "$DEST" ]; then
+  echo "install-ladder.sh: $DEST is a symlink or belongs to another account; refusing." >&2
+  exit 1
+fi
 
 linux_amd64() { [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; }
 
