@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import detect_agent_ingress, detect_egress, detect_guards, detect_privilege, detect_untrusted
-from .detect_untrusted import expression_paths, matches_untrusted_path
+from .detect_untrusted import untrusted_references
 from .model import (
     CapabilityHit,
     ExecutionContext,
@@ -32,7 +32,7 @@ from .model import (
 from .steps import iter_steps, uses_name
 from .tables import Tables
 
-__all__ = ["evaluate_all"]
+__all__ = ["evaluate_all", "injected_paths"]
 
 _AGENT_KINDS = {"agent-config-ingress", "agent-untrusted-worktree", "agent-mcp-ingress"}
 
@@ -147,10 +147,7 @@ def _scalar_texts(value: Any) -> Iterable[str]:
 
 
 def _contains_direct_untrusted(value: Any, patterns: tuple[str, ...]) -> bool:
-    for text in _scalar_texts(value):
-        if any(matches_untrusted_path(path, patterns) for path in expression_paths(text)):
-            return True
-    return False
+    return any(untrusted_references(text, patterns) for text in _scalar_texts(value))
 
 
 def _tainted_env_names(context: ExecutionContext, patterns: tuple[str, ...]) -> set[str]:
@@ -536,23 +533,43 @@ def _remediation(
             ),
         )
 
-    # 3. Agent prompt injection: the prompt is the sink, not the shell.
+    # 3. Agent prompt injection: the prompt is the sink, not the shell. The
+    # gate must vet whoever WROTE the injected text — the commenter for a
+    # comment, the issue author for an issue body — or the detectors (rightly)
+    # keep the finding, and advice the tool gives must be advice it accepts.
     hit = u_kinds.get("agent-prompt-injection")
     if hit is not None:
+        token = _quoted_token(hit.reason)
+        gate = detect_guards.association_gate(injected_paths(u_hits, "agent-prompt-injection"))
+        if gate is None:
+            return Remediation(
+                strip="U",
+                kind="drop-prompt-input",
+                target=token,
+                target_position=hit.position,
+                breaks="the agent no longer receives that text inline",
+                rendered=(
+                    f"Strip untrusted input. {token} is placed in the agent's prompt at "
+                    f"{_loc(hit.position)}, and the agent obeys what it reads. No "
+                    "`author_association` gate can vouch for whoever wrote that text, "
+                    "so take it out of the prompt: say where the material is and let "
+                    "the agent read it with read-only tools, in a job that holds no "
+                    "credential worth stealing."
+                ),
+            )
         return Remediation(
             strip="U",
             kind="narrow-trigger",
-            target=_quoted_token(hit.reason),
+            target=token,
             target_position=hit.position,
             breaks="drive-by contributors stop being able to invoke the agent",
             rendered=(
-                f"Strip untrusted input. {_quoted_token(hit.reason)} is placed in the "
-                f"agent's prompt at {_loc(hit.position)}, and the agent obeys what it "
-                "reads. Escaping does not help — the injection is semantic, not "
-                "syntactic. Gate the job on the commenter's association so only "
-                "trusted accounts can reach it:\n"
-                "    if: contains(fromJSON('[\"OWNER\",\"MEMBER\"]'), "
-                "github.event.comment.author_association)\n"
+                f"Strip untrusted input. {token} is placed in the agent's prompt at "
+                f"{_loc(hit.position)}, and the agent obeys what it reads. Escaping "
+                "does not help — the injection is semantic, not syntactic. Gate the "
+                "job on the association of whoever wrote that text, so only trusted "
+                "accounts can put words in front of the agent:\n"
+                f"    if: {gate}\n"
                 "That keeps the feature for maintainers and removes untrusted ingress "
                 "entirely. Removing the secret instead would break the agent step."
             ),
@@ -659,6 +676,18 @@ def _remediation(
             ),
         )
     return None
+
+
+_INJECTED_RE = re.compile(r"`\$\{\{\s*(.+?)\s*\}\}`")
+
+
+def injected_paths(hits: Iterable[CapabilityHit], kind: str) -> list[str]:
+    """The context paths named by hits of ``kind`` (their ``${{ … }}`` token)."""
+    paths = []
+    for hit in hits:
+        if hit.kind == kind and (match := _INJECTED_RE.search(hit.reason)):
+            paths.append(match.group(1))
+    return paths
 
 
 def _quoted_token(reason: str) -> str:

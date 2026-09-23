@@ -33,6 +33,7 @@ _COST: dict[str, tuple[int, str]] = {
     "drop-env-file-write": (1, "small change"),
     "drop-step": (1, "small change"),
     "narrow-trigger": (1, "small change"),
+    "drop-prompt-input": (1, "small change"),
     "split-job": (2, "restructure"),
     "move-secret": (2, "restructure"),
     "narrow-runner": (2, "restructure"),

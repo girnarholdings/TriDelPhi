@@ -37,9 +37,11 @@ from pathlib import Path
 from typing import Literal
 
 from .api import analyze
+from .detect_guards import association_gate
 from .fsutil import atomic_write_text
 from .model import Finding
 from .render import SEVERITY_ORDER
+from .rule import injected_paths
 
 __all__ = [
     "AUTO_FIXABLE",
@@ -361,16 +363,22 @@ def _fix_narrow_trigger(text: str, finding: Finding) -> str | None:
     if any(re.match(r"^\s*if:", ln) for ln in body):
         return None  # an existing gate is logic we must not clobber
     child_indent = " " * (len(body[0]) - len(body[0].lstrip()))
-    association = next(
-        (ctx for trig, ctx in _ASSOCIATION_CONTEXT if trig in finding.context.triggers),
-        None,
-    )
-    if association is None:
-        return None
-    gate = (
-        f"{child_indent}if: contains(fromJSON('[\"OWNER\",\"MEMBER\","
-        f"\"COLLABORATOR\"]'), {association})"
-    )
+    # Vet whoever wrote the injected text; the trigger's own author is only the
+    # fallback when the finding names no path (a gate on the commenter does
+    # not make the issue body the comment sits on trustworthy).
+    expression = association_gate(injected_paths(finding.hits, "agent-prompt-injection"))
+    if expression is None:
+        association = next(
+            (ctx for trig, ctx in _ASSOCIATION_CONTEXT if trig in finding.context.triggers),
+            None,
+        )
+        if association is None:
+            return None
+        expression = (
+            "contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), "
+            f"{association})"
+        )
+    gate = f"{child_indent}if: {expression}"
     return "\n".join([*lines[:start + 1], gate, *lines[start + 1:end], *lines[end:]])
 
 

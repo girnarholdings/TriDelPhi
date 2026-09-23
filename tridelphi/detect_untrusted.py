@@ -17,8 +17,9 @@ from collections.abc import Iterator
 from .model import CapabilityHit, ExecutionContext
 from .steps import iter_steps, uses_name
 from .tables import Tables
+from .yamlnode import YamlNode
 
-__all__ = ["detect", "expression_paths", "matches_untrusted_path"]
+__all__ = ["detect", "expression_paths", "matches_untrusted_path", "untrusted_references"]
 
 _EXPR = re.compile(r"\$\{\{(.+?)\}\}", re.DOTALL)
 
@@ -55,6 +56,45 @@ def matches_untrusted_path(path: str, patterns: tuple[str, ...]) -> str | None:
     return None
 
 
+# A whole object serialised into text: `toJSON(github.event)` renders every
+# attacker-written title and body inside it. GitHub function names are
+# case-insensitive.
+_TO_JSON = re.compile(r"\btoJSON\s*\(\s*([A-Za-z_][A-Za-z0-9_.\[\]'\"*-]*)\s*\)", re.IGNORECASE)
+
+
+def _normalise_path(path: str) -> str:
+    return path.replace("['", ".").replace("']", "").replace('["', ".").replace('"]', "")
+
+
+def _contains_untrusted(obj: str, patterns: tuple[str, ...]) -> str | None:
+    """The first table path that lies inside the serialised object ``obj``."""
+    prefix = _normalise_path(obj).rstrip(".") + "."
+    return next((pattern for pattern in patterns if pattern.startswith(prefix)), None)
+
+
+def untrusted_references(text: str, patterns: tuple[str, ...]) -> list[tuple[str, str]]:
+    """``(path, table pattern)`` for every attacker-controlled value in ``${{ }}``.
+
+    A leaf such as ``github.event.issue.title`` matches the table directly. An
+    object serialised whole — ``toJSON(github.event)``, a common debugging
+    line — carries every untrusted field beneath it, and matched nothing while
+    only leaves were compared: ``echo '${{ toJSON(github.event) }}'`` ran an
+    issue title containing a quote through the shell unseen.
+    """
+    found: list[tuple[str, str]] = []
+    for match in _EXPR.finditer(text or ""):
+        inner = match.group(1)
+        for path in expression_paths(match.group(0)):
+            pattern = matches_untrusted_path(path, patterns)
+            if pattern:
+                found.append((path, pattern))
+        for obj in _TO_JSON.findall(inner):
+            pattern = _contains_untrusted(obj, patterns)
+            if pattern:
+                found.append((obj, pattern))
+    return found
+
+
 def _reexpands(run_text: str, var_name: str, markers: tuple[str, ...]) -> bool:
     """Does this run block defeat the env-indirection mitigation?"""
     if any(marker in run_text for marker in markers):
@@ -72,23 +112,36 @@ def _scan_interpreter_sinks(
     env_files = tables.tuple_of("untrusted_expressions", "env_file_targets")
 
     # A strong author_association job gate means only trusted accounts can make
-    # this job run at all, so event-payload text is no longer stranger-writable.
-    # This is the remediation rule.py recommends for expression injection —
-    # honouring it here is what makes that advice actually turn the scan green.
-    # Scope: `github.event.*` paths only (the payload the gate vets the author
-    # of); env-file writes and re-expansion keep firing as defence in depth.
-    from .detect_guards import has_strong_association_gate
+    # this job run at all — but it vets one author: the one whose object it
+    # names. Text written by that author is no longer stranger-writable; the
+    # rest of the payload still is (see ``vetted_event_prefixes``). This is the
+    # remediation rule.py recommends, and honouring exactly its scope is what
+    # makes that advice turn the scan green without hiding the issue a trusted
+    # commenter happens to act on. Env-file writes and re-expansion keep firing
+    # as defence in depth.
+    from .detect_guards import is_vetted, vetted_event_prefixes
 
-    gated = has_strong_association_gate(context)
+    vetted = vetted_event_prefixes(context)
+
+    # Workflow- and job-level `env:` reach every step; a job value overrides a
+    # workflow one, so a safe override clears an untrusted inherited value.
+    inherited: dict[str, tuple[str, YamlNode]] = {}
+    for scope in (context.workflow_env, context.body.get("env")):
+        if scope is None or not scope.is_mapping():
+            continue
+        for var, val in scope.items():
+            refs = untrusted_references(val.text, patterns) if val.text else []
+            if refs:
+                inherited[str(var)] = (refs[0][0], val)
+            else:
+                inherited.pop(str(var), None)
+    reported_inherited: set[str] = set()
 
     for step in iter_steps(context.body):
         run = step.get("run")
         if run is not None and run.text:
-            for path in expression_paths(run.text):
-                matched = matches_untrusted_path(path, patterns)
-                if matched and gated and path.startswith("github.event."):
-                    continue
-                if matched:
+            for path, _pattern in untrusted_references(run.text, patterns):
+                if not is_vetted(path, vetted):
                     yield CapabilityHit(
                         capability="U",
                         kind="expression-injection",
@@ -107,19 +160,19 @@ def _scan_interpreter_sinks(
             for line in run.text.splitlines():
                 if not any(target in line for target in env_files):
                     continue
-                for path in expression_paths(line):
-                    if matches_untrusted_path(path, patterns):
-                        yield CapabilityHit(
-                            capability="U",
-                            kind="env-file-injection",
-                            reason=(
-                                f"`${{{{ {path} }}}}` is written into a GitHub "
-                                "environment file; attacker text there sets variables "
-                                "(NODE_OPTIONS, PATH…) that later privileged steps run"
-                            ),
-                            position=run.find_substring(path.split(".")[-1]),
-                        )
-                        break
+                refs = untrusted_references(line, patterns)
+                if refs:
+                    path = refs[0][0]
+                    yield CapabilityHit(
+                        capability="U",
+                        kind="env-file-injection",
+                        reason=(
+                            f"`${{{{ {path} }}}}` is written into a GitHub "
+                            "environment file; attacker text there sets variables "
+                            "(NODE_OPTIONS, PATH…) that later privileged steps run"
+                        ),
+                        position=run.find_substring(path.split(".")[-1]),
+                    )
 
         name = uses_name(step)
         sink_inputs = sinks.get(name)
@@ -130,11 +183,8 @@ def _scan_interpreter_sinks(
                     node = with_node.get(key)
                     if node is None or not node.text:
                         continue
-                    for path in expression_paths(node.text):
-                        matched = matches_untrusted_path(path, patterns)
-                        if matched and gated and path.startswith("github.event."):
-                            continue
-                        if matched:
+                    for path, _pattern in untrusted_references(node.text, patterns):
+                        if not is_vetted(path, vetted):
                             yield CapabilityHit(
                                 capability="U",
                                 kind="expression-injection",
@@ -152,9 +202,7 @@ def _scan_interpreter_sinks(
             for var, val in env_node.items():
                 if not val.text:
                     continue
-                for path in expression_paths(val.text):
-                    if not matches_untrusted_path(path, patterns):
-                        continue
+                for path, _pattern in untrusted_references(val.text, patterns):
                     if _reexpands(run.text, str(var), markers):
                         yield CapabilityHit(
                             capability="U",
@@ -166,6 +214,34 @@ def _scan_interpreter_sinks(
                             ),
                             position=val.value_position(),
                         )
+
+        # The same laundering through an inherited variable. A step's own
+        # `env:` shadows the name. Because the variable reaches every step, a
+        # hit also needs this step to reference it — not merely to contain a
+        # re-expansion primitive somewhere.
+        if run is not None and run.text and inherited:
+            shadowed = (
+                {str(k) for k in env_node.value}
+                if env_node is not None and env_node.is_mapping()
+                else set()
+            )
+            for var, (path, val) in inherited.items():
+                if var in shadowed or var in reported_inherited:
+                    continue
+                if re.search(rf"\$\{{?{re.escape(var)}\b", run.text) and _reexpands(
+                    run.text, var, markers
+                ):
+                    reported_inherited.add(var)
+                    yield CapabilityHit(
+                        capability="U",
+                        kind="expression-injection-via-env",
+                        reason=(
+                            f"`{var}` is set from attacker-controlled "
+                            f"`${{{{ {path} }}}}` for every step, and a run block "
+                            "re-expands it rather than quoting it"
+                        ),
+                        position=val.value_position(),
+                    )
 
 
 def _scan_untrusted_checkout(context: ExecutionContext) -> Iterator[CapabilityHit]:

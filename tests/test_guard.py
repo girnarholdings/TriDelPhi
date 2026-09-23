@@ -155,6 +155,71 @@ def test_narrow_trigger_fix_inserts_the_gate(tmp_path):
     assert not [f for f in analyze(root).findings if f.severity == "critical"]
 
 
+_ISSUE_BODY_AGENT = """\
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  assist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: "Fix the issue described here: ${{ github.event.issue.body }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+"""
+
+
+def _repo_with(tmp_path: Path, workflow: str) -> Path:
+    root = tmp_path / "repo"
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "assist.yml").write_text(workflow, encoding="utf-8")
+    return root
+
+
+def test_narrow_trigger_gates_the_author_of_the_injected_text(tmp_path):
+    """The job fires on comments, but the prompt carries the ISSUE body. A gate
+    on the commenter lets a maintainer's comment run a stranger's issue, so the
+    fix must vet the issue author — and the detectors must accept that gate."""
+    root = _repo_with(tmp_path, _ISSUE_BODY_AGENT)
+    finding = _critical(root)
+    assert "github.event.issue.author_association" in finding.remediation.rendered
+    result = apply_action(root, finding, "fix")
+    assert result.status == "applied"
+    text = (root / ".github/workflows/assist.yml").read_text()
+    assert "github.event.issue.author_association" in text
+    assert not [f for f in analyze(root).findings if f.severity == "critical"]
+
+
+def test_a_commenter_gate_does_not_vouch_for_the_issue_body(tmp_path):
+    gated = _ISSUE_BODY_AGENT.replace(
+        "    runs-on: ubuntu-latest\n",
+        "    runs-on: ubuntu-latest\n    if: contains(fromJSON('[\"OWNER\",\"MEMBER\"]'), "
+        "github.event.comment.author_association)\n",
+    )
+    root = _repo_with(tmp_path, gated)
+    assert any(
+        f.rule_id == "tridelphi/agent-prompt-injection" and f.severity == "critical"
+        for f in analyze(root).findings
+    )
+
+
+def test_unvettable_prompt_text_is_not_offered_a_gate(tmp_path):
+    """No author_association vouches for an upstream run's title, so the advice
+    must not promise that a gate fixes it."""
+    workflow = _ISSUE_BODY_AGENT.replace(
+        "on:\n  issue_comment:\n    types: [created]\n",
+        "on:\n  workflow_run:\n    workflows: [ci]\n    types: [completed]\n",
+    ).replace("github.event.issue.body", "github.event.workflow_run.display_title")
+    root = _repo_with(tmp_path, workflow)
+    finding = next(f for f in analyze(root).findings if f.rule_id == "tridelphi/agent-prompt-injection")
+    assert finding.remediation.kind == "drop-prompt-input"
+    assert "if: contains(" not in finding.remediation.rendered
+
+
 def test_comment_out_neutralises_the_step(tmp_path):
     root = _clone(tmp_path, "comment-and-control")
     result = apply_action(root, _critical(root), "comment-out")
