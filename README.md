@@ -821,6 +821,14 @@ tridelphi . --write-baseline   # once: record today's findings as fingerprints
 tridelphi .                    # from now on, only new findings gate
 ```
 
+In a pull request, the Action and the `init` workflows read
+`.tridelphi-baseline.json` from the **base branch**, not from the pull request.
+A fingerprint is a plain hash of workflow, job and rule names, so a pull request
+that could edit the baseline could accept the very critical it introduces.
+Accepting a new finding therefore takes its own pull request that changes only
+the baseline and merges first; a pull request that edits the baseline gets a
+notice saying the change applies once it merges.
+
 ## ⚡ Put it in CI — one line
 
 The composite action installs everything (version-pinned, **checksum-verified**),

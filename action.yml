@@ -107,6 +107,67 @@ runs:
         echo "::endgroup::"
         echo "TriDelPhi $(tridelphi --version 2>/dev/null || echo '?') ready at level ${LEVEL}"
 
+    # A pull request must not be able to accept its own findings. The baseline
+    # (.tridelphi-baseline.json) waives fingerprints, and a fingerprint is a
+    # plain hash of names the pull request chooses — so in a pull request it is
+    # read from the base commit through the job token, never from the tree
+    # under scan. Pushes keep the tree's copy: that tree is the branch itself.
+    - name: Take the baseline from the base branch
+      id: baseline
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        BASE_BASELINE: ${{ runner.temp }}/tridelphi-base-baseline.json
+      with:
+        script: |
+          // The baseline accepts findings, so a pull request must not supply its own:
+          // a fingerprint is a plain hash of the workflow, job and rule names, and a
+          // pull request could add the one for the critical it introduces. Read the
+          // copy on the commit the pull request merges into. Pushes keep the tree's.
+          const fs = require('fs');
+          const path = require('path');
+          const { owner, repo } = context.repo;
+          const decide = (mode) => { core.setOutput('mode', mode); };
+          let base = context.payload.pull_request && context.payload.pull_request.base
+            ? context.payload.pull_request.base.sha : '';
+          const number = Number(process.env.PR_NUMBER || 0);
+          if (!base && Number.isSafeInteger(number) && number > 0) {
+            try {
+              const { data } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+              base = data.base.sha;
+            } catch (error) {
+              core.warning(`Could not read pull request #${number} (${error.status || error.message}); every finding counts as new.`);
+              return decide('none');
+            }
+          }
+          if (!base) return decide('tree');
+          const file = path.posix.normalize(path.posix.join(process.env.SCAN_PATH || '.', '.tridelphi-baseline.json'));
+          if (path.posix.isAbsolute(file) || file === '..' || file.startsWith('../')) {
+            core.warning('The scan path is outside the repository, so no baseline applies; every finding counts as new.');
+            return decide('none');
+          }
+          let accepted = null;
+          try {
+            const { data } = await github.rest.repos.getContent({
+              owner, repo, path: file, ref: base, mediaType: { format: 'raw' },
+            });
+            accepted = typeof data === 'string' ? data : Buffer.from(data).toString('utf8');
+          } catch (error) {
+            if (error.status !== 404) {
+              core.warning(`Could not read ${file} from the base branch (${error.status || error.message}); every finding counts as new.`);
+              return decide('none');
+            }
+          }
+          let proposed = null;
+          try { proposed = fs.readFileSync(file, 'utf8'); } catch (_error) { proposed = null; }
+          if (proposed !== null && proposed !== accepted) {
+            core.notice(`This pull request changes ${file}. The gate uses the copy on the base branch; findings accepted here take effect once it merges.`);
+          }
+          if (accepted === null) return decide('none');
+          fs.writeFileSync(process.env.BASE_BASELINE, accepted);
+          decide('base');
+
     - name: Scan
       id: scan
       shell: bash
@@ -117,6 +178,8 @@ runs:
         SARIF_FILE: ${{ inputs.sarif-file }}
         EVIDENCE_FILE: ${{ inputs.evidence-file }}
         TRUST_LOCK: ${{ inputs.trust-lock }}
+        BASELINE_MODE: ${{ steps.baseline.outputs.mode }}
+        BASE_BASELINE: ${{ runner.temp }}/tridelphi-base-baseline.json
       # Never fail this step; the SARIF upload and PR comment must run
       # regardless. The threshold is enforced as the final step.
       run: |
@@ -132,7 +195,15 @@ runs:
         if [ "$LEVEL" -ge 1 ] 2>/dev/null; then
           LEVEL_ARGS=(--level "$LEVEL" --evidence-file "$INTERNAL_EVIDENCE" --trust-lock "$TRUST_LOCK")
         fi
-        tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" \
+        # base: the base branch's accepted findings. tree: a push, whose tree
+        # is the branch. Anything else (none, or a step that did not finish)
+        # accepts nothing, so every finding counts.
+        case "$BASELINE_MODE" in
+          base) BASELINE_ARGS=(--baseline "$BASE_BASELINE") ;;
+          tree) BASELINE_ARGS=() ;;
+          *) BASELINE_ARGS=(--no-baseline) ;;
+        esac
+        tridelphi "$SCAN_PATH" "${LEVEL_ARGS[@]}" "${BASELINE_ARGS[@]}" \
           --format checklist \
           --sarif-file "$INTERNAL_SARIF" \
           --checklist-md-file "$REPORT_MD" \

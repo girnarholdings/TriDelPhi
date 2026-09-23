@@ -32,6 +32,7 @@ and it prints exactly what to do next.
 from __future__ import annotations
 
 import sys
+import textwrap
 from pathlib import Path
 
 from .fsutil import atomic_write_text
@@ -39,6 +40,7 @@ from .release import ACTION_REF, install_command
 
 __all__ = [
     "APP_WORKFLOW",
+    "BASE_BASELINE_SCRIPT",
     "FIX_WORKFLOW",
     "LOCAL_HOOK",
     "WORKFLOW",
@@ -49,6 +51,57 @@ __all__ = [
 # The workflow is itself Rule-of-Two clean: it runs on pull_request (where fork
 # tokens are read-only), interpolates no github.event data into a shell, and the
 # only privileged action is posting a comment via first-party github-script.
+# The step that reads a pull request's baseline from its base commit. action.yml
+# carries the same body; tests/test_base_baseline.py keeps the two identical.
+BASE_BASELINE_SCRIPT = """\
+// The baseline accepts findings, so a pull request must not supply its own:
+// a fingerprint is a plain hash of the workflow, job and rule names, and a
+// pull request could add the one for the critical it introduces. Read the
+// copy on the commit the pull request merges into. Pushes keep the tree's.
+const fs = require('fs');
+const path = require('path');
+const { owner, repo } = context.repo;
+const decide = (mode) => { core.setOutput('mode', mode); };
+let base = context.payload.pull_request && context.payload.pull_request.base
+  ? context.payload.pull_request.base.sha : '';
+const number = Number(process.env.PR_NUMBER || 0);
+if (!base && Number.isSafeInteger(number) && number > 0) {
+  try {
+    const { data } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+    base = data.base.sha;
+  } catch (error) {
+    core.warning(`Could not read pull request #${number} (${error.status || error.message}); every finding counts as new.`);
+    return decide('none');
+  }
+}
+if (!base) return decide('tree');
+const file = path.posix.normalize(path.posix.join(process.env.SCAN_PATH || '.', '.tridelphi-baseline.json'));
+if (path.posix.isAbsolute(file) || file === '..' || file.startsWith('../')) {
+  core.warning('The scan path is outside the repository, so no baseline applies; every finding counts as new.');
+  return decide('none');
+}
+let accepted = null;
+try {
+  const { data } = await github.rest.repos.getContent({
+    owner, repo, path: file, ref: base, mediaType: { format: 'raw' },
+  });
+  accepted = typeof data === 'string' ? data : Buffer.from(data).toString('utf8');
+} catch (error) {
+  if (error.status !== 404) {
+    core.warning(`Could not read ${file} from the base branch (${error.status || error.message}); every finding counts as new.`);
+    return decide('none');
+  }
+}
+let proposed = null;
+try { proposed = fs.readFileSync(file, 'utf8'); } catch (_error) { proposed = null; }
+if (proposed !== null && proposed !== accepted) {
+  core.notice(`This pull request changes ${file}. The gate uses the copy on the base branch; findings accepted here take effect once it merges.`);
+}
+if (accepted === null) return decide('none');
+fs.writeFileSync(process.env.BASE_BASELINE, accepted);
+decide('base');
+"""
+
 WORKFLOW = """\
 # Added by `tridelphi init`. Scans your GitHub Actions for the jobs where a
 # prompt injection or pwn-request would run attacker code with your secrets.
@@ -93,6 +146,18 @@ jobs:
       - name: Install TriDelPhi
         run: __TRIDELPHI_INSTALL__
 
+      # A pull request must not accept its own findings: the baseline waives
+      # fingerprints, and a fingerprint is a plain hash of names the pull
+      # request chooses. In a pull request it is read from the base commit
+      # through the job token, never from the tree under scan.
+      - name: Take the baseline from the base branch
+        id: baseline
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BASE_BASELINE: ${{ runner.temp }}/tridelphi-base-baseline.json
+        with:
+          script: |
+__BASE_BASELINE_SCRIPT__
       - name: Scan
         id: scan
         # Don't fail *this* step; the SARIF upload and the PR comment must run
@@ -102,14 +167,24 @@ jobs:
         # `--format checklist` is the plain-language report: a first-time reader
         # gets pass/fail and what to do, not exit codes and rule ids. SARIF still
         # carries the full detail to the Security tab.
+        env:
+          BASELINE_MODE: ${{ steps.baseline.outputs.mode }}
+          BASE_BASELINE: ${{ runner.temp }}/tridelphi-base-baseline.json
         run: |
           code=0
+          # base: the base branch's accepted findings; tree: a push. Anything
+          # else accepts nothing, so every finding counts.
+          case "$BASELINE_MODE" in
+            base) BASELINE_ARGS=(--baseline "$BASE_BASELINE") ;;
+            tree) BASELINE_ARGS=() ;;
+            *) BASELINE_ARGS=(--no-baseline) ;;
+          esac
           REPORT_TEXT="$RUNNER_TEMP/tridelphi-report.txt"
           REPORT_MD="$RUNNER_TEMP/tridelphi-report.md"
           SARIF_FILE="$RUNNER_TEMP/tridelphi.sarif"
           EXIT_MARKER="$RUNNER_TEMP/tridelphi-exit-code"
           rm -f -- "$REPORT_TEXT" "$REPORT_MD" "$SARIF_FILE" "$EXIT_MARKER"
-          tridelphi . --format checklist --sarif-file "$SARIF_FILE" \
+          tridelphi . "${BASELINE_ARGS[@]}" --format checklist --sarif-file "$SARIF_FILE" \
             --checklist-md-file "$REPORT_MD" > "$REPORT_TEXT" 2>&1 || code=$?
           printf '%s\\n' "$code" > "$EXIT_MARKER"
           if [ -s "$SARIF_FILE" ]; then
@@ -597,6 +672,9 @@ jobs:
 # they cannot debug it. A generated workflow must never contain an install that
 # we have not checked resolves.
 WORKFLOW = WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command(pinned=True))
+WORKFLOW = WORKFLOW.replace(
+    "__BASE_BASELINE_SCRIPT__\n", textwrap.indent(BASE_BASELINE_SCRIPT, " " * 12)
+)
 # …except the one line that tells a *human* what to run on their own laptop.
 WORKFLOW = WORKFLOW.replace("__TRIDELPHI_INSTALL_LOCAL__", install_command())
 FIX_WORKFLOW = FIX_WORKFLOW.replace("__TRIDELPHI_INSTALL__", install_command(pinned=True))
