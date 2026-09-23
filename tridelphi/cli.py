@@ -17,6 +17,7 @@ JSON.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 import time
 from collections.abc import Callable
@@ -442,7 +443,23 @@ _SUBCOMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
 }
 
 
+def _tolerate_undecodable_text() -> None:
+    """Print a file name that is not valid UTF-8 as an escape, never a crash.
+
+    Linux file names are bytes; Python hands an undecodable one over as lone
+    surrogates, and a strict stdout then raised mid-report. A pull request can
+    add such a file, so the report must survive it.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with contextlib.suppress(OSError, ValueError):
+            reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _tolerate_undecodable_text()
     raw_args = sys.argv[1:] if argv is None else argv
     if raw_args and raw_args[0] == "audit":
         from .audit import main as audit_main

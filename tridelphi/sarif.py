@@ -103,7 +103,10 @@ def fingerprint(finding: Finding) -> str:
         finding.rule_id,
         ",".join(sorted({h.kind for h in finding.hits})),
     )
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()[:16]
+    # "surrogatepass": a file name with a byte that is not UTF-8 reaches us as a
+    # lone surrogate (Python's surrogateescape); a strict encode crashed the
+    # whole scan on one such workflow name. The bytes stay stable run to run.
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 def _region(position) -> dict[str, Any]:

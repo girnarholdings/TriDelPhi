@@ -136,3 +136,31 @@ def test_self_check_validates_schema(repo_root):
     result = run_cli([MALICIOUS, "--format", "sarif", "--self-check"], cwd=repo_root)
     assert result.returncode == 1
     assert json.loads(result.stdout)
+
+
+def test_undecodable_workflow_name_still_reports(tmp_path):
+    """Linux file names are bytes. A workflow named with a non-UTF-8 byte used
+    to crash the scan (a strict encode in the fingerprint), leaving a traceback
+    and no report — and a pull request can add such a file."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    try:
+        with open(bytes(workflows) + b"/bad\xff.yml", "wb") as handle:
+            handle.write(
+                b"on: issue_comment\njobs:\n  a:\n    runs-on: ubuntu-latest\n"
+                b"    permissions:\n      contents: write\n    steps:\n"
+                b'      - run: echo "${{ github.event.comment.body }}" && curl https://x.example\n'
+            )
+    except (OSError, ValueError):
+        pytest.skip("this filesystem refuses non-UTF-8 file names")
+    report_md = tmp_path / "report.md"
+    report_sarif = tmp_path / "report.sarif"
+    proc = run_cli([
+        str(tmp_path), "--format", "text",
+        "--checklist-md-file", str(report_md), "--sarif-file", str(report_sarif),
+    ])
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert proc.returncode == 1, "the critical in that workflow must still gate"
+    assert report_md.is_file() and report_sarif.is_file()
+    # The name survives as a visible escape (`\udcff`), not as invalid UTF-8.
+    assert "udcff" in report_md.read_text(encoding="utf-8")
