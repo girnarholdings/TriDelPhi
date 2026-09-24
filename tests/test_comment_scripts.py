@@ -62,7 +62,7 @@ def _scripts():
     found = []
     action = YAML(typ="safe").load(Path(__file__).resolve().parents[1].joinpath("action.yml").read_text())
     for step in action["runs"]["steps"]:
-        if "github-script" in str(step.get("uses", "")):
+        if "github-script" in str(step.get("uses", "")) and "listComments" in step["with"]["script"]:
             found.append(("action.yml", step["with"]["script"], "<!-- tridelphi -->"))
     for name, text, marker in (
         ("init workflow", WORKFLOW, "<!-- tridelphi -->"),
@@ -71,7 +71,8 @@ def _scripts():
         doc = YAML(typ="safe").load(text)
         for job in doc["jobs"].values():
             for step in job.get("steps", []):
-                if isinstance(step, dict) and "github-script" in str(step.get("uses", "")):
+                if (isinstance(step, dict) and "github-script" in str(step.get("uses", ""))
+                        and "listComments" in step["with"]["script"]):
                     found.append((name, step["with"]["script"], marker))
     assert len(found) == 3, [f[0] for f in found]
     return found
