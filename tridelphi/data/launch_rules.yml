@@ -1,0 +1,766 @@
+# Launch-door patterns for `tridelphi launch`.
+#
+# Hosts, SDK snippets, and phrases live here so a new vendor is a data change.
+# Structural decisions (what counts as a signup, when a checklist replaces a
+# detector) live in tridelphi/launch.py. Nothing in this file is legal advice,
+# and a match is a pattern in a file — not a determination that a statute applies.
+#
+# Short tokens that would false-positive as substrings ("dob" inside "adobe")
+# are not listed here; the detector uses word boundaries for those.
+
+version: 1
+
+scope: >-
+  This is not legal advice. A clean result is not a compliance certificate.
+  TriDelPhi only matched patterns in files it could read.
+
+categories:
+  - id: A
+    question: "Does signup ask age before an account exists?"
+    gloss: "COPPA — penalties in this family are framed per child under 13."
+  - id: B
+    question: "Do pages load fonts from someone else's server?"
+    gloss: "GDPR / ePrivacy — a third-party font request is framed per visitor."
+  - id: C
+    question: "Is session replay on without consent?"
+    gloss: "CIPA and similar wiretap statutes — often framed per session."
+  - id: D
+    question: "Do marketing emails have an unsubscribe and address?"
+    gloss: "CAN-SPAM — penalties in this family are framed per email."
+  - id: E
+    question: "Are renewal terms next to the subscribe button?"
+    gloss: "California auto-renewal (ARL) and similar state rules — per subscription."
+  - id: F
+    question: "Is there a DMCA agent page a visitor can find?"
+    gloss: "DMCA designated agent — the $6 copyright.gov filing is a checklist."
+  - id: G
+    question: "Can a visitor open privacy and terms pages?"
+    gloss: "Privacy notice and terms — expected per consumer or per visitor."
+  - id: H
+    question: "Do analytics or ad tags wait for consent?"
+    gloss: "ePrivacy, plus CCPA/CPRA when an ad or analytics tag is present."
+  - id: I
+    question: "Do marketing texts ask for express consent?"
+    gloss: "TCPA — statutory damages in this family are framed per text or call."
+  - id: J
+    question: "Are AI outputs marketed as human-made?"
+    gloss: "FTC advertising — a checklist, not a deception finding."
+  - id: K
+    question: "Can people report uploads they did not make?"
+    gloss: "User content needs a report path next to a DMCA agent."
+  - id: L
+    question: "Might health or bank data make a statute apply?"
+    gloss: "HIPAA / GLBA checklist only — this does not audit either statute."
+  - id: M
+    question: "Are vendored frontend licenses attributed?"
+    gloss: "A NOTICE check for vendored files — not a license scanner."
+  - id: N
+    question: "Do primary pages have any alt text or landmarks?"
+    gloss: "One accessibility note when a page has neither — not a WCAG audit."
+
+# Font CDNs that send the visitor's IP to a third party. fontsource, next/font,
+# and fonts.bunny.net are omitted on purpose: those are the self-host path.
+fonts:
+  hosts:
+    - fonts.googleapis.com
+    - fonts.gstatic.com
+    - use.typekit.net
+    - p.typekit.net
+    - fonts.adobe.com
+    - use.fontawesome.com
+    - kit.fontawesome.com
+    - cloud.typography.com
+    - fast.fonts.net
+
+session_replay:
+  - id: fullstory
+    label: FullStory
+    snippets:
+      - fullstory.com/s/fs.js
+      - _fs_org
+      - fs.identify
+  - id: hotjar
+    label: Hotjar
+    snippets:
+      - static.hotjar.com
+      - script.hotjar.com
+      - hjid:
+      - _hjsettings
+  - id: logrocket
+    label: LogRocket
+    snippets:
+      - cdn.logrocket.io
+      - logrocket.init
+  - id: clarity
+    label: Microsoft Clarity
+    snippets:
+      - clarity.ms/tag
+      - clarity.init
+  - id: heap
+    label: Heap
+    snippets:
+      - heapanalytics.com
+      - heap.identify
+      - heap.load
+  - id: smartlook
+    label: Smartlook
+    snippets:
+      - web-sdk.smartlook.com
+      - smartlook.com/recorder
+      - smartlook(
+  - id: mouseflow
+    label: Mouseflow
+    snippets:
+      - mouseflow.com/projects
+  - id: inspectlet
+    label: Inspectlet
+    snippets:
+      - cdn.inspectlet.com
+      - inspectlet.com/inspectlet
+  - id: luckyorange
+    label: Lucky Orange
+    snippets:
+      - luckyorange.com
+      - tools.luckyorange.com
+  - id: contentsquare
+    label: Contentsquare
+    snippets:
+      - contentsquare.net
+      - contentsquare.com
+
+# PostHog is analytics that can record. A bare init is not proof recording is
+# on, so it stays a checklist unless the snippet turns recording on.
+posthog:
+  present:
+    - posthog.init
+    - app.posthog.com
+  recording_on:
+    - "disable_session_recording: false"
+    - "disable_session_recording:false"
+    - "session_recording: true"
+    - "session_recording:true"
+    - startsessionrecording
+  recording_off:
+    - "disable_session_recording: true"
+    - "disable_session_recording:true"
+
+recording_consent:
+  - cookieconsent
+  - cookie-consent
+  - cookie_consent
+  - onetrust
+  - osano
+  - cookiebot
+  - cookieyes
+  - iubenda
+  - termly
+  - "accept cookies"
+  - "cookie banner"
+  - "consent manager"
+  - "i agree to session recording"
+  - "consent to recording"
+  - "consent to session"
+
+recording_mask:
+  - maskallinputs
+  - mask_all_inputs
+  - maskalltext
+  - mask_all_text
+  - data-hj-masked
+  - data-private
+  - fs-exclude
+  - disabletextcapture
+  - masktextselector
+
+analytics:
+  - id: google-analytics
+    label: Google Analytics or Tag Manager
+    ad: false
+    snippets:
+      - googletagmanager.com
+      - google-analytics.com
+      - gtag(
+      - google-analytics.com/analytics.js
+  - id: meta-pixel
+    label: Meta Pixel
+    ad: true
+    snippets:
+      - connect.facebook.net
+      - fbq(
+      - facebook.com/tr?
+  - id: tiktok-pixel
+    label: TikTok Pixel
+    ad: true
+    snippets:
+      - analytics.tiktok.com
+      - ttq.load
+  - id: linkedin-insight
+    label: LinkedIn Insight
+    ad: true
+    snippets:
+      - snap.licdn.com
+      - px.ads.linkedin.com
+  - id: x-pixel
+    label: X (Twitter) pixel
+    ad: true
+    snippets:
+      - static.ads-twitter.com
+      - twq(
+  - id: google-ads
+    label: Google Ads
+    ad: true
+    snippets:
+      - googleadservices.com
+      - googlesyndication.com
+      - doubleclick.net
+
+do_not_sell:
+  - do not sell
+  - do not share
+  - donotsell
+  - do-not-sell
+  - do-not-share
+
+gpc:
+  - globalprivacycontrol
+  - sec-gpc
+
+# Phrases. Matching is case-insensitive substring unless launch.py documents
+# a word-boundary exception.
+coppa_age_phrases:
+  - date of birth
+  - date_of_birth
+  - birthdate
+  - birth date
+  - under-13
+  - under 13
+  - parental consent
+  - age-gate
+  - age_gate
+  - age gate
+  - dateofbirth
+  - 'name="age"'
+  - "name='age'"
+  - "must be 13"
+  - "13 or older"
+  - "over 13"
+
+email_marketing_phrases:
+  - newsletter
+  - promotion
+  - special offer
+  - "% off"
+  - limited time
+  - shop now
+  - marketing email
+
+email_transactional_phrases:
+  - reset your password
+  - password reset
+  - verify your email
+  - magic link
+  - one-time code
+  - one time code
+  - your receipt
+  - order confirmation
+  - verification code
+
+renewal_phrases:
+  - auto-renew
+  - autorenew
+  - automatic renewal
+  - renews
+  - renewal
+  - until you cancel
+  - cancel anytime
+  - cancel at any time
+  - you will be charged
+  - next billing
+  - recurring charge
+  - billed until
+
+sms_optin_phrases:
+  - text me
+  - sms updates
+  - get texts
+  - text alerts
+  - send me texts
+  - whatsapp updates
+  - marketing texts
+
+sms_sdk_snippets:
+  - twilio
+  - messages.create
+  - api.twilio.com
+  - whatsapp business
+
+sms_marketing_phrases:
+  - promo
+  - promotion
+  - deal
+  - deals
+  - offer
+  - offers
+  - discount
+  - marketing
+
+sms_consent_phrases:
+  - express consent
+  - agree to receive
+  - "msg & data rates"
+  - "msg and data rates"
+  - message and data rates
+  - message frequency
+  - consent to receive
+
+sms_transactional_phrases:
+  - verification code
+  - one-time code
+  - one time code
+  - password reset
+
+ai_generative_snippets:
+  - openai
+  - anthropic
+  - gpt-4
+  - gpt-3
+  - text-davinci
+  - generate image
+  - stability.ai
+  - claude-3
+
+ai_human_claims:
+  - written by our team
+  - written by experts
+  - human-written
+  - 100% human
+  - real people wrote
+  - handcrafted by our writers
+  - written by humans
+
+upload_snippets:
+  - 'type="file"'
+  - "type='file'"
+  - uploadthing
+  - multer(
+  - presigned
+  - getsignedurl
+
+report_snippets:
+  - /dmca
+  - report this
+  - report content
+  - content moderation
+  - flag this
+  - "trust & safety"
+  - trust and safety
+  - abuse@
+  - designated agent
+
+phi_snippets:
+  - 'name="diagnosis"'
+  - "name='diagnosis'"
+  - 'name="prescription"'
+  - "name='prescription'"
+  - 'name="medical_record"'
+  - patient_id
+  - health_condition
+  - protected health information
+  - 'name="symptom"'
+
+finance_snippets:
+  - 'name="routing"'
+  - routing_number
+  - 'name="ssn"'
+  - social_security
+  - social security number
+  - 'name="bank_account"'
+  - bank_account_number
+  - plaid
+
+form_markers:
+  - "<form"
+  - "<input"
+  - name=
+
+oss:
+  vendor_dirs:
+    - vendor
+    - third_party
+    - third-party
+  notice_names:
+    - NOTICE
+    - NOTICE.md
+    - NOTICE.txt
+    - ATTRIBUTION
+    - ATTRIBUTION.md
+    - THIRD-PARTY-NOTICES
+    - THIRD-PARTY-NOTICES.md
+    - THIRD_PARTY_NOTICES
+  license_markers:
+    - spdx-license-identifier
+    - mit license
+    - apache license
+
+rules:
+  - id: coppa-age-gate
+    category: A
+    severity: warning
+    kind: static
+    message: >-
+      COPPA (children's privacy): {detail} creates an account and never asks
+      for an age, a date of birth, or an under-13 gate. Penalties in this
+      family are framed per child under 13 (about $53,000 in the figure this
+      check was built around). A pattern match is not proof a child signed up.
+      Not legal advice.
+    fix: >-
+      Add an age or date-of-birth question before the account is stored, and
+      block under-13 signups unless you have verifiable parental consent.
+      Put the gate on the signup form itself, not only in a privacy policy.
+
+  - id: third-party-font
+    category: B
+    severity: warning
+    kind: static
+    message: >-
+      GDPR / ePrivacy: {detail} loads fonts from a third party ({hosts}).
+      The browser sends the visitor's IP address to that server. Cases in
+      this family, including the Munich Google Fonts rulings, are framed
+      per visitor. Not legal advice.
+    fix: >-
+      Self-host the font files, or embed them at build time (next/font or
+      fontsource), and delete the third-party stylesheet and font URLs.
+
+  - id: session-replay
+    category: C
+    severity: warning
+    kind: static
+    message: >-
+      CIPA and similar wiretap statutes: {detail} loads {vendor} and the
+      files read show no consent before recording. Damages in this family
+      are often framed per session (about $5,000 in the common CIPA
+      framing). This is not a court finding. Not legal advice.
+    fix: >-
+      Do not load the recorder until the visitor agrees, and turn on input
+      masking (mask all inputs and mask all text) so passwords and messages
+      are not captured. If you do not need replay, delete the snippet.
+
+  - id: session-replay-unmasked
+    category: C
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: {detail} loads {vendor} and a consent marker is present,
+      but no input-masking setting was found. Confirm recording stays off
+      until consent and that inputs are masked. Not legal advice.
+    fix: >-
+      Turn on the vendor's mask-all-inputs (or equivalent) setting and
+      keep the recorder from starting before the visitor agrees.
+
+  - id: posthog-replay-default
+    category: C
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: {detail} calls PostHog and does not turn session recording
+      off in code. PostHog can still record from the project settings.
+      CIPA-style claims are framed per session. Not legal advice.
+    fix: >-
+      Set disable_session_recording to true unless a visitor has agreed,
+      and confirm the PostHog project has session replay switched off.
+
+  - id: can-spam-footer
+    category: D
+    severity: warning
+    kind: static
+    message: >-
+      CAN-SPAM: {detail} looks like a marketing email and is missing
+      {missing}. Penalties in this family are framed per email.
+      Not legal advice.
+    fix: >-
+      Add a working unsubscribe link and your physical postal address in
+      the message. A password-reset or receipt template should not also
+      carry a promotion; if it does, it needs both lines.
+
+  - id: auto-renewal-terms
+    category: E
+    severity: warning
+    kind: static
+    message: >-
+      California auto-renewal law (ARL) and similar state rules: {detail}
+      offers a paid subscription without the renewal terms and how to
+      cancel in the same view as the button. Exposure is framed per
+      subscription. Not legal advice.
+    fix: >-
+      Put the price, the billing period, when it renews, and how to cancel
+      immediately next to the subscribe button. A link to another page
+      does not satisfy the "next to the button" pattern this check looks for.
+
+  - id: auto-renewal-review
+    category: E
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: {detail} has a subscribe or trial control but no price in
+      that file, so renewal terms could not be checked. If this charges a
+      card on a schedule, put the price, the renewal, and how to cancel
+      next to the button. Not legal advice.
+    fix: >-
+      Open the checkout the visitor actually sees and confirm the renewal
+      price and the cancellation path sit next to the button.
+
+  - id: missing-dmca-agent
+    category: F
+    severity: warning
+    kind: static
+    message: >-
+      DMCA: visitor-facing pages were found and no designated-agent page
+      or footer link was found (for example /dmca). A takedown notice then
+      has nowhere public to go. This check did not contact copyright.gov
+      and does not know whether you registered. Not legal advice.
+    fix: >-
+      Publish a page with the agent's name, physical address, phone, and
+      email, and link it from the footer. Then complete the registration
+      checklist — filing is separate from having the page.
+
+  - id: dmca-registration-steps
+    category: F
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: copyright.gov designated-agent registration is not
+      something a file read can see, and this result does not mean you
+      registered or failed to. The filing fee this check was built around
+      is $6. Not legal advice.
+    fix: >-
+      1) Sign in at copyright.gov/dmca-directory. 2) File a designated
+      agent: name, physical address, phone, and email. 3) Pay the $6 fee.
+      4) Publish that same contact on a page of the site. 5) Link the page
+      from the footer. 6) Renew before the registration lapses.
+      TriDelPhi did not submit this filing.
+
+  - id: missing-privacy-policy
+    category: G
+    severity: warning
+    kind: static
+    message: >-
+      Privacy notice: a visitor-facing page is here and no privacy-policy
+      page or footer link was found. State privacy laws and GDPR expect
+      this notice; exposure is framed per consumer or per visitor.
+      Not legal advice.
+    fix: >-
+      Publish a real privacy policy (what you collect, why, and who you
+      share it with) and link it from the footer. An empty file or a
+      "TODO" page does not count.
+
+  - id: empty-privacy-policy
+    category: G
+    severity: warning
+    kind: static
+    message: >-
+      Privacy notice: {detail} is named like a privacy policy but has no
+      real text. An empty or placeholder page does not tell a visitor
+      what you collect. Exposure is framed per consumer or per visitor.
+      Not legal advice.
+    fix: >-
+      Replace the placeholder with the policy a person can read, covering
+      what you collect, why, and how to reach you.
+
+  - id: missing-terms
+    category: G
+    severity: warning
+    kind: static
+    message: >-
+      Consumer terms: a visitor-facing page is here and no terms-of-service
+      page or footer link was found. The gap is framed per customer.
+      Not legal advice.
+    fix: >-
+      Publish terms that match what the product actually does and link
+      them from the footer, next to the privacy policy.
+
+  - id: empty-terms
+    category: G
+    severity: warning
+    kind: static
+    message: >-
+      Consumer terms: {detail} is named like terms of service but has no
+      real text. A placeholder is not a contract the visitor can read.
+      Not legal advice.
+    fix: >-
+      Replace the placeholder with the terms a person can read before
+      they create an account or pay.
+
+  - id: analytics-before-consent
+    category: H
+    severity: warning
+    kind: static
+    message: >-
+      ePrivacy / state privacy: {detail} loads {vendors} and no consent
+      banner was found in the files read. Tag firings are framed per
+      visitor. Not legal advice.
+    fix: >-
+      Load those tags only after a banner blocks them until the visitor
+      accepts. This check cannot see runtime order — a banner that does
+      not actually gate the tag is still a problem.
+
+  - id: consent-order-unproven
+    category: H
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: {vendors} and a consent-banner marker are both in the
+      repo. Confirm the banner blocks those tags until the visitor
+      accepts. File reads cannot see runtime order. Not legal advice.
+    fix: >-
+      In the browser, confirm no analytics or ad request leaves before
+      the visitor chooses. Reject-all has to be as available as accept.
+
+  - id: ccpa-do-not-sell
+    category: H
+    severity: warning
+    kind: static
+    message: >-
+      CCPA/CPRA: {detail} loads an advertising pixel ({vendors}) and no
+      "Do Not Sell or Share" link was found. If California residents
+      visit, that link is the cheap fix, and Global Privacy Control
+      should be honored too. Exposure is framed per consumer.
+      Not legal advice.
+    fix: >-
+      Add a "Do Not Sell or Share My Personal Information" link in the
+      footer, and honor the browser's Global Privacy Control signal
+      (navigator.globalPrivacyControl or Sec-GPC) by turning off sale
+      and share when it is set.
+
+  - id: ccpa-do-not-sell-checklist
+    category: H
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: analytics tags are present and no "Do Not Sell or Share"
+      link was found. If you sell or share personal information about
+      California residents, that link has to be findable. Exposure is
+      framed per consumer. Not legal advice.
+    fix: >-
+      Add the "Do Not Sell or Share" link if it applies, and honor
+      Global Privacy Control. If you do not sell or share, say that in
+      the privacy policy instead of ignoring the question.
+
+  - id: ccpa-gpc-checklist
+    category: H
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: a "Do Not Sell or Share" marker is present, and no
+      Global Privacy Control read (navigator.globalPrivacyControl or
+      Sec-GPC) was found. CCPA/CPRA treats that signal as an opt-out
+      of sale or share. Not legal advice.
+    fix: >-
+      When the browser sends Global Privacy Control, stop sale and share
+      for that visitor. A footer link alone does not read the signal.
+
+  - id: tcpa-sms-consent
+    category: I
+    severity: warning
+    kind: static
+    message: >-
+      TCPA: {detail} looks like marketing SMS or WhatsApp and does not
+      show express consent (agreement to receive texts, message
+      frequency, and message-and-data rates). Statutory damages in this
+      family are framed per text or call. Not legal advice.
+    fix: >-
+      Put express written consent next to the phone field before any
+      marketing text is sent: the person agrees to receive marketing
+      texts, message frequency, "msg & data rates may apply", and how
+      to stop. A pre-checked box is a poor version of this.
+
+  - id: tcpa-sms-review
+    category: I
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist: {detail} collects a text or WhatsApp opt-in and does
+      not show express-consent language. If those messages are marketing,
+      TCPA damages are framed per text. A verification code is a
+      different bucket. Not legal advice.
+    fix: >-
+      If the texts are marketing, add express consent, frequency, and
+      "msg & data rates" before send. If they are one-time codes, keep
+      promotions out of that template.
+
+  - id: ai-human-disclosure
+    category: J
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist (FTC advertising): the files both call a generative model
+      and describe outputs as human-made ({detail}). If buyers are told
+      a person wrote or drew the output, say it is AI-generated in that
+      same place. This is not a finding that an ad was deceptive.
+      Not legal advice.
+    fix: >-
+      Label AI-generated output where it is shown, and take "written by
+      our team" (or the equivalent) off anything the model produced.
+
+  - id: ugc-no-report-path
+    category: K
+    severity: warning
+    kind: static
+    message: >-
+      DMCA / user content: {detail} accepts uploads and no report,
+      moderation, or designated-agent path was found. A visitor needs a
+      way to flag material. Not legal advice.
+    fix: >-
+      Add a visible report control on the upload and a /dmca page with
+      a designated agent. A queue nobody can find does not count.
+
+  - id: hipaa-may-apply
+    category: L
+    severity: warning
+    kind: checklist
+    message: >-
+      High-severity checklist — HIPAA may apply: {detail} collects health
+      information (a diagnosis, prescription, or similar field). This is
+      not a HIPAA audit and not a determination that you are a covered
+      entity or business associate. Penalties in this family are framed
+      per violation. Not legal advice.
+    fix: >-
+      Ask counsel whether HIPAA applies before this data is stored. If
+      it does, a consumer signup stack is the wrong place for it.
+
+  - id: glba-may-apply
+    category: L
+    severity: warning
+    kind: checklist
+    message: >-
+      High-severity checklist — GLBA may apply: {detail} collects bank or
+      similar financial-account data. This is not a GLBA audit and not a
+      determination that you are a financial institution. Penalties in
+      this family are framed per violation. Not legal advice.
+    fix: >-
+      Ask counsel whether GLBA applies before this data is stored. Do
+      not treat a payments form as a bank-account form.
+
+  - id: missing-oss-notice
+    category: M
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist (copyright / open-source notices): {detail} claims a
+      license and no NOTICE, ATTRIBUTION, or THIRD-PARTY-NOTICES file
+      was found. This is not a full license scan. Not legal advice.
+    fix: >-
+      Add a NOTICE or THIRD-PARTY-NOTICES file naming the vendored works
+      and the license they shipped with. Keep their license headers.
+
+  - id: a11y-primary-page
+    category: N
+    severity: note
+    kind: checklist
+    message: >-
+      Checklist (accessibility): images were found and none set alt text,
+      and no main or nav landmark was found. This is one high-signal
+      note, not a WCAG audit. Not legal advice.
+    fix: >-
+      Add alt text on images that convey meaning, alt="" on decorative
+      ones, and a main landmark on the primary page. Then run a real
+      accessibility checker.

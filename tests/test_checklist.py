@@ -51,7 +51,7 @@ def test_critical_reads_as_not_safe_with_a_plain_fix(repo_root):
 def _all_ran(**overrides) -> dict:
     """Every row reporting a clean run — the only state that earns a green banner."""
     clean = {"critical": 0, "warning": 0, "note": 0}
-    names = ("gitleaks", "osv-scanner", "zizmor", "scorecard", "semgrep", "trust", "expose")
+    names = ("gitleaks", "osv-scanner", "zizmor", "scorecard", "semgrep", "trust", "expose", "launch")
     status = {n: ExternalStatus(ran=True, counts=dict(clean)) for n in names}
     status.update(overrides)
     return status

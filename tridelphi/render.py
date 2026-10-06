@@ -198,7 +198,8 @@ def render_text(
                 style.dim(
                     "  nothing scanned — no .github/workflows here. This checks GitHub\n"
                     "  Actions only; it has not looked at your app. For what your app\n"
-                    "  ships, run: tridelphi expose ."
+                    "  ships, run: tridelphi expose .\n"
+                    "  For lawsuit traps before launch (not legal advice): tridelphi launch ."
                 ),
                 file=stream,
             )
@@ -216,7 +217,9 @@ def render_text(
                     "  no findings — every job holds at most two of three capabilities.\n"
                     "  Scope: your GitHub Actions. For what your app ships (keys in\n"
                     "  browser bundles, source maps, open database rules), run:\n"
-                    "  tridelphi expose ."
+                    "  tridelphi expose .\n"
+                    "  For lawsuit traps before launch (not legal advice), run:\n"
+                    "  tridelphi launch ."
                 ),
                 file=stream,
             )

@@ -24,9 +24,9 @@
 
 ---
 
-## Three doors
+## Four doors
 
-Want all three native static checks in one offline command?
+Want the native static checks in one offline command?
 
 ```console
 tridelphi audit ./your-project.zip
@@ -47,7 +47,7 @@ Free users can continue to a trusted TriDelPhi Codespace using their own GitHub
 allowance; paid Cloudflare scanning is reserved but disabled until its isolated
 backend is ready. No anonymous scanning and no automatic paid fallback.
 
-TriDelPhi answers three different questions. Start at the one you actually have.
+TriDelPhi answers four different questions. Start at the one you actually have.
 If you are unsure, run `tridelphi start`: it shows these same choices in plain
 language and does not change anything.
 
@@ -108,15 +108,29 @@ Keys inlined into bundles, source maps, `allow … : if true`, Supabase
 </tr>
 </table>
 
+**“What lawsuit traps am I about to ship?”**
+
+You are about to let strangers sign up, pay, or get an email, and a missing age
+gate, a third-party font, or session replay can be a per-child, per-visitor, or
+per-session problem. This is not legal advice, and a clean result is not a
+certificate.
+
 ```console
-$ pipx install git+https://github.com/girnarholdings/TriDelPhi   # one install, all three doors
+$ tridelphi launch .
+```
+
+Patterns and checklists: [`docs/LAUNCH_RULES.md`](docs/LAUNCH_RULES.md).
+
+```console
+$ pipx install git+https://github.com/girnarholdings/TriDelPhi   # one install, all four doors
 ```
 
 > **Every door runs on your machine.** `scan` reads files (the two registry
 > forms download-only, and say so before connecting); `tridelphi .` reads
-> `.github/workflows` and nothing else; `expose` reads your committed code. None
-> of them install, execute, or upload anything — and none will ever report a
-> clean result for something they did not actually open.
+> `.github/workflows` and nothing else; `expose` reads your committed code;
+> `launch` reads the same kind of files for lawsuit-shaped patterns and does
+> not give legal advice. None of them install, execute, or upload anything —
+> and none will ever report a clean result for something they did not actually open.
 
 > **Install note.** `tridelphi` is not on PyPI yet, so the git URL above is the
 > install that works; it is the same commit the Action pins, so your CLI and your
@@ -184,8 +198,17 @@ not scare-criticals; Supabase `service_role` is the one that gates.
 
 <sub>There is also `tridelphi privatize`, a consent-gated JavaScript obfuscator. It
 is **not security**, it refuses to run if your build ships a secret, and it is
-deliberately not part of either door — see
+deliberately not one of the doors — see
 [Audit & harden what you ship](#-audit--harden-what-you-ship).</sub>
+
+**[`tridelphi launch`](docs/LAUNCH_RULES.md)** is the fourth door: static
+legal and compliance patterns (age gate, third-party fonts, session replay,
+marketing-email footers, renewal terms, a DMCA agent) plus checklists for what
+a file read cannot prove. It is not a lawyer and not a certificate. `tridelphi
+audit` runs it with the other native checks. It is not wired into `init` or
+the GitHub Action.
+
+---
 
 ---
 
@@ -194,7 +217,7 @@ deliberately not part of either door — see
 - [The problem](#-the-problem) · [The rule](#-the-rule-two-is-fine-three-is-an-exploit)
 - [**How a scan works** (architecture)](#-how-a-scan-works) · [The restore-semantics moat](#-the-part-no-other-scanner-does)
 - [The hardening ladder L1–L7](#-the-hardening-ladder--l1l7) · [Output contract (SARIF)](#-output-contract)
-- [**Scan before you install** — `tridelphi scan`](#-scan-before-you-install) · [**Audit what you ship** — `expose` + `privatize`](#-audit--harden-what-you-ship) · [Coverage vs ADR](#-coverage-against-a-published-taxonomy)
+- [**Scan before you install** — `tridelphi scan`](#-scan-before-you-install) · [**Audit what you ship** — `expose` + `privatize`](#-audit--harden-what-you-ship) · [**Launch traps** — `tridelphi launch`](docs/LAUNCH_RULES.md) · [Coverage vs ADR](#-coverage-against-a-published-taxonomy)
 - [Install & use](#-install) · [In CI](#-put-it-in-ci--one-line)
 - [Credits](#-credits--standing-on-the-shoulders) · [**Harden it further**](#-harden-it-further)
 

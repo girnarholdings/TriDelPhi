@@ -54,22 +54,24 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tridelphi",
         description=(
             "Security guardrails for first-time builders: check code before installing "
-            "it, check GitHub robots for secret-stealing paths, or check what your app ships."
+            "it, check GitHub robots for secret-stealing paths, check what your app ships, "
+            "or check lawsuit traps before launch."
         ),
         epilog=(
-            "Run `tridelphi start` for the three plain-English starting points. "
-            "Core/expose are local; registry targets and requested ladder tools say "
-            "when they need the network."
+            "Run `tridelphi start` for the four plain-English starting points. "
+            "Core, expose, and launch are local; registry targets and requested ladder "
+            "tools say when they need the network."
         ),
     )
     parser.add_argument(
         "path", nargs="?", default=".",
         help=(
-            "repository root, or a command: `start` shows the three beginner paths, "
-            "`init` adds the scan workflow, `audit` runs all three native checks offline, `scan` "
+            "repository root, or a command: `start` shows the four beginner paths, "
+            "`init` adds the scan workflow, `audit` runs the native checks offline, `scan` "
             "audits someone else's code BEFORE you install it (a dir, an archive, "
             "npm:<pkg> or pypi:<pkg>), `fix` prints a remediation plan, `guard` "
             "fixes interactively, `expose` audits shipped-asset/DB/data exposure, "
+            "`launch` audits lawsuit traps before you ship, "
             "`privatize` obfuscates built JS (default: .)"
         ),
     )
@@ -281,7 +283,7 @@ def _cmd_init(args) -> int:
 def _cmd_start(args) -> int:
     target = args.command or "."
     print(
-        """TriDelPhi has three doors. Pick the sentence that sounds like your worry:
+        """TriDelPhi has four doors. Pick the sentence that sounds like your worry:
 
 1. I am about to install code someone sent me.
    tridelphi scan ./download
@@ -294,6 +296,10 @@ def _cmd_start(args) -> int:
 3. I shipped a web app and worry I leaked a key, source map, or database.
    tridelphi expose TARGET
    (Reads committed/build files locally; it is not a live penetration test.)
+
+4. I am about to let strangers use this and I do not want a per-visitor lawsuit.
+   tridelphi launch TARGET
+   (Reads files locally. Not legal advice. A clean result is not a compliance certificate.)
 
 Nothing is installed or changed by these checks. `tridelphi init TARGET` adds CI later.
 """.replace("TARGET", target),
@@ -317,6 +323,21 @@ def _cmd_scan(args) -> int:
         return 2
     return run_scan(
         args.command,
+        fmt="markdown" if args.markdown else args.format,
+        sarif_file=args.sarif_file,
+        checklist_md_file=args.checklist_md_file,
+        fail_on=args.fail_on,
+        tool_version=__version__,
+    )
+
+
+def _cmd_launch(args) -> int:
+    # Lawsuit traps: age gates, third-party fonts, session replay, email
+    # footers, renewal terms, DMCA. A sibling of expose, not a ladder rung.
+    from .launch_cmd import run_launch
+
+    return run_launch(
+        args.command or ".",
         fmt="markdown" if args.markdown else args.format,
         sarif_file=args.sarif_file,
         checklist_md_file=args.checklist_md_file,
@@ -435,6 +456,7 @@ _SUBCOMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "init": _cmd_init,
     "scan": _cmd_scan,
     "expose": _cmd_expose,
+    "launch": _cmd_launch,
     "privatize": _cmd_privatize,
     "fix": _cmd_fix,
     "guard": _cmd_guard,
@@ -536,6 +558,11 @@ def _main(argv: list[str] | None) -> int:
             f"tridelphi: to check what your app itself ships (keys in browser "
             f"bundles, source maps, open database rules, committed credentials), "
             f"run:  tridelphi expose {path}",
+            file=sys.stderr,
+        )
+        print(
+            f"tridelphi: for lawsuit traps before you ship (not legal advice), "
+            f"run:  tridelphi launch {path}",
             file=sys.stderr,
         )
         if args.require_workflows:
