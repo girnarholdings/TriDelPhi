@@ -1,4 +1,4 @@
-"""One offline command for the three native static scanners.
+"""One offline command for the native static scanners.
 
 No package installation, repository hooks, external analyzers, or network calls.
 Archive extraction uses the pre-install scanner's bounded extractor. Reports
@@ -18,14 +18,17 @@ from pathlib import Path
 from . import __version__
 from .api import AnalysisError, analyze
 from .expose import analyze_exposure
+from .launch import analyze_launch
 from .preflight import analyze_preflight, extract_archive
 from .reportutil import terminal_safe
 
 _ARCHIVES = (".zip", ".whl", ".tgz", ".tar.gz", ".tar", ".tar.bz2", ".tar.xz")
 _SCOPE = (
-    "Native static checks for install-time risks, GitHub/agent automation, and "
-    "data exposure. No code was executed or installed. External scanners, live "
-    "vulnerability databases, compiled malware and device monitoring are not included. "
+    "Native static checks for install-time risks, GitHub/agent automation, "
+    "data exposure, and launch-time legal patterns. Launch patterns are not "
+    "legal advice and a clean result is not a compliance certificate. No code "
+    "was executed or installed. External scanners, live vulnerability databases, "
+    "compiled malware and device monitoring are not included. "
     "No findings is not proof of safety."
 )
 
@@ -34,19 +37,25 @@ def audit_directory(root: Path) -> dict:
     core = analyze(root)
     preflight = analyze_preflight(root, tool_version=__version__)
     exposure = analyze_exposure(root, tool_version=__version__, run_semgrep=False)
+    launch = analyze_launch(root, tool_version=__version__)
     findings = [
         {"engine": "automation", "rule": f.rule_id, "severity": f.severity,
          "where": f"{f.primary_position.file}:{f.primary_position.line}",
          "message": f.message, "fix": f.remediation.rendered if f.remediation else "Review this finding."}
         for f in core.findings
     ]
-    for engine, result in (("install", preflight), ("exposure", exposure)):
+    for engine, result in (("install", preflight), ("exposure", exposure), ("launch", launch)):
         findings.extend({"engine": engine, "rule": f.rule, "severity": f.severity,
                          "where": f.where, "message": f.message, "fix": f.fix}
                         for f in result.findings)
     severity_order = {"critical": 0, "warning": 1, "note": 2}
     findings.sort(key=lambda f: (severity_order[f["severity"]], f["engine"], f["where"], f["rule"]))
-    complete = not core.diagnostics and not preflight.truncated and exposure.coverage.complete
+    complete = (
+        not core.diagnostics
+        and not preflight.truncated
+        and exposure.coverage.complete
+        and launch.coverage.complete
+    )
     capped = len(findings) > 1000
     return {
         "schemaVersion": 1, "toolVersion": __version__, "scope": _SCOPE,
@@ -60,6 +69,7 @@ def audit_directory(root: Path) -> dict:
                                            for d in core.diagnostics]},
             "install": {"complete": not preflight.truncated, "files": preflight.files_examined},
             "exposure": exposure.coverage.as_dict(),
+            "launch": launch.coverage.as_dict(),
         },
         "findingsTruncated": capped, "findings": findings[:1000],
     }
@@ -72,7 +82,7 @@ def _safe(text: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run all three native TriDelPhi static checks offline.")
+    parser = argparse.ArgumentParser(description="Run the native TriDelPhi static checks offline.")
     parser.add_argument("target", nargs="?", default=".", help="directory or ZIP/library archive")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument(

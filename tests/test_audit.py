@@ -9,7 +9,7 @@ from tridelphi import expose
 from tridelphi.audit import _safe, audit_directory, main
 
 
-def test_all_three_engines_offline(tmp_path, monkeypatch):
+def test_all_native_engines_offline(tmp_path, monkeypatch):
     import socket
     import subprocess
 
@@ -26,7 +26,7 @@ def test_all_three_engines_offline(tmp_path, monkeypatch):
     workflow.parent.mkdir(parents=True)
     workflow.write_text("on: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello\n")
     result = audit_directory(tmp_path)
-    assert set(result["engines"]) == {"install", "automation", "exposure"}
+    assert set(result["engines"]) == {"install", "automation", "exposure", "launch"}
     assert result["engines"]["automation"]["files"] >= 1
     assert result["counts"]["critical"] > 0
     assert any(f["engine"] == "install" for f in result["findings"])

@@ -48,11 +48,14 @@ _LADDER_ROWS: tuple[tuple[str, int, str], ...] = (
 # (name, level, question) like the ladder rows, with level 0 meaning "not a rung
 # — a sibling command".
 _APP_ROW = ("expose", 0, "Does the app you ship leak keys, source, or your data?")
+_LAUNCH_ROW = ("launch", 0, "What lawsuit traps are you about to ship?")
+_SIBLING_ROWS = (_APP_ROW, _LAUNCH_ROW)
 
 # Every row's "how do I actually run this?" — printed next to an unchecked box,
 # because "not run" without the command is just a shrug.
 _HOW_TO_RUN = {name: f"add --level {level}" for name, level, _q in _LADDER_ROWS}
 _HOW_TO_RUN["expose"] = "run `tridelphi expose`"
+_HOW_TO_RUN["launch"] = "run `tridelphi launch`"
 
 # which capability the fix removes → what a person actually does
 _PLAIN_FIX = {
@@ -369,7 +372,7 @@ def render_checklist(
     any_warn = any_warn or status == "warn"
     print(_row(status, "Can a stranger trick a robot into leaking your keys?", cnote), file=stream)
 
-    for name, _level, question in (*_LADDER_ROWS, _APP_ROW):
+    for name, _level, question in (*_LADDER_ROWS, *_SIBLING_ROWS):
         st = external.get(name)
         if st is None or not st.ran:
             unchecked.append(name)
@@ -503,6 +506,8 @@ def render_checklist(
         print("           ships — keys inlined into browser bundles, source maps,", file=stream)
         print("           open database rules, committed credentials — run:", file=stream)
         print("               tridelphi expose .", file=stream)
+        print("           For lawsuit traps in what you are about to ship", file=stream)
+        print("           (not legal advice), run:  tridelphi launch .", file=stream)
     elif result.diagnostics:
         print("  Result:  ⬜  PARTIAL — unreadable workflow input means this is not a pass.", file=stream)
         print("           Fix the parse/read note below, then run the scan again.", file=stream)
@@ -596,7 +601,7 @@ def render_checklist_markdown(
     # check that never ran. This heading is the notification email's subject line
     # for most readers — it is the single most-read string the tool produces.
     unchecked = [
-        name for name, _lvl, _q in (*_LADDER_ROWS, _APP_ROW)
+        name for name, _lvl, _q in (*_LADDER_ROWS, *_SIBLING_ROWS)
         if (st := external.get(name)) is None or not st.ran
     ]
     if files_scanned == 0:
@@ -644,11 +649,13 @@ def render_checklist_markdown(
             out.append(f"| {question} | ⬜ not run — add `--level {level}` |")
         else:
             out.append(f"| {question} | {status_cell(st.counts)} |")
-    app_st = external.get(_APP_ROW[0])
-    if app_st is None or not app_st.ran:
-        out.append(f"| {_APP_ROW[2]} | ⬜ not run — `tridelphi expose` |")
-    else:
-        out.append(f"| {_APP_ROW[2]} | {status_cell(app_st.counts)} |")
+    for name, _level, question in _SIBLING_ROWS:
+        st = external.get(name)
+        how = _HOW_TO_RUN[name].replace("run ", "")
+        if st is None or not st.ran:
+            out.append(f"| {question} | ⬜ not run — {how} |")
+        else:
+            out.append(f"| {question} | {status_cell(st.counts)} |")
     out.append("")
     if accepted:
         out.append(
