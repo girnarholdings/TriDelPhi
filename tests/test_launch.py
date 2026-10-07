@@ -470,3 +470,23 @@ def test_comment_minified_and_docs_do_not_count_as_the_app(tmp_path: Path):
     found = _rules(docs)
     assert "missing-dmca-agent" in found
     assert "hipaa-may-apply" not in found
+
+
+@pytest.mark.parametrize("files", [
+    {"index.html": '<head><link href="//fonts.googleapis.com/css?family=Roboto" rel="stylesheet"></head>'},
+    {"styles.scss": "@import url(//fonts.googleapis.com/css?family=Roboto);\n"},
+    {"server.js": (
+        'app.get("/*", (req, res) => res.send(page));\n'
+        'const page = `<link href="https://fonts.googleapis.com/css2?family=Inter">`;\n'
+        "/* serve the shell */\n"
+    )},
+], ids=["protocol-relative-href", "scss-url", "glob-route-before-comment"])
+def test_slashes_inside_strings_are_not_comments(tmp_path: Path, files):
+    """A comment pattern blanked these, and the font the page loads went unseen."""
+    assert "third-party-font" in _rules(_repo(tmp_path, files))
+
+
+def test_only_the_setuptools_build_lib_is_not_the_app(tmp_path: Path):
+    page = '<link href="https://fonts.googleapis.com/css2?family=Inter" rel="stylesheet">'
+    assert "third-party-font" in _rules(_repo(tmp_path, {"web/build/lib/index.html": page}))
+    assert "third-party-font" not in _rules(_repo(tmp_path, {"build/lib/pkg/index.html": page}))

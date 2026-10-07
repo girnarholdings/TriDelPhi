@@ -85,9 +85,9 @@ _TERMS_LINK = re.compile(r"(?i)terms of service|terms-of-service|/terms\b|href=[
 _DMCA_LINK = re.compile(r"(?i)/dmca\b|designated agent|dmca agent|copyright\.gov/dmca")
 _UI_SCRIPT = re.compile(r"(?i)(<form\b|createRoot\b|react-dom|document\.body|dangerouslySetInnerHTML)")
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-# `//` comments, but not the slashes in `https://`.
-_LINE_COMMENT = re.compile(r"(?m)(?<!:)//[^\n]*")
+# Files whose `//` and `/* */` are comments. Python, Ruby, YAML and prose only
+# lose their HTML comments: `//` there is division or a protocol-relative URL.
+_C_COMMENT_EXTS = _SCRIPT_EXTS | _MARKUP_EXTS | _STYLE_EXTS | frozenset({".go", ".php"})
 _IMG = re.compile(r"(?i)<img\b")
 _IMG_TAG = re.compile(r"(?i)<img\b[^>]*>")
 _ALT = re.compile(r"(?i)\balt\s*=")
@@ -252,10 +252,53 @@ def _blank_match(match: re.Match[str]) -> str:
     return re.sub(r"[^\n]", " ", match.group(0))
 
 
-def _strip_comments(text: str) -> str:
+def _strip_c_comments(text: str) -> str:
+    """Blank `//` and `/* */` comments that sit outside string literals.
+
+    A pattern cannot tell a comment from the same characters inside a string:
+    `href="//fonts.googleapis.com"` and `app.get("/*")` are code, and blanking
+    them hid the tracker or font the page loads. This walks quotes instead.
+    `'` and `"` end at a newline, so an apostrophe in markup prose costs at
+    most the rest of its line. An unclosed `/*` is left alone.
+    """
+    chars = list(text)
+    i, n, quote = 0, len(text), ""
+    while i < n:
+        char = text[i]
+        if quote:
+            if char == "\\":
+                i += 2
+                continue
+            if char == quote or (char == "\n" and quote != "`"):
+                quote = ""
+            i += 1
+            continue
+        if char in "\"'`":
+            quote = char
+            i += 1
+            continue
+        if text.startswith("//", i) and (i == 0 or text[i - 1] not in ":=("):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            if end < 0:
+                i += 2
+                continue
+            end += 2
+        else:
+            i += 1
+            continue
+        for k in range(i, end):
+            if chars[k] != "\n":
+                chars[k] = " "
+        i = end
+    return "".join(chars)
+
+
+def _strip_comments(text: str, ext: str) -> str:
     text = _HTML_COMMENT.sub(_blank_match, text)
-    text = _BLOCK_COMMENT.sub(_blank_match, text)
-    return _LINE_COMMENT.sub(_blank_match, text)
+    return _strip_c_comments(text) if ext in _C_COMMENT_EXTS else text
 
 
 def _minified(rel: Path, raw: str) -> bool:
@@ -268,10 +311,16 @@ def _minified(rel: Path, raw: str) -> bool:
 
 
 def _python_build_artifact(rel: Path) -> bool:
+    """setuptools output: `build/lib/` at the root, egg metadata, `.eggs`.
+
+    Only the root `build/lib` is setuptools'. A `build` and a `lib` anywhere
+    in the path also matched `web/build/lib/` and `lib/build/`, which are the
+    pages a visitor loads.
+    """
     parts = [part.lower() for part in rel.parts]
-    if any(part.endswith(".egg-info") or part == ".eggs" for part in parts):
+    if any(part.endswith(".egg-info") or part == ".eggs" for part in parts[:-1]):
         return True
-    return "build" in parts and "lib" in parts
+    return parts[:2] == ["build", "lib"] and len(parts) > 2
 
 
 def _vendored(rel: Path) -> bool:
@@ -321,7 +370,7 @@ def _load_docs(
         raw = _read_text(path, cap, coverage=coverage)
         if raw is None:
             continue
-        text = _strip_comments(raw)
+        text = _strip_comments(raw, ext)
         script_ui = ext in _SCRIPT_EXTS and bool(_UI_SCRIPT.search(text))
         docs.append(_Doc(
             rel=rel.as_posix(),
