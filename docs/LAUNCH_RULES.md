@@ -103,9 +103,9 @@ invent an amount.
 Each finding’s text report and SARIF result include a copy-paste **Example**
 and a **Source** line. The SARIF rule `helpUri` is the first URL in that
 source when one exists. The three dollar figures above stay in the message
-and the fix. A citation may name the published statutory maximum (COPPA’s
-2025 figure in 16 C.F.R. § 1.98 is higher than the “about $53,000” this
-check was built around) without adding a fourth amount to the message.
+and the fix. A citation may name the exact published maximum (COPPA’s
+$53,088, the 2025 figure in 16 C.F.R. § 1.98, which the FTC kept for 2026)
+without adding a fourth amount to the message.
 
 ## What the files are not
 
@@ -134,11 +134,11 @@ the docs admit. A clean run is not a compliance certificate.
 - A footer link counts even if the target page is missing.
 - Markdown essays do not count as the website, so a docs-only repo is not told it lacks a privacy policy.
 - Registration at copyright.gov cannot be seen, and the designation expires after three years unless it is amended or resubmitted (37 C.F.R. § 201.38). The checklist is the steps, not a status. TriDelPhi does not submit the filing.
-- The 2024 FTC Negative Option Rule (click-to-cancel) was vacated by the Eighth Circuit on July 8, 2025. The check cites California’s automatic renewal law as amended by AB 2863 (contracts entered, amended, or extended on or after July 1, 2025) and ROSCA, which were not vacated.
+- The 2024 FTC Negative Option Rule (click-to-cancel) was vacated by the Eighth Circuit on July 8, 2025. The check cites California’s automatic renewal law as amended by AB 2863 (contracts entered, amended, or extended on or after July 1, 2025) and ROSCA, which were not vacated. The FTC reopened negative-option rulemaking with an advance notice published March 13, 2026; until a new rule is final, it is not cited as law.
 - HIPAA and GLBA are “may apply” checklists. They do not certify that you are a covered entity or a financial institution.
 - `a11y-primary-page` stays quiet when any image has `alt` or the tree has a landmark. `a11y-missing-alt` still notes an `<img>` with no `alt` attribute. Neither is a WCAG audit.
-- EU AI Act Article 50 (chatbot transparency, applicable from August 2, 2026) is a checklist. It is not a finding that a deployed chat lacked a disclosure.
-- CIPA session-replay and chat-widget suits are real and the courts disagree (metadata versus contents). The check does not predict that a court would find liability. The “about $5,000” figure is the statutory number in Cal. Penal Code § 637.2, not a damages estimate.
+- EU AI Act Article 50 (chatbot transparency, applicable from August 2, 2026) is a checklist. The 2026 Digital Omnibus on AI postponed the high-risk obligations, not Article 50; only the Art. 50(2) machine-readable marking got a grace period (to December 2, 2026) for systems already on the market. It is not a finding that a deployed chat lacked a disclosure.
+- CIPA session-replay and chat-widget suits are real and the courts disagree (metadata versus contents). The check does not predict that a court would find liability. The “about $5,000” figure is the statutory number in Cal. Penal Code § 637.2, not a damages estimate. SB 690 (signed September 30, 2026) ends private pen-register (§ 638.51) suits over websites and apps; it does not touch the § 631 wiretap theory recorder suits use, so the check is unchanged.
 - The project’s own `LICENSE` file is not a third-party NOTICE.
 
 ## Coverage
