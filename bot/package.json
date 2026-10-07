@@ -10,6 +10,9 @@
     "test": "node test/verify.test.mjs && node test/route.test.mjs && node test/index.test.mjs && node test/state.test.mjs"
   },
   "devDependencies": {
-    "wrangler": "4.132.0"
+    "wrangler": "4.144.0"
+  },
+  "overrides": {
+    "sharp": "0.35.5"
   }
 }
