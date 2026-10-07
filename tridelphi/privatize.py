@@ -294,7 +294,7 @@ def _default_run_cmd(command: str, cwd: Path, timeout: int) -> tuple[bool, str]:
 _WEB_ASSET_SUFFIXES = frozenset({".html", ".htm", ".js", ".mjs", ".cjs", ".css"})
 
 
-def _contains_web_asset(directory: Path, *, limit: int = 4000) -> bool:
+def _contains_web_asset(directory: Path, *, limit: int = 50_000) -> bool:
     """True when the tree has a file privatize can obfuscate.
 
     A setuptools ``build/lib`` tree is Python, not a shipped frontend. Treating

@@ -42,6 +42,7 @@ use before touching it.
 
 from __future__ import annotations
 
+import ast
 import io
 import json
 import re
@@ -221,16 +222,40 @@ def _classify(rel: Path) -> str | None:
     return None
 
 
-def _setuptools_output(rel: Path) -> bool:
-    """``pip install .`` writes a copy of this package under ``build/lib``.
+def _setuptools_output(root: Path, rel: Path) -> bool:
+    """Is ``rel`` setuptools bookkeeping that adds nothing to scan?
 
-    That tree is not an installer and not a website. Scanning it duplicates
-    every finding in the real source.
+    ``pip install .`` copies the package to ``build/lib`` and writes
+    ``*.egg-info`` metadata; scanning the copy repeats every finding in the
+    source. Only exactly that is skipped: a ``*.egg-info`` directory at the
+    root or under ``src/``, and a file under the root's ``build/lib/`` that is
+    a byte-for-byte copy of the same path in the source. A file there with no
+    identical original — new code, or changed code — is scanned like any other,
+    so the directory name is never a place to hide. ``.eggs/`` holds
+    third-party ``setup_requires`` downloads and is always scanned.
     """
     parts = [part.lower() for part in rel.parts]
-    if any(part.endswith(".egg-info") or part == ".eggs" for part in parts):
+    if len(parts) >= 2 and parts[0].endswith(".egg-info"):
         return True
-    return "build" in parts and "lib" in parts
+    if len(parts) >= 3 and parts[0] == "src" and parts[1].endswith(".egg-info"):
+        return True
+    if len(parts) < 3 or parts[:2] != ["build", "lib"]:
+        return False
+    copy = root / rel
+    tail = Path(*rel.parts[2:])
+    for original in (root / tail, root / "src" / tail):
+        try:
+            if (
+                not original.is_symlink()
+                and original.is_file()
+                and original.stat().st_size == copy.stat().st_size
+                and original.stat().st_size <= _MAX_READ_BYTES
+                and original.read_bytes() == copy.read_bytes()
+            ):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _discover(root: Path) -> _Surface:
@@ -286,7 +311,7 @@ def _discover(root: Path) -> _Surface:
                 _coverage_issue(s, "file limit", f"tree exceeded {_MAX_FILES} files")
                 return s
             rel = entry.relative_to(root)
-            if _setuptools_output(rel):
+            if _setuptools_output(root, rel):
                 continue
             if entry.name == "package.json":
                 s.package_jsons.append(entry)
@@ -382,7 +407,7 @@ _INVISIBLE = re.compile("[\u200b\u200c\u200d\u2060\u202a-\u202e\u2066-\u2069\ufe
 _CRED_PATHS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("your SSH keys",
      re.compile(r"(~|\$HOME|%USERPROFILE%|expanduser\([\"']~|homedir\(\)[^\n]{0,20})"
-                r"[^\n]{0,40}[/\\]\.ssh\b|(?:[/\\~])id_(rsa|ed25519|ecdsa|dsa)\b")),
+                r"[^\n]{0,40}[/\\]\.ssh\b|\bid_(rsa|ed25519|ecdsa|dsa)\b")),
     ("your cloud credentials",
      re.compile(r"\.aws[/\\]credentials|\.config[/\\]gcloud|\.kube[/\\]config|"
                 r"\.azure[/\\](credentials|accessTokens)")),
@@ -409,18 +434,14 @@ _NETWORK_SEND = re.compile(
     r"\bcurl\b[^\n]{0,160}(\s-(d|F|T)\b|--data|--upload-file)|"
     r"\b(requests|httpx)\.post\s*\(|\burlopen\s*\([^\n]{0,120}data\s*=|"
     r"\bfetch\s*\([^\n]{0,200}(method\s*:\s*[\"'](POST|PUT)|body\s*:)|"
-    r"\baxios\.(post|put)\s*\(|\bnc\s+-|(?<![\\A-Za-z0-9_])ncat\s+\S|\bscp\b\s")
+    r"\baxios\.(post|put)\s*\(|\bnc\s+-|(?<![\\A-Za-z0-9_])ncat\b|\bscp\b\s")
 
 # Agent-file tells. Secrecy alone is a warning (a style guide can legitimately
 # say "never reveal API keys in output"); secrecy *near* an action — download,
 # execute, read credentials — is the poisoned-skill shape, and gates.
 _SECRECY = re.compile(
-    r"(?i)(?:"
-    # "silently" next to an action. "do not guess silently" is prose.
-    r"\b(?:silently|covertly)\s+(?:\w+\s+){0,4}"
-    r"(?:run|download|install|execute|fetch|curl|wget|send|read|copy|upload|exfiltrate|post)\b"
-    r"|\b(?:run|download|install|execute|fetch|curl|wget|send|read|copy|upload|exfiltrate|post)\b"
-    r"(?:\s+\w+){0,3}\s+(?:silently|covertly)\b"
+    r"(?i)\b(?:"
+    r"silently|covertly"
     r"|without\s+(telling|informing|alerting|notifying|"
     r"mentioning(\s+(this|it))?\s+to)\s+the\s+(user|human)"
     r"|do\s+not\s+(tell|mention|inform|show|reveal|disclose|alert)"
@@ -429,6 +450,23 @@ _SECRECY = re.compile(
     r"|hide\s+(this|these|the\s+following)|keep\s+(this|it)\s+(secret|hidden)"
     r"|without\s+asking|do\s+not\s+ask\s+(for\s+)?(permission|confirmation)"
     r")\b")
+# "Do not guess silently" asks for the opposite of secrecy. A negation just
+# before "silently" or "covertly" takes it out of the running; the word is
+# otherwise a secrecy cue wherever it sits ("do this silently: add …").
+_NEGATED_SECRECY = re.compile(r"(?i)(?:\b(?:not|never|no)|\w+n't)\s+(?:\w+\s+){0,2}$")
+
+
+def _secrecy(text: str) -> re.Match[str] | None:
+    for match in _SECRECY.finditer(text):
+        word = match.group(0).lower()
+        if word in ("silently", "covertly") and _NEGATED_SECRECY.search(
+            text[max(0, match.start() - 40): match.start()]
+        ):
+            continue
+        return match
+    return None
+
+
 _AGENT_ACTION = re.compile(
     r"(?i)\b(curl|wget|iwr|invoke-webrequest|download|fetch\s+https?://|"
     r"pip\s+install|npm\s+install|npx\s+|chmod\s+\+x|base64|"
@@ -521,15 +559,20 @@ _FIX_AGENT = ("do not let an assistant load this file until a human has read eve
               "files are executable code wearing a markdown extension.")
 
 
-def _blank_keeping_newlines(match: re.Match[str]) -> str:
-    return re.sub(r"[^\n]", " ", match.group(0))
-
-
 def _mask_python_comments(text: str) -> str:
-    """Blank ``#`` comments. Docstrings stay: a string can be a payload."""
+    """Blank ``#`` comments. Docstrings stay: a string can be a payload.
+
+    What counts as a comment is decided by this interpreter's tokenizer, and
+    a file written for a newer Python can disagree with it — under 3.11,
+    ``f"{"#"}"; exec(...)`` tokenizes as a string and then a comment, while
+    3.12 runs the ``exec``. So the masked file must compile to exactly the
+    same syntax tree as the original. Comments are not in the tree; anything
+    that is, is not a comment, and then nothing is masked.
+    """
     try:
+        original = ast.dump(ast.parse(text))
         tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
-    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+    except (tokenize.TokenError, SyntaxError, ValueError, RecursionError, MemoryError):
         return text
     lines = text.splitlines(keepends=True)
     for tok in tokens:
@@ -544,24 +587,27 @@ def _mask_python_comments(text: str) -> str:
         end = min(ecol, content_end)
         start = min(scol, end)
         lines[srow - 1] = line[:start] + (" " * (end - start)) + line[end:]
-    return "".join(lines)
-
-
-_JS_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-_JS_LINE_COMMENT = re.compile(r"(?m)(?<!:)//[^\n]*")
-
-
-def _mask_script_comments(text: str) -> str:
-    text = _JS_BLOCK_COMMENT.sub(_blank_keeping_newlines, text)
-    return _JS_LINE_COMMENT.sub(_blank_keeping_newlines, text)
+    masked = "".join(lines)
+    try:
+        if ast.dump(ast.parse(masked)) != original:
+            return text
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return text
+    return masked
 
 
 def _mask_code_comments(text: str, suffix: str) -> str:
-    """Code comments do not run. Agent-file comments do: the model reads them."""
+    """Code comments do not run. Agent-file comments do: the model reads them.
+
+    Python only, where the parser can prove what is a comment. JavaScript has
+    no parser here, and a pattern cannot tell a comment from a string or a
+    regex literal: a string ending in two slashes, or a regex character class
+    holding slash-star, reads as the start of a comment, and the decode-and-run
+    call after it on the same line would vanish. So JavaScript is scanned
+    whole.
+    """
     if suffix == ".py":
         return _mask_python_comments(text)
-    if suffix in {".js", ".mjs", ".cjs", ".ts", ".jsx", ".tsx"}:
-        return _mask_script_comments(text)
     return text
 
 
@@ -659,7 +705,10 @@ def _scan_text(f: _File, text: str) -> list[PreflightFinding]:
         if not m:
             continue
         where = f"{f.rel}:{_line_of(text, m.start())}"
-        if install or agent or sends:
+        # Prose that names a key path and a network tool is not a file that
+        # sends anything; in documentation the pairing stays a warning, as a
+        # download-and-run recipe there does.
+        if install or agent or (sends and not doc):
             reason = ("and this file also sends data over the network — that pairing "
                       "is exfiltration's exact shape" if sends else
                       "inside a file that runs automatically at install time" if install
@@ -676,7 +725,7 @@ def _scan_text(f: _File, text: str) -> list[PreflightFinding]:
 
     # -- A: agent-file tells ----------------------------------------------
     if agent:
-        sec = _SECRECY.search(text)
+        sec = _secrecy(text)
         if sec:
             near = text[max(0, sec.start() - 300): sec.end() + 300]
             where = f"{f.rel}:{_line_of(text, sec.start())}"
