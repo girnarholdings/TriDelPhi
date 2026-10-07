@@ -15,7 +15,7 @@ from typing import TextIO
 from .expose import ExposureLimits
 from .fsutil import atomic_write_text
 from .launch import CATEGORIES, NOT_LEGAL_ADVICE, LaunchFinding, LaunchResult, analyze_launch
-from .reportutil import grouped_lines, md_escape, wrap
+from .reportutil import compact_wheres, md_escape, wrap
 from .sarif import dumps
 from .severity import should_fail
 
@@ -45,6 +45,74 @@ def _by_category(findings: list[LaunchFinding]) -> dict[str, list[LaunchFinding]
     for finding in findings:
         owned.setdefault(finding.category, []).append(finding)
     return owned
+
+
+def _groups(findings: list[LaunchFinding], *, markdown: bool = False) -> list[dict[str, str]]:
+    """Same collapse as grouped_lines, plus the copy-paste fix and the source."""
+    esc = md_escape if markdown else (lambda text: text)
+    order: list[str] = []
+    by_msg: dict[str, dict[str, object]] = {}
+    for finding in findings:
+        slot = by_msg.get(finding.message)
+        if slot is None:
+            slot = {
+                "fix": finding.fix,
+                "snippet": finding.snippet,
+                "citation": finding.citation,
+                "wheres": [],
+            }
+            by_msg[finding.message] = slot
+            order.append(finding.message)
+        wheres = slot["wheres"]
+        assert isinstance(wheres, list)
+        if finding.where and finding.where not in wheres:
+            wheres.append(finding.where)
+    rows: list[dict[str, str]] = []
+    for message in order:
+        slot = by_msg[message]
+        wheres = slot["wheres"]
+        assert isinstance(wheres, list)
+        if not wheres:
+            text = esc(message)
+        elif len(wheres) == 1:
+            text = f"{esc(wheres[0])} — {esc(message)}"
+        else:
+            text = f"{esc(message)} — at {esc(compact_wheres(wheres))}"
+        rows.append({
+            "text": text,
+            "fix": str(slot["fix"]),
+            "snippet": str(slot["snippet"]),
+            "citation": str(slot["citation"]),
+        })
+    return rows
+
+
+def _append_markdown_advice(lines: list[str], row: dict[str, str]) -> None:
+    snippet = row["snippet"].strip()
+    if snippet:
+        lines.append("")
+        lines.append("  Example:")
+        lines.append("")
+        lines.append("  ```")
+        lines.extend(f"  {line.rstrip()}" for line in snippet.splitlines()[:12])
+        lines.append("  ```")
+    citation = " ".join(row["citation"].split())
+    if citation:
+        lines.append(f"  Source: {md_escape(citation)}")
+
+
+def _print_advice(row: dict[str, str], out: TextIO) -> None:
+    for line in wrap(f"Do this: {row['fix']}", 64):
+        print(f"        {line}", file=out)
+    snippet = row["snippet"].strip()
+    if snippet:
+        print("        Example:", file=out)
+        for line in snippet.splitlines()[:12]:
+            print(f"          {line.rstrip()}", file=out)
+    citation = " ".join(row["citation"].split())
+    if citation:
+        for line in wrap(f"Source: {citation}", 64):
+            print(f"        {line}", file=out)
 
 
 def _render_text(result: LaunchResult, repo: str, out: TextIO) -> None:
@@ -86,23 +154,21 @@ def _render_text(result: LaunchResult, repo: str, out: TextIO) -> None:
             if not group:
                 continue
             print(f"  ⚠️  {question}", file=out)
-            for _sev, text, fix in grouped_lines(group):
-                for index, line in enumerate(wrap(text, 64)):
+            for row in _groups(group):
+                for index, line in enumerate(wrap(row["text"], 64)):
                     print(f"      {'· ' if index == 0 else '  '}{line}", file=out)
-                for line in wrap(f"Do this: {fix}", 64):
-                    print(f"        {line}", file=out)
+                _print_advice(row, out)
             print("", file=out)
 
     if notes:
         print(f"  {'─' * 54}\n", file=out)
         print("  Checklists — a file read could not prove these. They are next", file=out)
         print("  steps, not a ruling that you broke a law.\n", file=out)
-        lines = grouped_lines(notes)
-        for _sev, text, fix in lines[:_MAX_ITEMS]:
-            for index, line in enumerate(wrap(text, 64)):
+        lines = _groups(notes)
+        for row in lines[:_MAX_ITEMS]:
+            for index, line in enumerate(wrap(row["text"], 64)):
                 print(f"      {'· ' if index == 0 else '  '}{line}", file=out)
-            for line in wrap(f"Do this: {fix}", 64):
-                print(f"        {line}", file=out)
+            _print_advice(row, out)
         if len(lines) > _MAX_ITEMS:
             print(f"      · {_more(len(lines) - _MAX_ITEMS)}", file=out)
         print("", file=out)
@@ -161,18 +227,20 @@ def _render_markdown(result: LaunchResult, repo: str) -> str:
     if actionable:
         out.append("**Look at these before you ship:**")
         for letter, _question, _gloss in CATEGORIES:
-            for _sev, text, fix in grouped_lines(
+            for row in _groups(
                 [finding for finding in actionable if finding.category == letter],
                 markdown=True,
             ):
-                out.append(f"- ⚠️ {text} **Do this:** {fix}")
+                out.append(f"- ⚠️ {row['text']} **Do this:** {md_escape(row['fix'])}")
+                _append_markdown_advice(out, row)
         out.append("")
     if notes:
         out.append("<details>")
         out.append(f"<summary><b>{len(notes)} checklist item{'s' if len(notes) != 1 else ''}</b> — not proven from files</summary>")
         out.append("")
-        for _sev, text, fix in grouped_lines(notes, markdown=True)[:_MAX_ITEMS]:
-            out.append(f"- {text} **Do this:** {fix}")
+        for row in _groups(notes, markdown=True)[:_MAX_ITEMS]:
+            out.append(f"- {row['text']} **Do this:** {md_escape(row['fix'])}")
+            _append_markdown_advice(out, row)
         hidden = len(notes) - _MAX_ITEMS
         if hidden > 0:
             out.append(f"- {_more(hidden)}")

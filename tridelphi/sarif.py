@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Sequence
 from importlib import resources
 from typing import Any
@@ -266,6 +267,13 @@ def to_sarif(
     return document
 
 
+def _first_http_url(text: str) -> str | None:
+    match = re.search(r"https?://[^\s)>\]]+", text)
+    if not match:
+        return None
+    return match.group(0).rstrip(".,;")
+
+
 def simple_sarif(findings, *, tool: str, audit_label: str, tool_version: str,
                  help_uri: str) -> dict[str, Any]:
     """One SARIF run for the sibling audits' flat findings.
@@ -281,20 +289,30 @@ def simple_sarif(findings, *, tool: str, audit_label: str, tool_version: str,
     results: list[dict[str, Any]] = []
     for f in sorted(findings, key=lambda x: (x.where, x.rule, x.message)):
         rule_id = f"{tool}/{f.rule}"
+        citation = " ".join(str(getattr(f, "citation", "") or "").split())
+        snippet = " ".join(str(getattr(f, "snippet", "") or "").split())
+        message = f.message
+        if snippet:
+            message = f"{message} Example: {snippet}"
+        if citation:
+            message = f"{message} Source: {citation}"
         if rule_id not in seen:
             seen.add(rule_id)
-            rules.append({
+            rule: dict[str, Any] = {
                 "id": rule_id,
                 "name": f.rule.replace("-", ""),
                 "shortDescription": {"text": f"{audit_label}: {f.rule}"},
-                "helpUri": help_uri,
-            })
+                "helpUri": _first_http_url(citation) or help_uri,
+            }
+            if citation:
+                rule["help"] = {"text": citation}
+            rules.append(rule)
         path, line = split_where(f.where)
         region = {"startLine": line or 1}
         results.append({
             "ruleId": rule_id,
             "level": _LEVEL.get(f.severity, "warning"),
-            "message": {"text": f.message},
+            "message": {"text": message},
             "locations": [{"physicalLocation": {
                 "artifactLocation": {"uri": path or "README.md"},
                 "region": region,

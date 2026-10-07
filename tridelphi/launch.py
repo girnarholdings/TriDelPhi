@@ -86,9 +86,22 @@ _DMCA_LINK = re.compile(r"(?i)/dmca\b|designated agent|dmca agent|copyright\.gov
 _UI_SCRIPT = re.compile(r"(?i)(<form\b|createRoot\b|react-dom|document\.body|dangerouslySetInnerHTML)")
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+# `//` comments, but not the slashes in `https://`.
+_LINE_COMMENT = re.compile(r"(?m)(?<!:)//[^\n]*")
 _IMG = re.compile(r"(?i)<img\b")
+_IMG_TAG = re.compile(r"(?i)<img\b[^>]*>")
 _ALT = re.compile(r"(?i)\balt\s*=")
 _LANDMARK = re.compile(r"(?i)(<main\b|<nav\b|role=[\"'](?:main|navigation)[\"'])")
+_AUTH_SIGNUP = re.compile(
+    r"(?i)(?:\.signUp\s*\(|createUserWithEmailAndPassword\s*\(|"
+    r"\.createUser\s*\(|<SignUp\b)"
+)
+_STRIPE_SUB = re.compile(
+    r"(?i)(?:mode\s*[:=]\s*[\"']subscription[\"']|subscriptions\.create\s*\()"
+)
+_REAL_FORM = re.compile(r"(?i)(<form\b|<input\b|<textarea\b|<select\b)")
+_DATA_EXTS = frozenset({".yml", ".yaml", ".json", ".toml", ".txt"})
+_VENDOR_PARTS = frozenset({"vendor", "third_party", "third-party"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +113,9 @@ class LaunchFinding:
     message: str
     fix: str
     kind: str = "static"
+    # Primary source and a copy-paste fix. Empty on older callers.
+    citation: str = ""
+    snippet: str = ""
 
 
 @dataclass
@@ -122,11 +138,15 @@ class _Doc:
     email: bool
     markup: bool
     script_ui: bool
+    # False for comments-only noise we already stripped, and for files that
+    # are not the shipped app: rule tables, minified bundles, vendored code,
+    # setuptools build output, and markdown essays.
+    trap: bool = True
 
     @property
     def page(self) -> bool:
         """A visitor-facing page, not a marketing-email template."""
-        if self.email:
+        if self.email or not self.trap:
             return False
         return self.markup or self.script_ui
 
@@ -188,6 +208,8 @@ def _finding(rules: dict[str, Any], rule_id: str, where: str, **tokens: str) -> 
         message=message,
         fix=_fill(str(spec["fix"]), **tokens),
         kind=kind,
+        citation=str(spec.get("citation") or ""),
+        snippet=str(spec.get("snippet") or "").strip(),
     )
 
 
@@ -225,8 +247,42 @@ def _has_phrase(lower: str, phrases: tuple[str, ...]) -> str | None:
     return None
 
 
+def _blank_match(match: re.Match[str]) -> str:
+    """Replace a comment with spaces, keeping newlines so line numbers hold."""
+    return re.sub(r"[^\n]", " ", match.group(0))
+
+
 def _strip_comments(text: str) -> str:
-    return _BLOCK_COMMENT.sub(" ", _HTML_COMMENT.sub(" ", text))
+    text = _HTML_COMMENT.sub(_blank_match, text)
+    text = _BLOCK_COMMENT.sub(_blank_match, text)
+    return _LINE_COMMENT.sub(_blank_match, text)
+
+
+def _minified(rel: Path, raw: str) -> bool:
+    name = rel.name.lower()
+    if ".min." in name:
+        return True
+    lines = raw.splitlines() or [raw]
+    long = sum(1 for line in lines if len(line) > 2000)
+    return long >= 1 and len(lines) <= 8
+
+
+def _python_build_artifact(rel: Path) -> bool:
+    parts = [part.lower() for part in rel.parts]
+    if any(part.endswith(".egg-info") or part == ".eggs" for part in parts):
+        return True
+    return "build" in parts and "lib" in parts
+
+
+def _vendored(rel: Path) -> bool:
+    return bool({part.lower() for part in rel.parts[:-1]} & _VENDOR_PARTS)
+
+
+def _trap_doc(rel: Path, ext: str, raw: str) -> bool:
+    """Files that are not the app a visitor loads."""
+    if ext in _MD_EXTS or ext in _DATA_EXTS:
+        return False
+    return not (_minified(rel, raw) or _python_build_artifact(rel) or _vendored(rel))
 
 
 def _is_skipped_rel(rel: Path) -> bool:
@@ -278,6 +334,7 @@ def _load_docs(
             email=_emailish(rel),
             markup=ext in _MARKUP_EXTS,
             script_ui=script_ui,
+            trap=_trap_doc(rel, ext, raw),
         ))
     return docs
 
@@ -306,19 +363,22 @@ def _detect_coppa(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding
     phrases = _phrases(rules, "coppa_age_phrases")
     out: list[LaunchFinding] = []
     for doc in docs:
-        if doc.email or doc.ext in _MD_EXTS | _STYLE_EXTS:
+        if not doc.trap or doc.email or doc.ext in _MD_EXTS | _STYLE_EXTS:
             continue
-        if not (doc.markup or doc.script_ui or doc.ext in _SCRIPT_EXTS):
+        if not (doc.markup or doc.script_ui or doc.ext in _SCRIPT_EXTS | _CODE_EXTS):
             continue
         path_signup = bool(_SIGNUP_PATH.search(doc.rel))
         create = bool(_CREATE_ACCOUNT.search(doc.text))
-        if not _PASSWORD.search(doc.text):
-            continue
-        if not (path_signup or create):
+        sdk = bool(_AUTH_SIGNUP.search(doc.text))
+        has_password = bool(_PASSWORD.search(doc.text))
+        # An auth SDK signup collects the password inside the vendor widget,
+        # so the form in this repo may not contain type=password.
+        if not ((has_password and (path_signup or create)) or sdk):
             continue
         if _has_phrase(doc.lower, phrases) or _AGE_WORD.search(doc.text):
             continue
-        out.append(_finding(rules, "coppa-age-gate", _where(doc, "password"), detail=doc.rel))
+        needle = "password" if has_password else (doc.rel)
+        out.append(_finding(rules, "coppa-age-gate", _where(doc, needle if has_password else ""), detail=doc.rel))
         break
     return out
 
@@ -328,6 +388,8 @@ def _detect_fonts(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding
     found: list[tuple[_Doc, str]] = []
     seen: set[str] = set()
     for doc in docs:
+        if not doc.trap:
+            continue
         if doc.ext in _MD_EXTS or doc.ext in {".py", ".rb", ".go", ".json", ".yml", ".yaml", ".txt"}:
             continue
         if not (doc.markup or doc.ext in _STYLE_EXTS or doc.ext in _SCRIPT_EXTS):
@@ -353,6 +415,8 @@ def _vendor_hits(docs: list[_Doc], vendors: list[Any]) -> list[tuple[str, str, _
         vid = str(vendor["id"])
         snippets = tuple(str(item).lower() for item in vendor.get("snippets") or ())
         for doc in docs:
+            if not doc.trap:
+                continue
             if not (doc.markup or doc.ext in _SCRIPT_EXTS or doc.ext in _STYLE_EXTS):
                 continue
             snippet = _has_phrase(doc.lower, snippets)
@@ -364,7 +428,8 @@ def _vendor_hits(docs: list[_Doc], vendors: list[Any]) -> list[tuple[str, str, _
 
 
 def _repo_has(docs: list[_Doc], phrases: tuple[str, ...]) -> bool:
-    return any(_has_phrase(doc.lower, phrases) for doc in docs)
+    """A mention in a rule table, a README, or a vendored bundle does not count."""
+    return any(doc.trap and _has_phrase(doc.lower, phrases) for doc in docs)
 
 
 def _detect_replay(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]:
@@ -393,21 +458,29 @@ def _detect_replay(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFindin
     present_doc: _Doc | None = None
     present_snippet = ""
     for doc in docs:
-        if doc.ext in _MD_EXTS:
+        if not doc.trap or doc.ext in _MD_EXTS:
+            continue
+        # Detector source in Python is not a recorder the visitor loads.
+        if not (doc.markup or doc.ext in _SCRIPT_EXTS or doc.ext in _STYLE_EXTS):
             continue
         # `disable_session_recording: true` contains the substring
         # `session_recording: true`. An explicit off wins inside that file.
         file_off = _has_phrase(doc.lower, off) is not None
         started = "startsessionrecording" in doc.lower
+        on_hit = _has_phrase(doc.lower, on)
         if file_off:
             disabled = True
-        if started or (not file_off and (snippet := _has_phrase(doc.lower, on))):
+        if started or (not file_off and on_hit):
             recording = True
-            posthog_doc = posthog_doc or doc
-            posthog_snippet = posthog_snippet or (snippet if not started else "startsessionrecording")
-        elif (snippet := _has_phrase(doc.lower, present)):
-            present_doc = present_doc or doc
-            present_snippet = present_snippet or snippet
+            if posthog_doc is None:
+                posthog_doc = doc
+            if not posthog_snippet:
+                posthog_snippet = "startsessionrecording" if started else (on_hit or "")
+        else:
+            present_hit = _has_phrase(doc.lower, present)
+            if present_hit and present_doc is None:
+                present_doc = doc
+                present_snippet = present_hit
     if posthog_doc is None and not recording:
         posthog_doc = present_doc
         posthog_snippet = present_snippet
@@ -434,7 +507,7 @@ def _detect_canspam(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFindi
     marketing = _phrases(rules, "email_marketing_phrases")
     transactional = _phrases(rules, "email_transactional_phrases")
     for doc in docs:
-        if not doc.email:
+        if not doc.trap or not doc.email:
             continue
         if doc.ext not in _MARKUP_EXTS | {".txt"}:
             continue
@@ -463,19 +536,22 @@ def _detect_canspam(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFindi
 def _detect_renewal(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]:
     renewal = _phrases(rules, "renewal_phrases")
     for doc in docs:
-        if doc.email or doc.ext in _MD_EXTS | _STYLE_EXTS:
+        if not doc.trap or doc.email or doc.ext in _MD_EXTS | _STYLE_EXTS:
             continue
         if not (doc.markup or doc.script_ui or doc.ext in _SCRIPT_EXTS):
             continue
         has_cta = bool(_CTA.search(doc.text))
         has_price = bool(_PRICE.search(doc.text))
         has_plan = bool(_PLAN.search(doc.text))
+        has_stripe = bool(_STRIPE_SUB.search(doc.text))
         has_renewal = _has_phrase(doc.lower, renewal) is not None
         if has_renewal:
             continue
-        if has_cta and has_price:
+        if (has_cta or has_stripe) and has_price:
             return [_finding(rules, "auto-renewal-terms", _where(doc, "subscribe"), detail=doc.rel)]
         if has_cta and has_plan:
+            return [_finding(rules, "auto-renewal-review", _where(doc), detail=doc.rel)]
+        if has_stripe:
             return [_finding(rules, "auto-renewal-review", _where(doc), detail=doc.rel)]
     return []
 
@@ -505,7 +581,8 @@ def _detect_site_pages(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFi
     dmca_files = _named(docs, _DMCA_PATH)
     privacy_link = any(_PRIVACY_LINK.search(doc.text) for doc in pages)
     terms_link = any(_TERMS_LINK.search(doc.text) for doc in pages)
-    dmca_link = any(_DMCA_LINK.search(doc.text) for doc in docs)
+    # A mention of "/dmca" in a README or the rule table is not a footer link.
+    dmca_link = any(doc.trap and _DMCA_LINK.search(doc.text) for doc in pages)
 
     real_privacy = [doc for doc in privacy_files if not _policy_empty(doc.text)]
     empty_privacy = [doc for doc in privacy_files if _policy_empty(doc.text)]
@@ -578,7 +655,7 @@ def _detect_tcpa(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]
     consent = _phrases(rules, "sms_consent_phrases")
     transactional = _phrases(rules, "sms_transactional_phrases")
     for doc in _surface(docs):
-        if doc.ext in _MD_EXTS | _STYLE_EXTS:
+        if not doc.trap or doc.ext in _MD_EXTS | _STYLE_EXTS:
             continue
         has_optin = _has_phrase(doc.lower, optin) is not None
         has_sdk = _has_phrase(doc.lower, sdk) is not None
@@ -599,14 +676,26 @@ def _detect_tcpa(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]
 def _detect_ai(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]:
     generative = _phrases(rules, "ai_generative_snippets")
     human = _phrases(rules, "ai_human_claims")
-    gen_doc = next((doc for doc in docs if doc.ext not in _MD_EXTS and _has_phrase(doc.lower, generative)), None)
-    human_doc = next((doc for doc in docs if _has_phrase(doc.lower, human)), None)
-    if gen_doc is None or human_doc is None:
-        return []
-    return [_finding(
-        rules, "ai-human-disclosure", _where(human_doc),
-        detail=f"{human_doc.rel} (model code in {gen_doc.rel})",
-    )]
+    chat = _phrases(rules, "ai_chat_snippets")
+    disclose = _phrases(rules, "ai_disclosure_phrases")
+    usable = [doc for doc in docs if doc.trap]
+    gen_doc = next((doc for doc in usable if _has_phrase(doc.lower, generative)), None)
+    human_doc = next((doc for doc in usable if doc.page and _has_phrase(doc.lower, human)), None)
+    out: list[LaunchFinding] = []
+    if gen_doc is not None and human_doc is not None:
+        out.append(_finding(
+            rules, "ai-human-disclosure", _where(human_doc),
+            detail=f"{human_doc.rel} (model code in {gen_doc.rel})",
+        ))
+    chat_doc = next((doc for doc in usable if _has_phrase(doc.lower, chat)), None)
+    disclosed = any(_has_phrase(doc.lower, disclose) for doc in usable)
+    if gen_doc is not None and chat_doc is not None and not disclosed:
+        where_doc = chat_doc
+        out.append(_finding(
+            rules, "ai-chatbot-disclosure", _where(where_doc),
+            detail=where_doc.rel,
+        ))
+    return out
 
 
 def _detect_ugc(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]:
@@ -614,7 +703,8 @@ def _detect_ugc(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]:
     reports = _phrases(rules, "report_snippets")
     upload = next((
         doc for doc in docs
-        if (doc.markup or doc.ext in _SCRIPT_EXTS | _CODE_EXTS) and _has_phrase(doc.lower, uploads)
+        if doc.trap and (doc.markup or doc.ext in _SCRIPT_EXTS | _CODE_EXTS)
+        and _has_phrase(doc.lower, uploads)
     ), None)
     if upload is None:
         return []
@@ -626,12 +716,13 @@ def _detect_ugc(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]:
 def _detect_regulated(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]:
     phi = _phrases(rules, "phi_snippets")
     finance = _phrases(rules, "finance_snippets")
-    forms = _phrases(rules, "form_markers")
     out: list[LaunchFinding] = []
     for doc in docs:
-        if doc.ext in _MD_EXTS | _STYLE_EXTS:
+        if not doc.trap or doc.ext in _MD_EXTS | _STYLE_EXTS:
             continue
-        if not _has_phrase(doc.lower, forms):
+        # `name=` alone is not a form. The rule table lists that token, and so
+        # does half of YAML. A real control is a form or an input.
+        if not _REAL_FORM.search(doc.text):
             continue
         if not any(item.rule == "hipaa-may-apply" for item in out) and _has_phrase(doc.lower, phi):
             out.append(_finding(rules, "hipaa-may-apply", _where(doc), detail=doc.rel))
@@ -656,9 +747,20 @@ def _detect_a11y(docs: list[_Doc], rules: dict[str, Any]) -> list[LaunchFinding]
         alts += len(_ALT.findall(doc.text))
         if _LANDMARK.search(doc.text):
             landmark = True
+    out: list[LaunchFinding] = []
     if images >= 1 and alts == 0 and not landmark and first_img is not None:
-        return [_finding(rules, "a11y-primary-page", _where(first_img, "<img"), detail=first_img.rel)]
-    return []
+        out.append(_finding(rules, "a11y-primary-page", _where(first_img, "<img"), detail=first_img.rel))
+    missing: _Doc | None = None
+    for doc in markup:
+        for tag in _IMG_TAG.findall(doc.text):
+            if not _ALT.search(tag):
+                missing = doc
+                break
+        if missing is not None:
+            break
+    if missing is not None:
+        out.append(_finding(rules, "a11y-missing-alt", _where(missing, "<img"), detail=missing.rel))
+    return out
 
 
 def _detect_oss(
