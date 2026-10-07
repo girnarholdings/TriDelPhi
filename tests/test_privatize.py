@@ -314,6 +314,16 @@ def test_source_only_repo_is_refused(tmp_path):
     assert "no built output" in out.getvalue()
 
 
+def test_setuptools_build_tree_is_not_web_output(tmp_path):
+    app = _app(tmp_path, {"build/lib/pkg/mod.py": "def add(a, b):\n    return a + b\n"})
+    out = io.StringIO()
+    code = run_privatize(str(app), input_stream=io.StringIO("y\n"), out=out, err=out,
+                         obfuscate=_marker_obfuscate, run_cmd=_pass)
+    assert code == 2
+    assert "no built output" in out.getvalue()
+    assert (app / "build" / "lib" / "pkg" / "mod.py").read_text(encoding="utf-8").startswith("def add")
+
+
 def test_missing_path_is_refused(tmp_path):
     out = io.StringIO()
     code = run_privatize(str(tmp_path / "nope"), out=out, err=out,
