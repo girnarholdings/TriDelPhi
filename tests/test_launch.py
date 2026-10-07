@@ -55,11 +55,16 @@ def _one(root: Path, rule: str):
 
 def test_rule_table_loads_and_names_only_the_briefed_amounts():
     rules = load_launch_rules()
-    assert rules["version"] == 1
+    assert rules["version"] == 2
     ids = [row["id"] for row in rules["rules"]]
     assert len(ids) == len(set(ids))
+    assert "ai-chatbot-disclosure" in ids
+    assert "a11y-missing-alt" in ids
     categories = {row["id"] for row in rules["categories"]}
     assert {row["category"] for row in rules["rules"]} <= categories
+    for row in rules["rules"]:
+        assert "http" in str(row["citation"]).lower(), row["id"]
+        assert str(row.get("snippet") or "").strip(), row["id"]
     blob = "\n".join(str(row["message"]) + "\n" + str(row["fix"]) for row in rules["rules"])
     assert "53,000" in blob and "5,000" in blob and "$6" in blob
     allowed = blob.replace("$53,000", "").replace("$5,000", "").replace("$6", "")
@@ -357,12 +362,111 @@ def test_vendored_mit_without_notice_is_a_checklist(tmp_path: Path):
 def test_accessibility_note_is_high_signal(tmp_path: Path):
     bare = _repo(tmp_path, {"index.html": '<img src="/a.png"><img src="/b.png">'})
     assert "a11y-primary-page" in _rules(bare)
+    assert "a11y-missing-alt" in _rules(bare)
     alt = _repo(tmp_path, {"index.html": '<img src="/a.png" alt="">'})
     assert "a11y-primary-page" not in _rules(alt)
+    assert "a11y-missing-alt" not in _rules(alt)
     landmark = _repo(tmp_path, {"index.html": '<main><img src="/a.png"></main>'})
     assert "a11y-primary-page" not in _rules(landmark)
+    assert "a11y-missing-alt" in _rules(landmark)
 
 
 def test_library_without_a_website_is_not_told_it_lacks_a_privacy_policy(tmp_path: Path):
     root = _repo(tmp_path, {"tridelphi_example/lib.py": "def add(a, b):\n    return a + b\n"})
     assert _rules(root) == set()
+
+
+def test_report_prints_a_fix_snippet_and_a_source():
+    buf = io.StringIO()
+    assert run_launch(str(VIBE), fmt="text", out=buf, fail_on="none") == 0
+    text = buf.getvalue()
+    assert "Source:" in text
+    assert "https://" in text
+    assert "Date of birth" in text
+
+
+def test_sarif_help_uri_is_the_primary_source():
+    buf = io.StringIO()
+    assert run_launch(str(VIBE), fmt="sarif", out=buf, fail_on="none") == 0
+    document = json.loads(buf.getvalue())
+    rules = document["runs"][0]["tool"]["driver"]["rules"]
+    coppa = next(rule for rule in rules if rule["id"] == "tridelphi-launch/coppa-age-gate")
+    assert "federalregister.gov" in coppa["helpUri"]
+    result = next(
+        item for item in document["runs"][0]["results"]
+        if item["ruleId"] == "tridelphi-launch/coppa-age-gate"
+    )
+    assert "Source:" in result["message"]["text"]
+    assert "Example:" in result["message"]["text"]
+    assert "not legal advice" in result["message"]["text"].lower()
+
+
+def test_next_and_vite_trap_fixtures_name_the_new_traps():
+    next_found = _rules(FIXTURES / "next-trap")
+    assert next_found >= {
+        "coppa-age-gate",
+        "third-party-font",
+        "session-replay",
+        "can-spam-footer",
+        "auto-renewal-terms",
+        "missing-dmca-agent",
+        "missing-privacy-policy",
+        "missing-terms",
+        "analytics-before-consent",
+        "ai-chatbot-disclosure",
+        "a11y-missing-alt",
+    }
+    messages = " ".join(
+        finding.message for finding in analyze_launch(FIXTURES / "next-trap").findings
+    )
+    assert "Sentry" in messages
+    assert "Intercom" in messages
+    assert "FullStory" not in messages
+    assert "Lucky Orange" not in messages
+    assert "hipaa-may-apply" not in next_found
+    vite = _rules(FIXTURES / "vite-trap")
+    assert vite >= {
+        "coppa-age-gate",
+        "third-party-font",
+        "session-replay",
+        "auto-renewal-terms",
+        "missing-dmca-agent",
+        "missing-privacy-policy",
+        "missing-terms",
+        "analytics-before-consent",
+        "a11y-missing-alt",
+    }
+    vite_messages = " ".join(
+        finding.message for finding in analyze_launch(FIXTURES / "vite-trap").findings
+    )
+    assert "Hotjar" in vite_messages
+
+
+def test_next_and_vite_clean_fixtures_stay_quiet():
+    assert analyze_launch(FIXTURES / "next-clean").findings == []
+    assert analyze_launch(FIXTURES / "vite-clean").findings == []
+
+
+def test_python_detector_mentioning_posthog_is_not_a_recorder(tmp_path: Path):
+    root = _repo(tmp_path, {
+        "detectors.py": 'started = "startsessionrecording" in text\n',
+    })
+    assert "session-replay" not in _rules(root)
+    assert "posthog-replay-default" not in _rules(root)
+
+
+def test_comment_minified_and_docs_do_not_count_as_the_app(tmp_path: Path):
+    commented = _repo(tmp_path, {
+        "app.tsx": "// https://fonts.googleapis.com/css2?family=Inter\nexport const x = 1;\n",
+        "public/lo.min.js": 'var s="https://tools.luckyorange.com/core/lo.js";\n',
+    })
+    assert "third-party-font" not in _rules(commented)
+    assert "session-replay" not in _rules(commented)
+    docs = _repo(tmp_path, {
+        "index.html": "<main><p>Hello visitor</p></main>",
+        "docs/policy.md": "The footer links to /dmca and names a designated agent.",
+        "rules.yml": 'example: name="diagnosis"\n',
+    })
+    found = _rules(docs)
+    assert "missing-dmca-agent" in found
+    assert "hipaa-may-apply" not in found

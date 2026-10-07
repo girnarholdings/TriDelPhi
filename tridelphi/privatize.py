@@ -291,6 +291,36 @@ def _default_run_cmd(command: str, cwd: Path, timeout: int) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
+_WEB_ASSET_SUFFIXES = frozenset({".html", ".htm", ".js", ".mjs", ".cjs", ".css"})
+
+
+def _contains_web_asset(directory: Path, *, limit: int = 4000) -> bool:
+    """True when the tree has a file privatize can obfuscate.
+
+    A setuptools ``build/lib`` tree is Python, not a shipped frontend. Treating
+    it as output offers to obfuscate the package you just installed.
+    """
+    seen = 0
+    stack = [directory]
+    while stack:
+        current = stack.pop()
+        try:
+            children = sorted(current.iterdir(), key=lambda path: path.name)
+        except OSError:
+            continue
+        for child in children:
+            if child.is_symlink():
+                continue
+            seen += 1
+            if seen > limit:
+                return False
+            if child.is_dir():
+                stack.append(child)
+            elif child.suffix.lower() in _WEB_ASSET_SUFFIXES:
+                return True
+    return False
+
+
 def _resolve_output(root: Path, privatize_out: str | None) -> Path | None:
     root = root.resolve()
     if privatize_out:
@@ -302,10 +332,12 @@ def _resolve_output(root: Path, privatize_out: str | None) -> Path | None:
             resolved.relative_to(root)
         except (OSError, ValueError):
             return None
+        if not _contains_web_asset(resolved):
+            return None
         return resolved
     for name in _OUTPUT_DIRS:
         cand = root / name
-        if cand.is_dir() and not cand.is_symlink():
+        if cand.is_dir() and not cand.is_symlink() and _contains_web_asset(cand):
             return cand.resolve()
     return None
 

@@ -10,7 +10,7 @@ time the AI loads it.
 
 Four ideas organize the module:
 
-1. **Install context is the severity dial.** `curl | bash` in a README is how
+1. **Install context is the severity dial.** A curl piped into a shell in a README is how
    half the internet installs Homebrew — worth a look, not a siren. The same
    line in an npm `postinstall`, a `.envrc`, a VS Code `folderOpen` task or a
    git hook runs *without you choosing to run it* — that is critical. Every
@@ -42,11 +42,13 @@ use before touching it.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import stat
 import tarfile
 import time
+import tokenize
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -72,13 +74,13 @@ CATEGORIES: tuple[tuple[str, str, str], ...] = (
      "Code wired to execute automatically: npm install hooks, setup.py, .envrc, "
      "editor auto-tasks, git hooks shipped in the tree."),
     ("D", "Does the installer download and run code from the internet?",
-     "Fetch-and-execute: curl|bash, PowerShell download cradles, "
+     "Fetch-and-execute: a download piped into a shell, PowerShell download cradles, "
      "fetch-chmod-run chains."),
     ("O", "Is anything hiding what it does?",
      "Encoded or invisible payloads: base64 piped to a shell, eval of decoded "
      "strings, zero-width and right-to-left Unicode tricks."),
     ("C", "Does anything reach for your keys, wallets, or browser data?",
-     "Reads of ~/.ssh, cloud credentials, browser profile stores, crypto "
+     "Reads of SSH private keys, cloud credential files, browser profile stores, crypto "
      "wallets — and whether the same file also talks to the network."),
     ("A", "Are the AI-assistant files safe to let an agent load?",
      "SKILL.md, CLAUDE.md, rules files, agent hooks and MCP configs — files an "
@@ -219,6 +221,18 @@ def _classify(rel: Path) -> str | None:
     return None
 
 
+def _setuptools_output(rel: Path) -> bool:
+    """``pip install .`` writes a copy of this package under ``build/lib``.
+
+    That tree is not an installer and not a website. Scanning it duplicates
+    every finding in the real source.
+    """
+    parts = [part.lower() for part in rel.parts]
+    if any(part.endswith(".egg-info") or part == ".eggs" for part in parts):
+        return True
+    return "build" in parts and "lib" in parts
+
+
 def _discover(root: Path) -> _Surface:
     s = _Surface()
     if root.is_symlink() or not root.is_dir():
@@ -272,6 +286,8 @@ def _discover(root: Path) -> _Surface:
                 _coverage_issue(s, "file limit", f"tree exceeded {_MAX_FILES} files")
                 return s
             rel = entry.relative_to(root)
+            if _setuptools_output(rel):
+                continue
             if entry.name == "package.json":
                 s.package_jsons.append(entry)
                 continue
@@ -362,11 +378,11 @@ _LONG_B64 = re.compile(r"[\"']?[A-Za-z0-9+/]{200,}={0,2}[\"']?")
 _INVISIBLE = re.compile("[\u200b\u200c\u200d\u2060\u202a-\u202e\u2066-\u2069\ufeff]")
 
 # Credential and wallet reach. Matching is deliberately path-shaped — the word
-# "ssh" alone flags nothing; "~/.ssh" or expanduser('~/.aws') does.
+# "ssh" alone flags nothing; a home SSH directory or a cloud-credential file does.
 _CRED_PATHS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("your SSH keys",
      re.compile(r"(~|\$HOME|%USERPROFILE%|expanduser\([\"']~|homedir\(\)[^\n]{0,20})"
-                r"[^\n]{0,40}[/\\]\.ssh\b|\bid_(rsa|ed25519|ecdsa|dsa)\b")),
+                r"[^\n]{0,40}[/\\]\.ssh\b|(?:[/\\~])id_(rsa|ed25519|ecdsa|dsa)\b")),
     ("your cloud credentials",
      re.compile(r"\.aws[/\\]credentials|\.config[/\\]gcloud|\.kube[/\\]config|"
                 r"\.azure[/\\](credentials|accessTokens)")),
@@ -393,19 +409,26 @@ _NETWORK_SEND = re.compile(
     r"\bcurl\b[^\n]{0,160}(\s-(d|F|T)\b|--data|--upload-file)|"
     r"\b(requests|httpx)\.post\s*\(|\burlopen\s*\([^\n]{0,120}data\s*=|"
     r"\bfetch\s*\([^\n]{0,200}(method\s*:\s*[\"'](POST|PUT)|body\s*:)|"
-    r"\baxios\.(post|put)\s*\(|\bnc\s+-|\bncat\b|\bscp\b\s")
+    r"\baxios\.(post|put)\s*\(|\bnc\s+-|(?<![\\A-Za-z0-9_])ncat\s+\S|\bscp\b\s")
 
 # Agent-file tells. Secrecy alone is a warning (a style guide can legitimately
 # say "never reveal API keys in output"); secrecy *near* an action — download,
 # execute, read credentials — is the poisoned-skill shape, and gates.
 _SECRECY = re.compile(
-    r"(?i)\b(silently|covertly|without\s+(telling|informing|alerting|notifying|"
-    r"mentioning(\s+(this|it))?\s+to)\s+the\s+(user|human)|"
-    r"do\s+not\s+(tell|mention|inform|show|reveal|disclose|alert)|"
-    r"don'?t\s+(tell|mention|inform|show|reveal)|"
-    r"never\s+(tell|mention|reveal|disclose)|"
-    r"hide\s+(this|these|the\s+following)|keep\s+(this|it)\s+(secret|hidden)|"
-    r"without\s+asking|do\s+not\s+ask\s+(for\s+)?(permission|confirmation))\b")
+    r"(?i)(?:"
+    # "silently" next to an action. "do not guess silently" is prose.
+    r"\b(?:silently|covertly)\s+(?:\w+\s+){0,4}"
+    r"(?:run|download|install|execute|fetch|curl|wget|send|read|copy|upload|exfiltrate|post)\b"
+    r"|\b(?:run|download|install|execute|fetch|curl|wget|send|read|copy|upload|exfiltrate|post)\b"
+    r"(?:\s+\w+){0,3}\s+(?:silently|covertly)\b"
+    r"|without\s+(telling|informing|alerting|notifying|"
+    r"mentioning(\s+(this|it))?\s+to)\s+the\s+(user|human)"
+    r"|do\s+not\s+(tell|mention|inform|show|reveal|disclose|alert)"
+    r"|don'?t\s+(tell|mention|inform|show|reveal)"
+    r"|never\s+(tell|mention|reveal|disclose)"
+    r"|hide\s+(this|these|the\s+following)|keep\s+(this|it)\s+(secret|hidden)"
+    r"|without\s+asking|do\s+not\s+ask\s+(for\s+)?(permission|confirmation)"
+    r")\b")
 _AGENT_ACTION = re.compile(
     r"(?i)\b(curl|wget|iwr|invoke-webrequest|download|fetch\s+https?://|"
     r"pip\s+install|npm\s+install|npx\s+|chmod\s+\+x|base64|"
@@ -498,8 +521,54 @@ _FIX_AGENT = ("do not let an assistant load this file until a human has read eve
               "files are executable code wearing a markdown extension.")
 
 
+def _blank_keeping_newlines(match: re.Match[str]) -> str:
+    return re.sub(r"[^\n]", " ", match.group(0))
+
+
+def _mask_python_comments(text: str) -> str:
+    """Blank ``#`` comments. Docstrings stay: a string can be a payload."""
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return text
+    lines = text.splitlines(keepends=True)
+    for tok in tokens:
+        if tok.type != tokenize.COMMENT:
+            continue
+        (srow, scol), (erow, ecol) = tok.start, tok.end
+        if srow != erow or srow < 1 or srow > len(lines):
+            continue
+        line = lines[srow - 1]
+        newline = len(line) - len(line.rstrip("\r\n"))
+        content_end = len(line) - newline
+        end = min(ecol, content_end)
+        start = min(scol, end)
+        lines[srow - 1] = line[:start] + (" " * (end - start)) + line[end:]
+    return "".join(lines)
+
+
+_JS_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_JS_LINE_COMMENT = re.compile(r"(?m)(?<!:)//[^\n]*")
+
+
+def _mask_script_comments(text: str) -> str:
+    text = _JS_BLOCK_COMMENT.sub(_blank_keeping_newlines, text)
+    return _JS_LINE_COMMENT.sub(_blank_keeping_newlines, text)
+
+
+def _mask_code_comments(text: str, suffix: str) -> str:
+    """Code comments do not run. Agent-file comments do: the model reads them."""
+    if suffix == ".py":
+        return _mask_python_comments(text)
+    if suffix in {".js", ".mjs", ".cjs", ".ts", ".jsx", ".tsx"}:
+        return _mask_script_comments(text)
+    return text
+
+
 def _scan_text(f: _File, text: str) -> list[PreflightFinding]:
     """Run every content detector appropriate to one file."""
+    if f.context == "code":
+        text = _mask_code_comments(text, f.path.suffix.lower())
     out: list[PreflightFinding] = []
     install = f.context == "install"
     agent = f.context == "agent"
@@ -539,7 +608,7 @@ def _scan_text(f: _File, text: str) -> list[PreflightFinding]:
         break  # one finding per file per detector family keeps the report readable
 
     # -- O: obfuscation ----------------------------------------------------
-    # A doc that *describes* `eval(atob(...))` is documentation, not a dropper —
+    # A comment that describes decoded-JavaScript evaluation is not a dropper —
     # so encoded execution gates in code/install/agent files and is a warning in
     # prose. (A README is still where a copycat's real payload could hide, hence
     # a warning rather than nothing.)

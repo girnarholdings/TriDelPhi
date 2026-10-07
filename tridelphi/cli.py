@@ -138,13 +138,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-f", "--format", choices=("text", "checklist", "sarif", "json", "html"), default=None,
+        "-f", "--format", choices=("text", "checklist", "sarif", "json", "html", "markdown"), default=None,
         help=(
             "output format. Default: 'checklist' at an interactive terminal — the "
             "plain-language, no-jargon report a first-time user can act on — and "
             "'text' (the U/P/E detail) when stdout is a pipe, a file or CI, so "
-            "existing scripts are unchanged. 'html' is browsable; 'sarif' is the "
-            "machine contract."
+            "existing scripts are unchanged. 'html' is browsable; 'markdown' is "
+            "the checklist as GitHub Markdown; 'sarif' is the machine contract."
         ),
     )
     parser.add_argument("--sarif-file", metavar="PATH", help="also write SARIF here")
@@ -719,6 +719,18 @@ def _main(argv: list[str] | None) -> int:
                 result,
                 repo_label=repo_label,
                 external_summary=external_summary,
+                baseline=baseline,
+            )
+        )
+    elif args.format == "markdown":
+        sys.stdout.write(
+            render_checklist_markdown(
+                result,
+                repo_label=repo_label,
+                files_scanned=result.files_scanned,
+                jobs_scanned=result.contexts_scanned,
+                fail_on=args.fail_on,
+                external=external_status,
                 baseline=baseline,
             )
         )

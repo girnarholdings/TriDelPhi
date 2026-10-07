@@ -48,7 +48,7 @@ Fetch-and-execute: the server decides what runs on your machine.
 Encoding a command has one honest use at install time: none.
 
 - `encoded-execution` (**critical**) — base64-piped-to-shell, `eval(atob(…))`, `exec(base64.b64decode(…))`, PowerShell `-EncodedCommand`, `eval(String.fromCharCode(…))`.
-- `encoded-execution-doc` (**warning**) — the same, described in prose. A README explaining `eval(atob())` is documentation, not a dropper.
+- `encoded-execution-doc` (**warning**) — the same, described in prose. A README explaining `eval(atob())` is documentation, not a dropper. A `#` comment in Python or a `//` comment in JS/TS is not treated as code that runs. Comments in agent files still count, because the model reads them. setuptools output under `build/lib` is not scanned.
 - `invisible-characters` (**critical**) — zero-width or bidirectional-override Unicode in a script or agent file. You read one thing; a model or interpreter reads another. A leading BOM is exempt.
 - `opaque-blob` (**warning**) — a long base64 literal in an install or agent file. Maybe an asset, maybe a payload; you can't tell without decoding it.
 
@@ -57,13 +57,13 @@ Encoding a command has one honest use at install time: none.
 Reads of the things worth stealing.
 
 - `credential-reach` (**critical**) — a path-shaped reference to `~/.ssh`, cloud credentials, browser login/cookie stores, crypto wallets, or the keychain, *inside a file that runs at install, that an assistant loads, or that also sends data over the network*. A read plus a send is exfiltration's exact shape.
-- `credential-reach-code` (**warning**) — the same reference in ordinary code that neither auto-runs nor phones home. Some tools have a legitimate reason; most don't.
+- `credential-reach-code` (**warning**) — the same reference in ordinary code that neither auto-runs nor phones home. Some tools have a legitimate reason; most don't. A bare name like `"id_rsa"` in a list is not a path. The netcat command counts as a send only when a destination follows it, not when those letters sit inside a detector's own regular expression.
 
 ### A — poisoned agent files
 
 Files an assistant treats as instructions or executes.
 
-- `covert-instruction` (**critical**) — a secrecy instruction ("silently", "do not tell the user") paired with an action (download, install, credential access). The poisoned-skill shape: the assistant is told to act and not tell you.
+- `covert-instruction` (**critical**) — a secrecy instruction paired with an action (download, install, credential access). "Silently run" and "do not tell the user" count. "Do not guess silently" next to the word "token" does not. The poisoned-skill shape: the assistant is told to act and not tell you.
 - `hidden-comment-instruction` (**critical**) — an imperative inside an HTML comment: invisible in any rendered view, read by a model like any other text.
 - `agent-config-downloader` (**critical**) — a command in `.mcp.json` / hooks / VS Code tasks that reaches for the network or an encoder, run automatically when the config loads.
 - `editor-autorun-task` (**warning**) — a VS Code task that runs on `folderOpen`: opening the folder is enough to execute it.
