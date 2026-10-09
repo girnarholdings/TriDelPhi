@@ -147,7 +147,7 @@ not papered over with invented legal copy.
 | Info | `tridelphi/init_cmd.py` CodeQL action SHA | trufflehog unverified Github detector. gitleaks: no leaks in 123 commits | **Not a secret** |
 | Low | bandit on `tridelphi/` | 16 low, 0 medium, 0 high. Mostly B105 on the emoji “✅” and on fix-text that contains the word “password” | **Not a bug.** No `#nosec` spam added |
 | Typecheck | `mypy tridelphi` | 36 errors, pre-existing (`preflight`, `checklist`, `cli`, `apply`, parsers). Not a crash | **Not boiled.** ruff is the bar this repo enforces. The launch PostHog walrus that mypy flagged was rewritten while fixing the detector |
-| Advisory | `scripts/semgrep-requirements.txt` pyjwt 2.13.0; `.tridelphi/privatize/package-lock.json` brace-expansion 1.1.18 and undici 6.28.0; `bot/package-lock.json` sharp 0.35.4 (dev) and undici 7.29.0 (dev) | osv-scanner: 5 packages, 31 known vulns (1 critical, 11 high, 15 medium, 4 low). `pip-audit` on the installed env: no known vulns (TriDelPhi itself skipped, not on PyPI) | **Bumped in review**, each release at least seven days old: bot wrangler 4.144.0 (undici 7.29.1) with `sharp` overridden to 0.35.5; privatize undici 6.29.0 and brace-expansion 1.1.21. **PyJWT waits:** semgrep 1.177 and 1.178 pin `pyjwt~=2.13.0`, and 1.179.0 (the first to admit PyJWT 2.15) passes the seven-day minimum on Oct 9, 2026. The weekly `dependency-advisories` run on Oct 5 was red, which is its notification |
+| Advisory | `scripts/semgrep-requirements.txt` pyjwt 2.13.0; `.tridelphi/privatize/package-lock.json` brace-expansion 1.1.18 and undici 6.28.0; `bot/package-lock.json` sharp 0.35.4 (dev) and undici 7.29.0 (dev) | osv-scanner: 5 packages, 31 known vulns (1 critical, 11 high, 15 medium, 4 low). `pip-audit` on the installed env: no known vulns (TriDelPhi itself skipped, not on PyPI) | **Bumped in review**, each release at least seven days old: bot wrangler 4.144.0 (undici 7.29.1) with `sharp` overridden to 0.35.5; privatize undici 6.29.0 and brace-expansion 1.1.21; the semgrep closure moved to semgrep 1.179.0 with PyJWT 2.15.1 once 1.179.0 passed the seven-day minimum (semgrep 1.177 and 1.178 pin `pyjwt~=2.13.0`). `deps.py check`: no known advisories. The weekly `dependency-advisories` run on Oct 5 was red, which is its notification |
 | Packaging | `python -m build`, `twine check` | On `main`, both sdist and wheel passed `twine check`. On this branch, `python -m build --wheel` of the edited tree passed `twine check`. The wheel contains `tridelphi/data/launch_rules.yml` (rule table version 2, 29 rules) and `tridelphi = tridelphi.cli:main`. Installed from that wheel: `tridelphi --version` is 0.2.0, `launch` on `next-clean` exits 0, `launch --fail-on warning` on `next-trap` exits 1. Version 0.2.0 matches `pyproject.toml` and `tridelphi/__init__.py` | **Checked.** Not published |
 | Action | `action.yml` | Composite action not executed on GitHub Actions from this environment. `actionlint -no-color` on `.github/workflows` from the repo root: no findings. zizmor 1.29.0 offline: no findings (1 ignored, 26 suppressed). Install step is `pip install $GITHUB_ACTION_PATH`, the same as `pip install .` | **Left.** Shipping the action SHA is a release |
 | Link | `https://github.com/marketplace/actions/tridelphi` | 404 | **Expected.** `docs/MARKETPLACE.md` says the listing is not published |
@@ -227,9 +227,9 @@ in pinned optional files TriDelPhi’s offline doors do not claim to cover.
    agent at copyright.gov. Renew it before three years. This PR does not invent
    that copy and does not submit the filing.
 4. **Deploy.** Merging YAML does not update tridelphi.com or scan.tridelphi.com.
-5. **Dependency pins.** undici, sharp and brace-expansion are bumped. PyJWT in
-   `scripts/semgrep-requirements.txt` moves with semgrep 1.179.0 once it is seven
-   days old (Oct 9, 2026); run the `pin-closure` line in `docs/RELEASES.md`.
+5. **Dependency pins.** Done: undici, sharp, brace-expansion, and PyJWT (via the
+   semgrep 1.179.0 closure) are bumped, and `deps.py check` reports no known
+   advisories. Drop the bot's `sharp` override once miniflare pins 0.35.5.
 6. **Marketplace.** The action listing 404s until someone publishes it.
 7. **mypy**, if you want it as a gate. It is not clean, and this PR did not make
    it a project requirement.
