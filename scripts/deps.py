@@ -2,7 +2,7 @@
 """Keep this repository's pinned dependencies current without a bot.
 
     python3 scripts/deps.py check
-    python3 scripts/deps.py pin-closure semgrep==1.177.0 -o scripts/semgrep-requirements.txt
+    python3 scripts/deps.py pin-closure semgrep==1.179.0 -o scripts/semgrep-requirements.txt
 
 This replaces Dependabot, and the replacement is deliberately smaller than what
 it replaces. Dependabot did two jobs here: it told us when something we pin had
@@ -563,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
     check.set_defaults(func=cmd_check)
 
     pin = sub.add_parser("pin-closure", help="regenerate a hash-pinned closure wholesale")
-    pin.add_argument("requirements", nargs="+", help="top-level requirement(s), e.g. semgrep==1.177.0")
+    pin.add_argument("requirements", nargs="+", help="top-level requirement(s), e.g. semgrep==1.179.0")
     pin.add_argument("-o", "--output", required=True, help="closure file to write")
     pin.add_argument("--python", default=sys.executable, help="interpreter to resolve for")
     pin.add_argument(

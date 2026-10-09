@@ -510,10 +510,9 @@ rules:
   kind: static
   message: >-
     COPPA (children's privacy): {detail} creates an account and never asks for an age, a date of birth,
-    or an under-13 gate. The FTC amended 16 C.F.R. Part 312 in 2025; most operators have until April 22,
-    2026 to comply. Penalties in this family are framed per child under 13 (about $53,000 in the figure
-    this check was built around; the 2025 maximum published in 16 C.F.R. § 1.98 is higher and was not
-    increased for 2026). A pattern match is not proof a child signed up. Not legal advice.
+    or an under-13 gate. The FTC amended 16 C.F.R. Part 312 in 2025, and the compliance date for most
+    operators was April 22, 2026. Penalties in this family are framed per child under 13 (about $53,000
+    per violation; the FTC kept its 2025 maximum for 2026). A pattern match is not proof a child signed up. Not legal advice.
   fix: >-
     Add an age or date-of-birth question before the account is stored, and
     block under-13 signups unless you have verifiable parental consent.
@@ -521,7 +520,8 @@ rules:
 
   citation: 15 U.S.C. §§ 6501–6506; 16 C.F.R. Part 312 as amended, 90 Fed. Reg. 16918 (Apr. 22, 
     2025) (effective June 23, 2025; most operators must comply by Apr. 22, 2026). Civil penalty 
-    maximum $53,088 per violation under 16 C.F.R. § 1.98 (2025 level, unchanged for 2026). 
+    maximum $53,088 per violation under 16 C.F.R. § 1.98 (2025 level; the FTC made no 2026 
+    adjustment, 91 Fed. Reg., FR Doc. 2026-18853, Sept. 15, 2026). 
     https://www.federalregister.gov/documents/2025/04/22/2025-05904/childrens-online-privacy-protection-rule
   snippet: |
     <label>Date of birth <input type="date" name="dob" required></label>
@@ -563,7 +563,9 @@ rules:
 
   citation: Cal. Penal Code §§ 631(a), 637.2 ($5,000 per violation is the statutory figure, not a 
     prediction). Session-replay and chat-widget complaints are actively litigated; courts disagree 
-    about metadata versus message contents (see Popa v. Microsoft and later CIPA rulings). 
+    about metadata versus message contents (see Popa v. Microsoft and later CIPA rulings). SB 690 
+    (signed Sept. 30, 2026) ends private pen-register suits under § 638.51 over websites and apps; 
+    it leaves the § 631 wiretap claims that recorder suits rely on. 
     https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=PEN&sectionNum=631.
   snippet: |
     // Start the recorder only after a real yes, and mask inputs.
@@ -642,7 +644,8 @@ rules:
   citation: Cal. Bus. & Prof. Code §§ 17600–17606, including AB 2863 for contracts entered into, 
     amended, or extended on or after July 1, 2025. ROSCA, 15 U.S.C. §§ 8401–8405, is still in force.
     The FTC's 2024 Negative Option ("click-to-cancel") rule was vacated by the Eighth Circuit on 
-    July 8, 2025. 
+    July 8, 2025. The FTC reopened the rulemaking with an advance notice published March 13, 2026; 
+    no replacement rule is in force. 
     https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202320240AB2863
   snippet: |
     <p>$12 per month. Renews monthly until you cancel. Cancel anytime in Settings.</p>
@@ -1038,7 +1041,9 @@ rules:
     was missing in production. Not legal advice.'
   fix: 'Put a plain sentence on the chat itself, before the first message: you are talking to an AI assistant,
     not a person. A line buried in the terms does not do this job.'
-  citation: Regulation (EU) 2024/1689 Art. 50 (transparency, applicable from August 2, 2026); FTC 
+  citation: Regulation (EU) 2024/1689 Art. 50 (transparency, applicable from August 2, 2026). The 
+    2026 Digital Omnibus on AI delayed the high-risk rules, not Art. 50; it gave providers already on 
+    the market until December 2, 2026 only for the Art. 50(2) machine-readable marking. FTC 
     Act § 5, 15 U.S.C. § 45. https://artificialintelligenceact.eu/article/50/
   snippet: |
     <p>You are chatting with an AI assistant, not a person.</p>
